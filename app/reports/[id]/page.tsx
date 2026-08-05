@@ -18,6 +18,7 @@ import {
   Clock,
   Printer,
 } from "lucide-react";
+import { getClaimsHistoryPresentation } from "@/lib/report-claims-summary";
 
 export default function ReportDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -81,8 +82,14 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
   const checkModule = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_CHECK");
   const detailsModule = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_DETAILS");
 
-  const hasClaims = claims.length > 0;
-  const noClaimsFound = checkModule?.status === "NO_DATA";
+  const claimsHistoryPresentation = getClaimsHistoryPresentation({
+    claimCount: claims.length,
+    claimCheckStatus: checkModule?.status,
+    claimDetailsStatus: detailsModule?.status,
+  });
+  const hasClaims = claimsHistoryPresentation === "CLAIM_DETAILS_AVAILABLE";
+  const historyDetectedWithoutDetails = claimsHistoryPresentation === "HISTORY_DETECTED_DETAILS_NOT_REQUESTED";
+  const noClaimsFound = claimsHistoryPresentation === "NO_HISTORY";
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
@@ -209,7 +216,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               : "border-transparent text-slate-400 hover:text-slate-200"
           }`}
         >
-          <AlertTriangle className="h-4 w-4" /> Historia & Szczegóły Szkód ({claims.length})
+          <AlertTriangle className="h-4 w-4" /> Historia & Szczegóły Szkód ({historyDetectedWithoutDetails ? "wpisy wykryte" : claims.length})
         </button>
 
         <button
@@ -326,6 +333,21 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                 <h2 className="text-lg font-bold text-red-400">Znaleziono Wpisy Historii Szkód</h2>
                 <p className="text-xs text-slate-300">
                   Baza Audatex Claims History Engine zawiera {claims.length} zarejestrowane zdarzenia dla tego pojazdu.
+                </p>
+              </div>
+            </div>
+          ) : historyDetectedWithoutDetails ? (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-6 flex items-start gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-400 shrink-0">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-lg font-bold text-amber-400">Wykryto wpisy historii szkód</h2>
+                <p className="text-xs text-slate-300">
+                  Usługa `hasHistory` potwierdziła wpisy dla tego VIN. Nie wybrano jednak Modułu 3 (`getDetails`), dlatego raport nie zawiera liczby ani szczegółów szkód.
+                </p>
+                <p className="text-[11px] text-slate-400 pt-1">
+                  Aby pobrać szczegóły, utwórz nowy raport z zaznaczonym Modułem 3: Szczegóły Szkód.
                 </p>
               </div>
             </div>
