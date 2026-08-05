@@ -13,9 +13,17 @@ const xmlParser = new XMLParser({
 
 export class AudatexHistoryAdapter {
   private isMockMode: boolean;
+  private timeoutMs: number;
+  private maxRetries: number;
 
   constructor() {
-    this.isMockMode = process.env.AUDATEX_MOCK_MODE !== "false";
+    this.isMockMode = process.env.AUDATEX_MOCK_MODE === "true";
+    this.timeoutMs = parseInt(process.env.AUDATEX_TIMEOUT_MS || "15000", 10);
+    this.maxRetries = parseInt(process.env.AUDATEX_MAX_RETRIES || "2", 10);
+  }
+
+  public getIsMockMode(): boolean {
+    return this.isMockMode;
   }
 
   /**
@@ -30,6 +38,9 @@ export class AudatexHistoryAdapter {
     }
 
     const endpoint = process.env.AUDATEX_CHE_ENDPOINT || "https://vin-history-v2.eu.solera.com/service/ExternalVin";
+    const country = input.country || process.env.AUDATEX_CHE_COUNTRY || "pl";
+    const currency = input.currency || process.env.AUDATEX_CHE_CURRENCY || "PLN";
+
     const body = `
       <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:HistoryWSDL">
         <soapenv:Header/>
@@ -38,8 +49,8 @@ export class AudatexHistoryAdapter {
             <urn:requestParam>
               <urn:username>${process.env.AUDATEX_CHE_USERNAME || ""}</urn:username>
               <urn:password>${process.env.AUDATEX_CHE_PASSWORD || ""}</urn:password>
-              <urn:country>${input.country || process.env.AUDATEX_CHE_COUNTRY || "pl"}</urn:country>
-              <urn:currency>${input.currency || process.env.AUDATEX_CHE_CURRENCY || "PLN"}</urn:currency>
+              <urn:country>${country}</urn:country>
+              <urn:currency>${currency}</urn:currency>
               <urn:vin>${input.vin}</urn:vin>
               ${input.firstRegistration ? `<urn:firstRegistration>${input.firstRegistration}</urn:firstRegistration>` : ""}
               <urn:showIsMileage>true</urn:showIsMileage>
@@ -51,7 +62,7 @@ export class AudatexHistoryAdapter {
       </soapenv:Envelope>
     `;
 
-    const responseText = await this.postSoapRequest(endpoint, body);
+    const responseText = await this.postSoapWithRetry(endpoint, body);
     return this.parseHasHistoryXml(responseText);
   }
 
@@ -64,6 +75,9 @@ export class AudatexHistoryAdapter {
     }
 
     const endpoint = process.env.AUDATEX_CHE_ENDPOINT || "https://vin-history-v2.eu.solera.com/service/ExternalVin";
+    const country = input.country || process.env.AUDATEX_CHE_COUNTRY || "pl";
+    const currency = input.currency || process.env.AUDATEX_CHE_CURRENCY || "PLN";
+
     const body = `
       <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:HistoryWSDL">
         <soapenv:Header/>
@@ -72,8 +86,8 @@ export class AudatexHistoryAdapter {
             <urn:requestParam>
               <urn:username>${process.env.AUDATEX_CHE_USERNAME || ""}</urn:username>
               <urn:password>${process.env.AUDATEX_CHE_PASSWORD || ""}</urn:password>
-              <urn:country>${input.country || process.env.AUDATEX_CHE_COUNTRY || "pl"}</urn:country>
-              <urn:currency>${input.currency || process.env.AUDATEX_CHE_CURRENCY || "PLN"}</urn:currency>
+              <urn:country>${country}</urn:country>
+              <urn:currency>${currency}</urn:currency>
               <urn:vin>${input.vin}</urn:vin>
               ${input.firstRegistration ? `<urn:firstRegistration>${input.firstRegistration}</urn:firstRegistration>` : ""}
               <urn:showIsMileage>true</urn:showIsMileage>
@@ -84,7 +98,7 @@ export class AudatexHistoryAdapter {
       </soapenv:Envelope>
     `;
 
-    const responseText = await this.postSoapRequest(endpoint, body);
+    const responseText = await this.postSoapWithRetry(endpoint, body);
     return this.parseGetDetailsXml(responseText);
   }
 
@@ -93,10 +107,9 @@ export class AudatexHistoryAdapter {
     const returnVal = outerObj["SOAP-ENV:Envelope"]?.["SOAP-ENV:Body"]?.["ns2:hasHistoryResponse"]?.["ns2:hasHistoryReturn"];
 
     if (!returnVal) {
-      throw new Error("Brak odpowiedzi hasHistoryReturn w komunikacie SOAP.");
+      throw new Error("Brak odpowiedzi hasHistoryReturn w komunikacie SOAP CHE.");
     }
 
-    // Extract CDATA XML content inside <ns2:hasHistoryReturn>
     const innerXml = typeof returnVal === "string" ? returnVal : String(returnVal);
     const innerObj = xmlParser.parse(innerXml);
     const rootNode = innerObj["claim-history"];
@@ -116,7 +129,6 @@ export class AudatexHistoryAdapter {
       photosStatus,
       photosIdentifier: rootNode["photosIdentifier"] ? String(rootNode["photosIdentifier"]) : undefined,
       advice: rootNode["advice"] ? String(rootNode["advice"]) : undefined,
-      rawXml: xmlText,
     };
   }
 
@@ -125,7 +137,7 @@ export class AudatexHistoryAdapter {
     const returnVal = outerObj["SOAP-ENV:Envelope"]?.["SOAP-ENV:Body"]?.["ns2:getDetailsResponse"]?.["ns2:getDetailsReturn"];
 
     if (!returnVal) {
-      throw new Error("Brak odpowiedzi getDetailsReturn w komunikacie SOAP.");
+      throw new Error("Brak odpowiedzi getDetailsReturn w komunikacie SOAP CHE.");
     }
 
     const innerXml = typeof returnVal === "string" ? returnVal : String(returnVal);
@@ -133,7 +145,7 @@ export class AudatexHistoryAdapter {
     const resultNode = innerObj["claim-history"]?.["result"];
 
     if (!resultNode) {
-      return { claims: [], rawXml: xmlText };
+      return { claims: [] };
     }
 
     const rawClaims = Array.isArray(resultNode["claim"])
@@ -152,11 +164,9 @@ export class AudatexHistoryAdapter {
       const mandateCode = String(assessment["mandate"]?.["code"] || claimInner["technical-control"]?.["code"] || "");
       const mandateDesc = this.translateMandateCode(mandateCode);
 
-      // Extract damage zones
       const damagePositionsStr = String(assessment["damage-positions"] || "");
       const affectedZones = this.translateDamagePositions(damagePositionsStr, damage);
 
-      // Extract significant parts groups
       const damageGroupsStr = String(assessment["damage-groups"] || "");
       const significantParts = this.translateSignificantParts(damageGroupsStr);
 
@@ -181,34 +191,49 @@ export class AudatexHistoryAdapter {
       };
     });
 
-    return { claims, rawXml: xmlText };
+    return { claims };
   }
 
-  private async postSoapRequest(url: string, body: string): Promise<string> {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/xml; charset=utf-8",
-      },
-      body,
-    });
+  private async postSoapWithRetry(url: string, body: string): Promise<string> {
+    let lastError: any = null;
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`SOAP Fault CHE (${res.status}): ${errText}`);
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/xml; charset=utf-8",
+          },
+          body,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timer);
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`SOAP Fault CHE (${res.status}): ${errText}`);
+        }
+
+        return await res.text();
+      } catch (err: any) {
+        clearTimeout(timer);
+        lastError = err;
+        if (attempt === this.maxRetries) break;
+        await new Promise((r) => setTimeout(r, attempt * 1000));
+      }
     }
 
-    return await res.text();
+    throw new Error(`Usługa Audatex CHE SOAP nie odpowiedziała po ${this.maxRetries} próbach. Błąd: ${lastError?.message || lastError}`);
   }
 
-  /**
-   * Tłumaczy kody mandatów zgodnie ze specyfikacją Audatex CHE v1.23.0
-   */
   public translateMandateCode(code: string): string {
     if (!code) return "Brak kodu mandatu";
 
     const dict: Record<string, string> = {
-      // FRS/FRH
       "2": "Pojazd skradziony i nieodzyskany",
       "3": "Szkoda pożarowa",
       "3G": "Pożar – ustalona przyczyna",
@@ -254,12 +279,10 @@ export class AudatexHistoryAdapter {
       "SV": "Zgłoszenie kradzieży",
       "RW": "Aukcja AON – Szkoda całkowita",
       "FL": "Kalkulacja flotowa",
-      // USA
       "1": "USA: Szkoda całkowita (Total loss)",
       "6": "USA: Szkoda całkowita",
       "15": "USA: Szkoda całkowita",
       "22": "USA: Całkowity pożar",
-      // BEL
       "A0": "Belgia: Szkoda całkowita",
       "27": "Belgia: Wandalizm",
       "30": "Belgia: Pożar",
@@ -269,9 +292,6 @@ export class AudatexHistoryAdapter {
     return dict[code] || `Kod mandatu: ${code}`;
   }
 
-  /**
-   * Tłumaczy 28 stref uszkodzeń (Part zone classification)
-   */
   public translateDamagePositions(positionsStr: string, damageNode: any): string[] {
     const zonesMap: Record<string, string> = {
       "01": "Przód lewa góra",
@@ -312,7 +332,6 @@ export class AudatexHistoryAdapter {
       }
     }
 
-    // Inspect general damage flags
     const gen = damageNode?.["general"];
     if (gen) {
       if (gen["front"] === "Y" && !results.includes("Przód (Ogólne)")) results.push("Przód (Ogólne)");
@@ -335,9 +354,6 @@ export class AudatexHistoryAdapter {
     return results;
   }
 
-  /**
-   * Tłumaczy istotne grupy części (Significant parts group classification 001-015)
-   */
   public translateSignificantParts(groupsStr: string): string[] {
     const groupsMap: Record<string, string> = {
       "001": "Systemy bezpieczeństwa biernego (Airbag / Pasy)",

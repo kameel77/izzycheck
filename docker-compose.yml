@@ -10,23 +10,40 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=postgresql://izzycheck:izzycheck_pass_2026@postgres:5432/izzycheck?schema=public
-      - JWT_SECRET=izzycheck-coolify-secret-key-change-in-production
-      - AUDATEX_MOCK_MODE=true
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - AUDATEX_MOCK_MODE=${AUDATEX_MOCK_MODE:-false}
+      - AUDATEX_VALUATION_ENDPOINT=${AUDATEX_VALUATION_ENDPOINT}
+      - AUDATEX_VALUATION_SERVICE_ENDPOINT=${AUDATEX_VALUATION_SERVICE_ENDPOINT}
+      - AUDATEX_VEHICLE_DATA_ENDPOINT=${AUDATEX_VEHICLE_DATA_ENDPOINT}
+      - AUDATEX_CHE_ENDPOINT=${AUDATEX_CHE_ENDPOINT}
+      - AUDATEX_CHE_USERNAME=${AUDATEX_CHE_USERNAME}
+      - AUDATEX_CHE_PASSWORD=${AUDATEX_CHE_PASSWORD}
+      - AUDATEX_MARKET_CODE=${AUDATEX_MARKET_CODE:-PL}
+      - AUDATEX_LANGUAGE=${AUDATEX_LANGUAGE:-PL}
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/auth/me', (r) => process.exit(r.statusCode === 401 || r.statusCode === 200 ? 0 : 1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
   postgres:
     image: postgres:16-alpine
     restart: always
     environment:
       POSTGRES_USER: izzycheck
-      POSTGRES_PASSWORD: izzycheck_pass_2026
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: izzycheck
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U izzycheck -d izzycheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

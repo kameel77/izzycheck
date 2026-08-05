@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Car, Lock, Mail, ArrowRight, ShieldCheck } from "lucide-react";
+import { Car, Lock, Mail, ArrowRight } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("operator@izzylease.pl");
-  const [password, setPassword] = useState("OperatorIzzy2026!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -33,16 +33,6 @@ export default function LoginPage() {
       setError("Wystąpił błąd podczas logowania.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleQuickFill = (type: "operator" | "admin") => {
-    if (type === "operator") {
-      setEmail("operator@izzylease.pl");
-      setPassword("OperatorIzzy2026!");
-    } else {
-      setEmail("admin@izzylease.pl");
-      setPassword("AdminIzzy2026!");
     }
   };
 
@@ -76,7 +66,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-xl border border-slate-800 bg-slate-950/70 py-2.5 pl-10 pr-4 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                placeholder="operator@izzylease.pl"
+                placeholder="Wprowadź adres email"
               />
             </div>
           </div>
@@ -110,28 +100,6 @@ export default function LoginPage() {
             )}
           </button>
         </form>
-
-        <div className="pt-4 border-t border-slate-800/80">
-          <p className="text-[11px] font-semibold text-slate-400 mb-3 text-center uppercase tracking-wider">
-            Szybkie zalogowanie dla testów demo:
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => handleQuickFill("operator")}
-              className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-700/60 bg-slate-800/50 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
-            >
-              <ShieldCheck className="h-3.5 w-3.5 text-blue-400" /> Operator B2B
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill("admin")}
-              className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-700/60 bg-slate-800/50 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
-            >
-              <ShieldCheck className="h-3.5 w-3.5 text-purple-400" /> Admin B2B
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

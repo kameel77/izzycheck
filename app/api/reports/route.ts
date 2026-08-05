@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    let { vin, firstRegistrationDate, mileage, valuationDate, modules } = body;
+    let { vin, firstRegistrationDate, mileage, valuationDate, manufactureDate, modules } = body;
 
     // 1. VIN normalization & syntax validation
     if (!vin || typeof vin !== "string") {
@@ -53,36 +53,24 @@ export async function POST(req: Request) {
     const todayStr = new Date().toISOString().split("T")[0];
     const valDate = valuationDate || todayStr;
 
-    // 4. Create Report record
-    let report: any;
-    try {
-      report = await prisma.report.create({
-        data: {
-          vin,
-          firstRegistrationDate,
-          mileage: mileageNum,
-          valuationDate: valDate,
-          createdById: user.userId,
-          status: "PROCESSING",
-        },
-      });
-    } catch (e) {
-      // In-memory fallback if DB table is unmigrated during demo
-      report = {
-        id: `rep-${Date.now()}`,
+    // 4. Create Report record in Database (Throw HTTP 500 if DB is down)
+    const report = await prisma.report.create({
+      data: {
         vin,
         firstRegistrationDate,
         mileage: mileageNum,
         valuationDate: valDate,
         createdById: user.userId,
         status: "PROCESSING",
-        createdAt: new Date(),
-      };
-    }
+      },
+    });
 
     let valuationResultData: any = null;
     let claimCheckResultData: any = null;
     let claimDetailsResultData: any = null;
+
+    let moduleSuccessCount = 0;
+    let moduleFailureCount = 0;
 
     // --- MODULE 1: VALUATION & EQUIPMENT ---
     if (includeValuation) {
@@ -92,48 +80,47 @@ export async function POST(req: Request) {
           dateOfFirstReg: firstRegistrationDate,
           mileage: mileageNum,
           valuationDate: valDate,
+          manufactureDate,
         });
         valuationResultData = valRes;
+        moduleSuccessCount++;
 
-        try {
-          await prisma.vehicleSnapshot.create({
-            data: {
-              reportId: report.id,
-              ibsCode: valRes.ibsCode,
-              make: valRes.make,
-              model: valRes.model,
-              variant: valRes.variant,
-              newPriceCv: valRes.newPriceCv,
-              marketPriceCob: valRes.marketPriceCob,
-              technicalValueTh: valRes.technicalValueTh,
-              mileageUsed: valRes.mileageUsed,
-              isAverageMileageUsed: valRes.isAverageMileageUsed,
-              standardEquipment: JSON.stringify(valRes.standardEquipment),
-              optionalEquipment: JSON.stringify(valRes.optionalEquipment),
-            },
-          });
+        await prisma.vehicleSnapshot.create({
+          data: {
+            reportId: report.id,
+            ibsCode: valRes.ibsCode,
+            make: valRes.make,
+            model: valRes.model,
+            variant: valRes.variant,
+            newPriceCv: valRes.newPriceCv,
+            marketPriceCob: valRes.marketPriceCob,
+            technicalValueTh: valRes.technicalValueTh,
+            mileageUsed: valRes.mileageUsed,
+            isAverageMileageUsed: valRes.isAverageMileageUsed,
+            manufactureDate: valRes.manufactureDate || null,
+            standardEquipment: JSON.stringify(valRes.standardEquipment),
+            optionalEquipment: JSON.stringify(valRes.optionalEquipment),
+          },
+        });
 
-          await prisma.reportModuleResult.create({
-            data: {
-              reportId: report.id,
-              moduleId: "VALUATION",
-              status: "SUCCEEDED",
-              rawXml: valRes.rawXml,
-              responseMetadata: JSON.stringify({ ibsCode: valRes.ibsCode, make: valRes.make, model: valRes.model }),
-            },
-          });
-        } catch (e) {}
+        await prisma.reportModuleResult.create({
+          data: {
+            reportId: report.id,
+            moduleId: "VALUATION",
+            status: "SUCCEEDED",
+            responseMetadata: JSON.stringify({ ibsCode: valRes.ibsCode, make: valRes.make, model: valRes.model }),
+          },
+        });
       } catch (err: any) {
-        try {
-          await prisma.reportModuleResult.create({
-            data: {
-              reportId: report.id,
-              moduleId: "VALUATION",
-              status: "FAILED",
-              errorMessage: err.message || "Błąd wyceny AudaValuation.",
-            },
-          });
-        } catch (e) {}
+        moduleFailureCount++;
+        await prisma.reportModuleResult.create({
+          data: {
+            reportId: report.id,
+            moduleId: "VALUATION",
+            status: "FAILED",
+            errorMessage: err.message || "Błąd wyceny AudaValuation.",
+          },
+        });
       }
     }
 
@@ -145,24 +132,22 @@ export async function POST(req: Request) {
           firstRegistration: firstRegistrationDate,
         });
         claimCheckResultData = checkRes;
+        moduleSuccessCount++;
 
         const moduleStatus = checkRes.hasHistory ? "SUCCEEDED" : "NO_DATA";
 
-        try {
-          await prisma.reportModuleResult.create({
-            data: {
-              reportId: report.id,
-              moduleId: "CLAIM_CHECK",
-              status: moduleStatus,
-              rawXml: checkRes.rawXml,
-              responseMetadata: JSON.stringify({
-                hasHistory: checkRes.hasHistory,
-                photosStatus: checkRes.photosStatus,
-                advice: checkRes.advice,
-              }),
-            },
-          });
-        } catch (e) {}
+        await prisma.reportModuleResult.create({
+          data: {
+            reportId: report.id,
+            moduleId: "CLAIM_CHECK",
+            status: moduleStatus,
+            responseMetadata: JSON.stringify({
+              hasHistory: checkRes.hasHistory,
+              photosStatus: checkRes.photosStatus,
+              advice: checkRes.advice,
+            }),
+          },
+        });
 
         // --- MODULE 3: CLAIMS DETAILS (getDetails) ---
         // Audatex PRD requirement: run getDetails ONLY IF hasHistory is true!
@@ -174,108 +159,107 @@ export async function POST(req: Request) {
                 firstRegistration: firstRegistrationDate,
               });
               claimDetailsResultData = detailsRes;
+              moduleSuccessCount++;
 
-              try {
-                for (const claim of detailsRes.claims) {
-                  await prisma.damageClaim.create({
-                    data: {
-                      reportId: report.id,
-                      claimId: claim.claimId,
-                      accidentDate: claim.accidentDate,
-                      claimDate: claim.creationDate,
-                      country: claim.country,
-                      makeModel: claim.makeModel,
-                      mileage: claim.mileage,
-                      damageValue: claim.damageValue,
-                      currency: claim.currency,
-                      isTotalLoss: claim.isTotalLoss,
-                      mandateCode: claim.mandateCode,
-                      mandateDescription: claim.mandateDescription,
-                      damageZones: JSON.stringify(claim.affectedZones),
-                      significantParts: JSON.stringify(claim.significantParts),
-                    },
-                  });
-                }
-
-                await prisma.reportModuleResult.create({
+              for (const claim of detailsRes.claims) {
+                await prisma.damageClaim.create({
                   data: {
                     reportId: report.id,
-                    moduleId: "CLAIM_DETAILS",
-                    status: "SUCCEEDED",
-                    rawXml: detailsRes.rawXml,
-                    responseMetadata: JSON.stringify({ claimsCount: detailsRes.claims.length }),
+                    claimId: claim.claimId,
+                    accidentDate: claim.accidentDate,
+                    claimDate: claim.creationDate,
+                    country: claim.country,
+                    makeModel: claim.makeModel,
+                    mileage: claim.mileage,
+                    damageValue: claim.damageValue,
+                    currency: claim.currency,
+                    isTotalLoss: claim.isTotalLoss,
+                    mandateCode: claim.mandateCode,
+                    mandateDescription: claim.mandateDescription,
+                    damageZones: JSON.stringify(claim.affectedZones),
+                    significantParts: JSON.stringify(claim.significantParts),
                   },
                 });
-              } catch (e) {}
-            } catch (err: any) {
-              try {
-                await prisma.reportModuleResult.create({
-                  data: {
-                    reportId: report.id,
-                    moduleId: "CLAIM_DETAILS",
-                    status: "FAILED",
-                    errorMessage: err.message || "Błąd pobierania szczegółów szkód getDetails.",
-                  },
-                });
-              } catch (e) {}
-            }
-          } else {
-            // hasHistory was false -> getDetails cannot be run according to Audatex spec
-            try {
+              }
+
               await prisma.reportModuleResult.create({
                 data: {
                   reportId: report.id,
                   moduleId: "CLAIM_DETAILS",
-                  status: "NO_DATA",
-                  errorMessage: "Szczegóły szkód niedostępne: brak wpisów w weryfikacji wstępnej hasHistory.",
+                  status: "SUCCEEDED",
+                  responseMetadata: JSON.stringify({ claimsCount: detailsRes.claims.length }),
                 },
               });
-            } catch (e) {}
+            } catch (err: any) {
+              moduleFailureCount++;
+              await prisma.reportModuleResult.create({
+                data: {
+                  reportId: report.id,
+                  moduleId: "CLAIM_DETAILS",
+                  status: "FAILED",
+                  errorMessage: err.message || "Błąd pobierania szczegółów szkód getDetails.",
+                },
+              });
+            }
+          } else {
+            // hasHistory returned false -> getDetails unavailable
+            await prisma.reportModuleResult.create({
+              data: {
+                reportId: report.id,
+                moduleId: "CLAIM_DETAILS",
+                status: "NO_DATA",
+                errorMessage: "Szczegóły szkód niedostępne: brak wpisów w weryfikacji wstępnej hasHistory.",
+              },
+            });
           }
         }
       } catch (err: any) {
-        try {
-          await prisma.reportModuleResult.create({
-            data: {
-              reportId: report.id,
-              moduleId: "CLAIM_CHECK",
-              status: "FAILED",
-              errorMessage: err.message || "Błąd kontroli historii szkód Audatex CHE.",
-            },
-          });
-        } catch (e) {}
+        moduleFailureCount++;
+        await prisma.reportModuleResult.create({
+          data: {
+            reportId: report.id,
+            moduleId: "CLAIM_CHECK",
+            status: "FAILED",
+            errorMessage: err.message || "Błąd kontroli historii szkód Audatex CHE.",
+          },
+        });
       }
     }
 
-    // Update Report final status
-    try {
-      await prisma.report.update({
-        where: { id: report.id },
-        data: { status: "COMPLETED" },
-      });
-    } catch (e) {}
+    // Determine honest final status
+    let finalStatus = "COMPLETED";
+    if (moduleFailureCount > 0 && moduleSuccessCount > 0) {
+      finalStatus = "PARTIALLY_FAILED";
+    } else if (moduleFailureCount > 0 && moduleSuccessCount === 0) {
+      finalStatus = "FAILED";
+    }
+
+    await prisma.report.update({
+      where: { id: report.id },
+      data: { status: finalStatus },
+    });
 
     // Record Audit Event
-    try {
-      await prisma.auditEvent.create({
-        data: {
-          userId: user.userId,
-          userEmail: user.email,
-          action: "CREATE_REPORT",
-          resource: `REPORT:${report.id}`,
-          metadataJson: JSON.stringify({
-            vin,
-            firstRegistrationDate,
-            modulesRequested: { includeValuation, includeClaimCheck, includeClaimDetails },
-          }),
-        },
-      });
-    } catch (e) {}
+    await prisma.auditEvent.create({
+      data: {
+        userId: user.userId,
+        userEmail: user.email,
+        action: "CREATE_REPORT",
+        resource: `REPORT:${report.id}`,
+        metadataJson: JSON.stringify({
+          vin,
+          firstRegistrationDate,
+          status: finalStatus,
+          modulesRequested: { includeValuation, includeClaimCheck, includeClaimDetails },
+        }),
+      },
+    });
 
     return NextResponse.json({
       success: true,
       reportId: report.id,
       vin,
+      status: finalStatus,
       firstRegistrationDate,
       valuation: valuationResultData,
       claimCheck: claimCheckResultData,

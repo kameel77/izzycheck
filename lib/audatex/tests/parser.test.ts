@@ -3,6 +3,8 @@ import { test, describe } from "node:test";
 import { AudatexHistoryAdapter } from "../history.ts";
 import { AudatexValuationAdapter } from "../valuation.ts";
 
+process.env.AUDATEX_MOCK_MODE = "true";
+
 describe("Audatex Integration Adapters", () => {
   const historyAdapter = new AudatexHistoryAdapter();
   const valuationAdapter = new AudatexValuationAdapter();

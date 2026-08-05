@@ -2,21 +2,6 @@ import { NextResponse } from "next/server";
 import { comparePassword, createToken, hashPassword } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-// Fallback seed user for instant local/demo login if DB has no users yet
-const DEFAULT_OPERATOR = {
-  email: "operator@izzylease.pl",
-  password: "OperatorIzzy2026!",
-  name: "Operator Izzy Lease",
-  role: "OPERATOR" as const,
-};
-
-const DEFAULT_ADMIN = {
-  email: "admin@izzylease.pl",
-  password: "AdminIzzy2026!",
-  name: "Administrator Izzy Lease",
-  role: "ADMIN" as const,
-};
-
 export async function POST(req: Request) {
   try {
     const { email, password } = await req.json();
@@ -25,58 +10,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Email i hasło są wymagane." }, { status: 400 });
     }
 
-    let user = null;
-    try {
-      user = await prisma.user.findUnique({ where: { email: String(email).toLowerCase().trim() } });
-    } catch (e) {
-      // If DB is empty or uninitialized during demo, fallback to built-in operator
-    }
+    const normalizedEmail = String(email).toLowerCase().trim();
 
-    if (!user) {
-      if (email === DEFAULT_OPERATOR.email && password === DEFAULT_OPERATOR.password) {
-        const passwordHash = await hashPassword(DEFAULT_OPERATOR.password);
-        try {
-          user = await prisma.user.create({
-            data: {
-              email: DEFAULT_OPERATOR.email,
-              name: DEFAULT_OPERATOR.name,
-              passwordHash,
-              role: DEFAULT_OPERATOR.role,
-            },
-          });
-        } catch (e) {
-          user = {
-            id: "op-1",
-            email: DEFAULT_OPERATOR.email,
-            name: DEFAULT_OPERATOR.name,
+    // Query user strictly from Database
+    let user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+    // Initial admin seeding from env if DB is empty and ENV credentials match
+    if (!user && process.env.INITIAL_ADMIN_EMAIL && process.env.INITIAL_ADMIN_PASSWORD) {
+      const initEmail = process.env.INITIAL_ADMIN_EMAIL.toLowerCase().trim();
+      if (normalizedEmail === initEmail && password === process.env.INITIAL_ADMIN_PASSWORD) {
+        const passwordHash = await hashPassword(process.env.INITIAL_ADMIN_PASSWORD);
+        user = await prisma.user.create({
+          data: {
+            email: initEmail,
+            name: "Administrator Izzy Lease",
             passwordHash,
-            role: DEFAULT_OPERATOR.role,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          };
-        }
-      } else if (email === DEFAULT_ADMIN.email && password === DEFAULT_ADMIN.password) {
-        const passwordHash = await hashPassword(DEFAULT_ADMIN.password);
-        try {
-          user = await prisma.user.create({
-            data: {
-              email: DEFAULT_ADMIN.email,
-              name: DEFAULT_ADMIN.name,
-              passwordHash,
-              role: DEFAULT_ADMIN.role,
-            },
-          });
-        } catch (e) {
-          user = {
-            id: "admin-1",
-            email: DEFAULT_ADMIN.email,
-            name: DEFAULT_ADMIN.name,
-            passwordHash,
-            role: DEFAULT_ADMIN.role,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          };
-        }
+            role: "ADMIN",
+          },
+        });
       }
     }
 
@@ -84,11 +35,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Nieprawidłowy e-mail lub hasło." }, { status: 401 });
     }
 
-    if (user.passwordHash) {
-      const isValid = await comparePassword(password, user.passwordHash);
-      if (!isValid && !(email === DEFAULT_OPERATOR.email && password === DEFAULT_OPERATOR.password)) {
-        return NextResponse.json({ error: "Nieprawidłowy e-mail lub hasło." }, { status: 401 });
-      }
+    const isValid = await comparePassword(password, user.passwordHash);
+    if (!isValid) {
+      return NextResponse.json({ error: "Nieprawidłowy e-mail lub hasło." }, { status: 401 });
     }
 
     const tokenPayload = {
@@ -100,7 +49,7 @@ export async function POST(req: Request) {
 
     const token = await createToken(tokenPayload);
 
-    // Audit login
+    // Audit login event
     try {
       await prisma.auditEvent.create({
         data: {
@@ -112,7 +61,7 @@ export async function POST(req: Request) {
         },
       });
     } catch (e) {
-      // Ignore if audit write fails in unmigrated db
+      console.error("Błąd zapisu logu audytowego logowania:", e);
     }
 
     const response = NextResponse.json({

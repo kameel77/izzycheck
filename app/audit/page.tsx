@@ -1,21 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ShieldAlert, User, Clock, FileText, Lock } from "lucide-react";
+import { ShieldAlert, User, Lock, AlertCircle } from "lucide-react";
 
 export default function AuditPage() {
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/audit")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.auditEvents) setEvents(data.auditEvents);
+      .then((res) => {
+        if (res.status === 403) {
+          setForbidden(true);
+          return null;
+        }
+        return res.json();
       })
-      .catch(() => {})
+      .then((data) => {
+        if (data && data.auditEvents) setEvents(data.auditEvents);
+        else if (data && data.error) setError(data.error);
+      })
+      .catch(() => setError("Błąd pobierania logów audytowych."))
       .finally(() => setLoading(false));
   }, []);
+
+  if (forbidden) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-16 text-center space-y-4">
+        <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <Lock className="h-8 w-8" />
+        </div>
+        <h1 className="text-xl font-bold text-white">Dostęp Zastrzeżony (RBAC)</h1>
+        <p className="text-sm text-slate-400">
+          Rejestr zdarzeń audytowych i RODO jest dostępny wyłącznie dla zalogowanych użytkowników z rolą **ADMINISTRATORA**.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
@@ -24,9 +47,15 @@ export default function AuditPage() {
           <ShieldAlert className="h-6 w-6 text-purple-400" /> Rejestr Zdarzeń Audytowych i Compliance (RODO)
         </h1>
         <p className="text-xs text-slate-400 mt-1">
-          Niezmienny log zdarzeń operacyjnych, dostępów oraz generowania raportów pojazdów zgodnie z sekcją 7 PRD.
+          Dostępny wyłącznie dla Administratorów. Niezmienny log zdarzeń operacyjnych i generowania raportów.
         </p>
       </div>
+
+      {error && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-xs font-medium text-red-400 flex items-center gap-2">
+          <AlertCircle className="h-4 w-4" /> {error}
+        </div>
+      )}
 
       <div className="rounded-2xl border border-slate-800 bg-slate-900/80 overflow-hidden">
         {loading ? (

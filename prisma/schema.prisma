@@ -46,7 +46,7 @@ model Report {
   firstRegistrationDate String
   mileage               Int?
   valuationDate         String
-  status                String               @default("COMPLETED")
+  status                String               @default("COMPLETED") // COMPLETED | PARTIALLY_FAILED | FAILED
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   createdById           String
@@ -66,7 +66,6 @@ model ReportModuleResult {
   report           Report         @relation(fields: [reportId], references: [id], onDelete: Cascade)
   moduleId         ReportModuleId
   status           ModuleStatus   @default(PENDING)
-  rawXml           String?
   responseMetadata String?
   errorMessage     String?
   createdAt        DateTime       @default(now())
@@ -88,6 +87,7 @@ model VehicleSnapshot {
   technicalValueTh     Float?
   mileageUsed          Int?
   isAverageMileageUsed Boolean  @default(false)
+  manufactureDate      String?  // Dedykowane potwierdzone źródło daty produkcji (lub null)
   standardEquipment    String?  // JSON string
   optionalEquipment    String?  // JSON string
   createdAt            DateTime @default(now())
@@ -110,8 +110,8 @@ model DamageClaim {
   isTotalLoss        Boolean  @default(false)
   mandateCode        String?
   mandateDescription String?
-  damageZones        String?  // JSON string of affected 28 body zones & glass zones
-  significantParts   String?  // JSON string of part group IDs (001-015)
+  damageZones        String?  // JSON string 28 stref
+  significantParts   String?  // JSON string grup części (001-015)
   createdAt          DateTime @default(now())
 
   @@index([reportId])

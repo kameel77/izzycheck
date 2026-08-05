@@ -2,9 +2,17 @@ import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "izzycheck-super-secret-jwt-key-change-in-production-2026"
-);
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("KRYTYCZNY BŁĄD KONFIGURACJI: Zmienna JWT_SECRET nie została ustawiona w środowisku produkcyjnym.");
+    }
+    // Only in local development fallback
+    return new TextEncoder().encode("izzycheck-dev-secret-only-for-local-testing");
+  }
+  return new TextEncoder().encode(secret);
+}
 
 export interface JWTPayload {
   userId: string;
@@ -22,16 +30,18 @@ export async function comparePassword(password: string, hash: string): Promise<b
 }
 
 export async function createToken(payload: JWTPayload): Promise<string> {
+  const secret = getJwtSecret();
   return await new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("24h")
-    .sign(JWT_SECRET);
+    .sign(secret);
 }
 
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
-    const verified = await jwtVerify(token, JWT_SECRET);
+    const secret = getJwtSecret();
+    const verified = await jwtVerify(token, secret);
     return verified.payload as unknown as JWTPayload;
   } catch (err) {
     return null;

@@ -13,9 +13,18 @@ const xmlParser = new XMLParser({
 
 export class AudatexValuationAdapter {
   private isMockMode: boolean;
+  private timeoutMs: number;
+  private maxRetries: number;
 
   constructor() {
-    this.isMockMode = process.env.AUDATEX_MOCK_MODE !== "false";
+    // Mock mode is enabled ONLY if explicitly set to "true"
+    this.isMockMode = process.env.AUDATEX_MOCK_MODE === "true";
+    this.timeoutMs = parseInt(process.env.AUDATEX_TIMEOUT_MS || "15000", 10);
+    this.maxRetries = parseInt(process.env.AUDATEX_MAX_RETRIES || "2", 10);
+  }
+
+  public getIsMockMode(): boolean {
+    return this.isMockMode;
   }
 
   /**
@@ -26,10 +35,13 @@ export class AudatexValuationAdapter {
       return this.parseMockValuation(input);
     }
 
-    // Live SOAP Calls
-    const carVinResult = await this.getCarByVinWs(input);
-    const evaluationResult = await this.evaluateCarFull(input, carVinResult.ibsCode, carVinResult.equipments, carVinResult.packets);
-    const classificationResult = await this.getClassificationByIBSCode(input, carVinResult.ibsCode);
+    const marketCode = input.marketCode || process.env.AUDATEX_MARKET_CODE || "PL";
+    const language = input.language || process.env.AUDATEX_LANGUAGE || "PL";
+
+    // Live SOAP Calls with timeout & retry
+    const carVinResult = await this.getCarByVinWs(input, marketCode, language);
+    const evaluationResult = await this.evaluateCarFull(input, carVinResult.ibsCode, carVinResult.equipments, carVinResult.packets, language);
+    const classificationResult = await this.getClassificationByIBSCode(input, carVinResult.ibsCode, marketCode, language);
 
     return {
       ibsCode: carVinResult.ibsCode,
@@ -41,13 +53,13 @@ export class AudatexValuationAdapter {
       technicalValueTh: evaluationResult.technicalValueTh,
       mileageUsed: input.mileage && input.mileage > 0 ? input.mileage : 0,
       isAverageMileageUsed: !input.mileage || input.mileage === 0,
+      manufactureDate: input.manufactureDate || undefined,
       standardEquipment: classificationResult.standardEquipment,
       optionalEquipment: classificationResult.optionalEquipment,
-      rawXml: evaluationResult.rawXml,
     };
   }
 
-  private async getCarByVinWs(input: VinValuationInput) {
+  private async getCarByVinWs(input: VinValuationInput, marketCode: string, language: string) {
     const endpoint = process.env.AUDATEX_VALUATION_ENDPOINT || "https://te5adxwseu.taxexpert.cz/TE5_AUDAVIN_Service.asmx";
     const body = `
       <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:te5="http://TE5.ibs-expert.cz/">
@@ -55,8 +67,8 @@ export class AudatexValuationAdapter {
         <soapenv:Body>
           <te5:GetCarByVinWs>
             <te5:vin>${input.vin}</te5:vin>
-            <te5:language>${input.language || "PL"}</te5:language>
-            <te5:marketCode>${input.marketCode || "PL"}</te5:marketCode>
+            <te5:language>${language}</te5:language>
+            <te5:marketCode>${marketCode}</te5:marketCode>
             <te5:dateOfFirstReg>${input.dateOfFirstReg}</te5:dateOfFirstReg>
             <te5:certificateHash>${process.env.AUDATEX_CERTIFICATE_HASH || ""}</te5:certificateHash>
             <te5:licenceNumber>${process.env.AUDATEX_LICENCE_NUMBER || ""}</te5:licenceNumber>
@@ -65,12 +77,12 @@ export class AudatexValuationAdapter {
       </soapenv:Envelope>
     `;
 
-    const responseText = await this.postSoapRequest(endpoint, body, "http://TE5.ibs-expert.cz/GetCarByVinWs");
+    const responseText = await this.postSoapWithRetry(endpoint, body, "http://TE5.ibs-expert.cz/GetCarByVinWs");
     const parsed = xmlParser.parse(responseText);
     const resultNode = parsed["soap:Envelope"]?.["soap:Body"]?.["GetCarByVinWsResponse"]?.["GetCarByVinWsResult"];
 
     if (!resultNode || !resultNode["IbsCode"]) {
-      throw new Error("Identyfikacja AUDAVIN nie zwróciła ważnego IBSCode dla przekazanego VIN.");
+      throw new Error("Identyfikacja AUDAVIN nie zwróciła IBSCode dla podanego VIN.");
     }
 
     const eqCodes = this.extractStringArray(resultNode["AdditionalEquipmentsCodes"]);
@@ -83,7 +95,7 @@ export class AudatexValuationAdapter {
     };
   }
 
-  private async evaluateCarFull(input: VinValuationInput, ibsCode: string, equipments: string[], packets: string[]) {
+  private async evaluateCarFull(input: VinValuationInput, ibsCode: string, equipments: string[], packets: string[], language: string) {
     const endpoint = process.env.AUDATEX_VALUATION_SERVICE_ENDPOINT || "https://te5wseu.taxexpert.cz/TE5_EvaluationServices.asmx";
     const valuationDate = input.valuationDate || new Date().toISOString().split("T")[0];
 
@@ -106,7 +118,7 @@ export class AudatexValuationAdapter {
         <SOAP-ENV:Header/>
         <SOAP-ENV:Body>
           <EvaluateCarFull xmlns="http://TE5.ibs-expert.cz/">
-            <language>${input.language || "PL"}</language>
+            <language>${language}</language>
             <car>
               <IBSCode>${ibsCode}</IBSCode>
               <DV>${input.dateOfFirstReg}</DV>
@@ -122,7 +134,7 @@ export class AudatexValuationAdapter {
       </SOAP-ENV:Envelope>
     `;
 
-    const responseText = await this.postSoapRequest(endpoint, body, "http://TE5.ibs-expert.cz/EvaluateCarFull");
+    const responseText = await this.postSoapWithRetry(endpoint, body, "http://TE5.ibs-expert.cz/EvaluateCarFull");
     const parsed = xmlParser.parse(responseText);
     const evalResult = parsed["soap:Envelope"]?.["soap:Body"]?.["EvaluateCarFullResponse"]?.["EvaluateCarFullResult"];
 
@@ -130,23 +142,30 @@ export class AudatexValuationAdapter {
       newPriceCv: parseFloat(evalResult?.["CVv"] || 0),
       marketPriceCob: parseFloat(evalResult?.["COBv"] || 0),
       technicalValueTh: parseFloat(evalResult?.["THv"] || 0),
-      rawXml: responseText,
     };
   }
 
-  private async getClassificationByIBSCode(input: VinValuationInput, ibsCode: string) {
+  private async getClassificationByIBSCode(input: VinValuationInput, ibsCode: string, marketCode: string, language: string) {
     const endpoint = process.env.AUDATEX_VEHICLE_DATA_ENDPOINT || "https://te5wseu.taxexpert.cz/TE5_VehicleData.asmx";
-    const [year, month] = input.dateOfFirstReg.split("-");
+    
+    // Separation: Use explicit manufactureDate if supplied, otherwise do not send unconfirmed production date
+    let monthXml = "";
+    let yearXml = "";
+    if (input.manufactureDate && /^\d{4}-\d{2}/.test(input.manufactureDate)) {
+      const [y, m] = input.manufactureDate.split("-");
+      monthXml = `<ManufacturedMonth>${m}</ManufacturedMonth>`;
+      yearXml = `<ManufacturedYear>${y}</ManufacturedYear>`;
+    }
 
     const body = `
       <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/">
         <SOAP-ENV:Header/>
         <SOAP-ENV:Body>
           <GetClassificationByIBSCode xmlns="http://TE5.ibs-expert.cz/">
-            <marketCode>${input.marketCode || "PL"}</marketCode>
-            <language>${input.language || "PL"}</language>
-            <ManufacturedMonth>${month || "01"}</ManufacturedMonth>
-            <ManufacturedYear>${year || "2020"}</ManufacturedYear>
+            <marketCode>${marketCode}</marketCode>
+            <language>${language}</language>
+            ${monthXml}
+            ${yearXml}
             <IBSCode>${ibsCode}</IBSCode>
             <certificateHash>${process.env.AUDATEX_CERTIFICATE_HASH || ""}</certificateHash>
             <licenceNumber>${process.env.AUDATEX_LICENCE_NUMBER || ""}</licenceNumber>
@@ -155,7 +174,7 @@ export class AudatexValuationAdapter {
       </SOAP-ENV:Envelope>
     `;
 
-    const responseText = await this.postSoapRequest(endpoint, body, "http://TE5.ibs-expert.cz/GetClassificationByIBSCode");
+    const responseText = await this.postSoapWithRetry(endpoint, body, "http://TE5.ibs-expert.cz/GetClassificationByIBSCode");
     return this.parseClassificationXml(responseText);
   }
 
@@ -198,22 +217,42 @@ export class AudatexValuationAdapter {
     return { make, model, variant, standardEquipment, optionalEquipment };
   }
 
-  private async postSoapRequest(url: string, body: string, soapAction: string): Promise<string> {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/xml; charset=utf-8",
-        SOAPAction: soapAction,
-      },
-      body,
-    });
+  private async postSoapWithRetry(url: string, body: string, soapAction: string): Promise<string> {
+    let lastError: any = null;
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`SOAP Fault (${res.status}): ${errText}`);
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/xml; charset=utf-8",
+            SOAPAction: soapAction,
+          },
+          body,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timer);
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`SOAP Fault (${res.status}): ${errText}`);
+        }
+
+        return await res.text();
+      } catch (err: any) {
+        clearTimeout(timer);
+        lastError = err;
+        if (attempt === this.maxRetries) break;
+        // Exponential backoff
+        await new Promise((r) => setTimeout(r, attempt * 1000));
+      }
     }
 
-    return await res.text();
+    throw new Error(`Usługa AudaValuation SOAP nie odpowiedziała po ${this.maxRetries} próbach. Błąd: ${lastError?.message || lastError}`);
   }
 
   private extractStringArray(node: any): string[] {
@@ -236,9 +275,9 @@ export class AudatexValuationAdapter {
       technicalValueTh: 121000.0,
       mileageUsed: input.mileage && input.mileage > 0 ? input.mileage : 0,
       isAverageMileageUsed: !input.mileage || input.mileage === 0,
+      manufactureDate: input.manufactureDate || undefined,
       standardEquipment: classification.standardEquipment,
       optionalEquipment: classification.optionalEquipment,
-      rawXml: AUDAVALUATION_EVALUATE_CAR_RESPONSE,
     };
   }
 }

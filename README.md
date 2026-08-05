@@ -8,52 +8,46 @@ Aplikacja integruje się z dwoma podsystemami SOAP dostawcy **Audatex / Solera**
 
 ---
 
-## 🚀 Wdrożenie na Coolify (VPS Hetzner)
+## 🔒 Bezpieczeństwo & Wymagane Zmienne Środowiskowe
 
-Wszystkie pliki aplikacji znajdują się w niniejszym repozytorium (`github/izzycheck`).
+Kod źródłowy **nie zawiera żadnych wbudowanych haseł ani stałych kluczy JWT**. Wszystkie sekrety muszą być przekazane wyłącznie w konfiguracji produkcyjnej Coolify.
 
-### Instrukcja konfiguracji w Coolify v4:
-1. W Coolify utwórz nowy projekt i dodaj **Application** podłączony do tego repozytorium Git (`github/izzycheck`).
-2. Jako **Build Pack** wybierz **Docker Compose** lub **Dockerfile**.
-3. Upewnij się, że lokalizacja pliku Docker Compose w panelu Coolify to `/docker-compose.yml` lub `/Dockerfile`.
-4. Skonfiguruj zmienne środowiskowe z pliku `.env.example`:
-   - `DATABASE_URL`: Połączenie do PostgreSQL
-   - `JWT_SECRET`: Klucz szyfrowania tokenów
-   - `AUDATEX_MOCK_MODE`: Ustaw `true` dla danych demonstracyjnych / testów fixture, lub `false` dla produkcyjnych SOAP Audatex.
-   - `AUDATEX_CHE_USERNAME`, `AUDATEX_CHE_PASSWORD`, `AUDATEX_CERTIFICATE_HASH`, `AUDATEX_LICENCE_NUMBER`: Produkcyjne poświadczenia Audatex.
+- `DATABASE_URL`: Wymagany ciąg połączenia do bazy PostgreSQL.
+- `POSTGRES_PASSWORD`: Hasło bazy PostgreSQL w kontenerze.
+- `JWT_SECRET`: Wymagany unikalny klucz szyfrowania tokenów sesji.
+- `INITIAL_ADMIN_EMAIL` i `INITIAL_ADMIN_PASSWORD`: Opcjonalne parametry do utworzenia pierwszego konta administratora przy czystej bazie danych.
+- `AUDATEX_MOCK_MODE`: Domyślnie `false` (wymusza żywe wywołania SOAP Audatex). Ustaw `true` wyłącznie dla lokalnego środowiska testowego z fixture'ami XML.
+- `AUDATEX_CHE_USERNAME`, `AUDATEX_CHE_PASSWORD`, `AUDATEX_CERTIFICATE_HASH`, `AUDATEX_LICENCE_NUMBER`: Produkcyjne poświadczenia Audatex.
+- `AUDATEX_MARKET_CODE` (domyślnie `PL`) & `AUDATEX_LANGUAGE` (domyślnie `PL`).
 
 ---
 
-## 💻 Uruchomienie Lokalnie
+## 🚀 Instrukcja Wdrożenia w Coolify v4
+
+Ze względu na to, że repozytorium zawiera pliki źródłowe oraz `Dockerfile` i `docker-compose.yml`:
+
+1. W Coolify dodaj nowy zasób typu **Application** podłączony do tego repozytorium Git (`github/izzycheck`).
+2. Ustaw **Build Pack** na **Docker Compose**.
+3. W konfiguracji wdrożenia upewnij się, że **Docker Compose Location** ma wartość `/docker-compose.yml`.
+4. Baza danych PostgreSQL oraz aplikacja uruchomią się w prywatnej sieci kontenerowej. Port bazy 5432 nie jest wystawiany publicznie ze względów bezpieczeństwa.
+5. Podczas pierwszego uruchomienia skrypt `docker-entrypoint.sh` automatycznie wykona `npx prisma migrate deploy` oraz zepnie migracje.
+
+---
+
+## 💻 Uruchomienie Lokalnie i Testy
 
 ```bash
 # 1. Zainstaluj zależności
 npm install
 
-# 2. Wygeneruj klienta Prisma DB
+# 2. Wygeneruj klienta Prisma
 npx prisma generate
 
 # 3. Uruchom testy jednostkowe parsera SOAP Audatex
-npm run test
+npm test
 
 # 4. Uruchom serwer deweloperski
 npm run dev
 ```
 
 Po uruchomieniu przejdź pod `http://localhost:3000`.
-
-### Dane logowania demo:
-- **Operator:** `operator@izzylease.pl` / `OperatorIzzy2026!`
-- **Admin:** `admin@izzylease.pl` / `AdminIzzy2026!`
-
----
-
-## 📁 Architektura i Pakiety
-
-- `app/` — Full-stack Next.js App Router (strony UI, interfejsy i REST API endpoints)
-- `lib/audatex/` — Serwerowe adaptery SOAP:
-  - `valuation.ts`: Integracja AudaValuation WS 2023
-  - `history.ts`: Integracja Claims History Engine v1.23.0 + dekodery mandatów i 28 stref uszkodzeń
-  - `fixtures.ts`: Zanonimizowane próbki XML z oficjalnej dokumentacji Audatex
-- `prisma/` — Schemat bazy danych PostgreSQL (Raporty, Wyceny, Szkody, Log Audytowy)
-- `Dockerfile` & `docker-compose.yml` — Wdrożenie kontenerowe

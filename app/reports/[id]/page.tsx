@@ -12,15 +12,11 @@ import {
   XCircle,
   FileText,
   ShieldCheck,
-  ChevronDown,
-  ChevronUp,
   Layers,
   ArrowLeft,
   Info,
   Clock,
   Printer,
-  Copy,
-  Check,
 } from "lucide-react";
 
 export default function ReportDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -31,8 +27,6 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"valuation" | "claims" | "audit">("valuation");
-  const [showRawXml, setShowRawXml] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetch(`/api/reports/${reportId}`)
@@ -41,10 +35,10 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
         if (data.report) {
           setReport(data.report);
         } else {
-          setError(data.error || "Nie odnaleziono raportu.");
+          setError(data.error || "Nie odnaleziono raportu w bazie.");
         }
       })
-      .catch(() => setError("Wystąpił błąd podczas ładowania raportu."))
+      .catch(() => setError("Wystąpił błąd podczas ładowania raportu z bazy danych."))
       .finally(() => setLoading(false));
   }, [reportId]);
 
@@ -53,7 +47,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
       <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-8">
         <div className="text-center space-y-4">
           <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-blue-500 border-t-transparent"></div>
-          <p className="text-sm font-semibold text-slate-300">Pobieranie raportu Audatex...</p>
+          <p className="text-sm font-semibold text-slate-300">Wczytywanie raportu z bazy danych...</p>
         </div>
       </div>
     );
@@ -90,13 +84,6 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
   const hasClaims = claims.length > 0;
   const noClaimsFound = checkModule?.status === "NO_DATA";
 
-  const handleCopyXml = () => {
-    const rawXml = valModule?.rawXml || checkModule?.rawXml || detailsModule?.rawXml || "Brak surowego XML";
-    navigator.clipboard.writeText(rawXml);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
       {/* Top Navigation */}
@@ -108,14 +95,12 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
           <ArrowLeft className="h-4 w-4" /> Powrót do pulpitu
         </Link>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
-          >
-            <Printer className="h-4 w-4" /> Drukuj Raport
-          </button>
-        </div>
+        <button
+          onClick={() => window.print()}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+        >
+          <Printer className="h-4 w-4" /> Drukuj Raport
+        </button>
       </div>
 
       {/* Main Header Banner */}
@@ -127,7 +112,18 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                 Raport IzzyCheck #{report.id.substring(0, 8)}
               </span>
               <span className="text-xs text-slate-400">
-                Data sprawdzenia: {new Date(report.createdAt).toLocaleString("pl-PL")}
+                Data weryfikacji: {new Date(report.createdAt).toLocaleString("pl-PL")}
+              </span>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                  report.status === "COMPLETED"
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    : report.status === "PARTIALLY_FAILED"
+                    ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                    : "bg-red-500/10 text-red-400 border border-red-500/20"
+                }`}
+              >
+                Status: {report.status}
               </span>
             </div>
 
@@ -149,7 +145,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 bg-slate-950/70 p-4 rounded-2xl border border-slate-800">
             <div className="text-left sm:text-right">
-              <p className="text-[11px] font-semibold text-slate-400 uppercase">Operator Izzy Lease</p>
+              <p className="text-[11px] font-semibold text-slate-400 uppercase">Operator Utworzenia</p>
               <p className="text-sm font-bold text-white">{report.createdBy?.name || "Operator"}</p>
               <p className="text-[10px] text-slate-500">{report.createdBy?.email}</p>
             </div>
@@ -167,6 +163,15 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
 
           <div className="space-y-1">
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+              <Calendar className="h-3.5 w-3.5 text-purple-400" /> Data Produkcji
+            </span>
+            <p className="text-sm font-bold text-white">
+              {snapshot?.manufactureDate ? snapshot.manufactureDate : "Brak potwierdzenia źródła"}
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
               <Gauge className="h-3.5 w-3.5 text-cyan-400" /> Kilometraż
             </span>
             <p className="text-sm font-bold text-white">
@@ -179,15 +184,6 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               <Clock className="h-3.5 w-3.5 text-emerald-400" /> Data Wyceny
             </span>
             <p className="text-sm font-bold text-white">{report.valuationDate}</p>
-          </div>
-
-          <div className="space-y-1">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-              <ShieldCheck className="h-3.5 w-3.5 text-purple-400" /> Status Usług
-            </span>
-            <p className="text-sm font-bold text-emerald-400 flex items-center gap-1">
-              <CheckCircle2 className="h-4 w-4" /> Zweryfikowano
-            </p>
           </div>
         </div>
       </div>
@@ -224,19 +220,18 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               : "border-transparent text-slate-400 hover:text-slate-200"
           }`}
         >
-          <Layers className="h-4 w-4" /> Ślad Audytowy & XML
+          <Layers className="h-4 w-4" /> Ślad Audytowy
         </button>
       </div>
 
       {/* TAB 1: VALUATION & EQUIPMENT */}
       {activeTab === "valuation" && (
         <div className="space-y-8">
-          {/* Valuation Summary Cards */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-white">Wartości Pojazdu z AudaValuation</h2>
               <div className="flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-400 border border-amber-500/20">
-                <Info className="h-3.5 w-3.5" /> Wartości podane bez VAT (netto)
+                <Info className="h-3.5 w-3.5" /> Wartości podane w przykładach dokumentacji BEZ VAT (netto)
               </div>
             </div>
 
@@ -267,9 +262,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
             </div>
           </div>
 
-          {/* Equipment Lists */}
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-            {/* Standard Equipment */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">Wyposażenie Standardowe</h3>
@@ -294,7 +287,6 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               )}
             </div>
 
-            {/* Optional Equipment */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">Wyposażenie Dodatkowe & Pakiety</h3>
@@ -325,7 +317,6 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
       {/* TAB 2: CLAIMS & DAMAGE DETAILS */}
       {activeTab === "claims" && (
         <div className="space-y-8">
-          {/* Claims Status Banner */}
           {hasClaims ? (
             <div className="rounded-2xl border border-red-500/30 bg-red-950/20 p-6 flex items-start gap-4">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20 text-red-400 shrink-0">
@@ -355,11 +346,10 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
             </div>
           ) : (
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-xs text-slate-400">
-              Moduł historii szkód nie został wybrany lub jest przetwarzany.
+              Moduł historii szkód nie został wybrany lub nie przyniósł wyników.
             </div>
           )}
 
-          {/* Claims Timeline List */}
           {hasClaims && (
             <div className="space-y-6">
               <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300">Chronologiczny Wykaz Szkód</h3>
@@ -395,7 +385,6 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                       </div>
 
-                      {/* Claim Details Grid */}
                       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 text-xs">
                         <div>
                           <span className="text-[11px] text-slate-400 block">Data Zdarzenia</span>
@@ -415,7 +404,6 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                       </div>
 
-                      {/* Affected Damage Zones (28 Zones Matrix) */}
                       {affectedZonesList.length > 0 && (
                         <div className="space-y-2 pt-2 border-t border-slate-800/60">
                           <span className="text-xs font-bold text-slate-300">Uszkodzone Strefy Nadwozia i Szyb (Part Zones):</span>
@@ -429,7 +417,6 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                       )}
 
-                      {/* Significant Parts Groups */}
                       {sigPartsList.length > 0 && (
                         <div className="space-y-2 pt-2 border-t border-slate-800/60">
                           <span className="text-xs font-bold text-slate-300">Istotne Grupy Części Objęte Kalkulacją:</span>
@@ -451,7 +438,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
         </div>
       )}
 
-      {/* TAB 3: AUDIT TRAIL & RAW XML */}
+      {/* TAB 3: AUDIT TRAIL */}
       {activeTab === "audit" && (
         <div className="space-y-6">
           <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 space-y-6">
@@ -464,6 +451,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                   <span className="font-bold text-emerald-400 flex items-center gap-1">
                     <CheckCircle2 className="h-4 w-4" /> {valModule?.status || "NIEWYKONANO"}
                   </span>
+                  {valModule?.errorMessage && <p className="text-[11px] text-red-400">{valModule.errorMessage}</p>}
                 </div>
 
                 <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-1">
@@ -471,6 +459,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                   <span className="font-bold text-emerald-400 flex items-center gap-1">
                     <CheckCircle2 className="h-4 w-4" /> {checkModule?.status || "NIEWYKONANO"}
                   </span>
+                  {checkModule?.errorMessage && <p className="text-[11px] text-red-400">{checkModule.errorMessage}</p>}
                 </div>
 
                 <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-1">
@@ -478,32 +467,13 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                   <span className="font-bold text-emerald-400 flex items-center gap-1">
                     <CheckCircle2 className="h-4 w-4" /> {detailsModule?.status || "NIEWYKONANO"}
                   </span>
+                  {detailsModule?.errorMessage && <p className="text-[11px] text-red-400">{detailsModule.errorMessage}</p>}
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-slate-800 space-y-2">
-                <button
-                  onClick={() => setShowRawXml(!showRawXml)}
-                  className="flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-700 transition-colors"
-                >
-                  {showRawXml ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  {showRawXml ? "Ukryj Surowy Komunikat XML" : "Pokaż Surowy Komunikat SOAP XML"}
-                </button>
-
-                {showRawXml && (
-                  <div className="relative mt-4 rounded-xl border border-slate-800 bg-slate-950 p-4 font-mono text-[11px] text-slate-300 overflow-x-auto">
-                    <button
-                      onClick={handleCopyXml}
-                      className="absolute right-3 top-3 flex items-center gap-1 rounded bg-slate-800 px-2 py-1 text-[10px] text-slate-300 hover:text-white"
-                    >
-                      {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
-                      {copied ? "Skopiowano" : "Kopiuj XML"}
-                    </button>
-                    <pre className="whitespace-pre-wrap">
-                      {valModule?.rawXml || checkModule?.rawXml || detailsModule?.rawXml || "Brak zapisanego XML w logu."}
-                    </pre>
-                  </div>
-                )}
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+                <p className="font-semibold text-slate-300">Zgodność z RODO & PRD:</p>
+                <p>Surowe parametry XML SOAP są parsowane wyłącznie po stronie serwera i nie są utrwalane w przeglądarce.</p>
               </div>
             </div>
           </div>
