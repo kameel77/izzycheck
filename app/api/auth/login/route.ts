@@ -5,16 +5,6 @@ import { isRateLimited } from "@/lib/rate-limit";
 
 export async function POST(req: Request) {
   try {
-    const ip = req.headers.get("x-forwarded-for") || "client-ip";
-    // Rate limit: max 5 login attempts per minute per IP
-    const rateCheck = isRateLimited("auth_login", ip, 5, 60000);
-    if (rateCheck.limited) {
-      return NextResponse.json(
-        { error: `Zbyt wiele prób logowania. Spróbuj ponownie za ${Math.ceil(rateCheck.resetMs / 1000)} sekund.` },
-        { status: 429 }
-      );
-    }
-
     const { email, password } = await req.json();
 
     if (!email || !password) {
@@ -22,6 +12,19 @@ export async function POST(req: Request) {
     }
 
     const normalizedEmail = String(email).toLowerCase().trim();
+
+    const forwarded = req.headers.get("x-forwarded-for");
+    const realIp = req.headers.get("x-real-ip");
+    const clientIp = forwarded ? forwarded.split(",")[0].trim() : (realIp || "127.0.0.1");
+
+    // Rate limit: max 5 login attempts per minute per IP + email combination
+    const rateCheck = isRateLimited("auth_login", `${clientIp}:${normalizedEmail}`, 5, 60000);
+    if (rateCheck.limited) {
+      return NextResponse.json(
+        { error: `Zbyt wiele prób logowania. Spróbuj ponownie za ${Math.ceil(rateCheck.resetMs / 1000)} sekund.` },
+        { status: 429 }
+      );
+    }
 
     // Query user strictly from Database
     let user = await prisma.user.findUnique({ where: { email: normalizedEmail } });

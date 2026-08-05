@@ -60,22 +60,27 @@ export async function POST(req: Request) {
       );
     }
 
+    const mileageNum = mileage ? parseInt(String(mileage), 10) : undefined;
+    const todayStr = new Date().toISOString().split("T")[0];
+    const valDate = valuationDate || todayStr;
+
     const idempotencyHeader = req.headers.get("idempotency-key");
     const currentRequestHash = computeRequestHash({
       vin,
       firstRegistrationDate,
-      mileage,
-      valuationDate,
+      mileage: mileageNum,
+      valuationDate: valDate,
       manufactureDate,
       modules,
     });
 
-    // Idempotency / Deduplication check: Match exact request parameters within 60s window
+    // Idempotency / Deduplication check: Match exact request parameters (dates, mileage, modules) within 60s window
     const sixtySecondsAgo = new Date(Date.now() - 60000);
     const existingRecentReport = await prisma.report.findFirst({
       where: {
         vin,
         createdById: user.userId,
+        firstRegistrationDate,
         createdAt: { gte: sixtySecondsAgo },
       },
       include: { moduleResults: true },
@@ -83,12 +88,15 @@ export async function POST(req: Request) {
     });
 
     if (existingRecentReport && (idempotencyHeader || existingRecentReport.moduleResults.length > 0)) {
+      const mileageMatches = (mileageNum === undefined && existingRecentReport.mileage === null) || existingRecentReport.mileage === mileageNum;
+      const valDateMatches = existingRecentReport.valuationDate === valDate;
+
       const existingModuleIds = new Set(existingRecentReport.moduleResults.map((m) => m.moduleId));
       const requestedValuationMatches = !includeValuation || existingModuleIds.has("VALUATION");
       const requestedCheckMatches = !includeClaimCheck || existingModuleIds.has("CLAIM_CHECK");
       const requestedDetailsMatches = !includeClaimDetails || existingModuleIds.has("CLAIM_DETAILS");
 
-      if (idempotencyHeader || (requestedValuationMatches && requestedCheckMatches && requestedDetailsMatches)) {
+      if (idempotencyHeader || (mileageMatches && valDateMatches && requestedValuationMatches && requestedCheckMatches && requestedDetailsMatches)) {
         return NextResponse.json({
           success: true,
           reportId: existingRecentReport.id,
@@ -98,10 +106,6 @@ export async function POST(req: Request) {
         });
       }
     }
-
-    const mileageNum = mileage ? parseInt(String(mileage), 10) : undefined;
-    const todayStr = new Date().toISOString().split("T")[0];
-    const valDate = valuationDate || todayStr;
 
     // 4. Create Report record in Database
     const report = await prisma.report.create({
