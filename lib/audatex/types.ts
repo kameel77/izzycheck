@@ -3,6 +3,7 @@ export interface VinValuationInput {
   dateOfFirstReg: string; // YYYY-MM-DD
   mileage?: number;
   valuationDate?: string; // YYYY-MM-DD
+  manufactureDate?: string; // YYYY-MM-DD (Dedykowane potwierdzone źródło daty produkcji)
   marketCode?: string;
   language?: string;
 }
@@ -24,6 +25,7 @@ export interface ValuationResult {
   technicalValueTh: number;
   mileageUsed: number;
   isAverageMileageUsed: boolean;
+  manufactureDate?: string;
   standardEquipment: EquipmentItem[];
   optionalEquipment: EquipmentItem[];
   rawXml?: string;

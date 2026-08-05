@@ -15,10 +15,10 @@
     "@prisma/client": "^6.2.1",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
-    "fast-xml-parser": "^4.5.1",
+    "fast-xml-parser": "^5.10.1",
     "jose": "^5.9.6",
     "lucide-react": "^0.474.0",
-    "next": "15.1.6",
+    "next": "^16.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^2.6.0"

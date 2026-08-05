@@ -4,39 +4,36 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  const operatorPassword = await bcrypt.hash("OperatorIzzy2026!", 10);
-  const adminPassword = await bcrypt.hash("AdminIzzy2026!", 10);
+  const adminEmail = process.env.INITIAL_ADMIN_EMAIL?.toLowerCase().trim();
+  const adminPassword = process.env.INITIAL_ADMIN_PASSWORD;
 
-  const operator = await prisma.user.upsert({
-    where: { email: "operator@izzylease.pl" },
-    update: {},
-    create: {
-      email: "operator@izzylease.pl",
-      name: "Operator Izzy Lease",
-      passwordHash: operatorPassword,
-      role: "OPERATOR",
-    },
-  });
+  if (!adminEmail || !adminPassword) {
+    console.log("No INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD provided. Skipping admin seed.");
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(adminPassword, 10);
 
   const admin = await prisma.user.upsert({
-    where: { email: "admin@izzylease.pl" },
-    update: {},
+    where: { email: adminEmail },
+    update: {
+      passwordHash,
+      role: "ADMIN",
+    },
     create: {
-      email: "admin@izzylease.pl",
+      email: adminEmail,
       name: "Administrator Izzy Lease",
-      passwordHash: adminPassword,
+      passwordHash,
       role: "ADMIN",
     },
   });
 
-  console.log("Seeded default users successfully:");
-  console.log("Operator:", operator.email);
-  console.log("Admin:", admin.email);
+  console.log(`Initial admin user successfully configured for: ${admin.email}`);
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error("Seeding failed:", e);
     process.exit(1);
   })
   .finally(async () => {

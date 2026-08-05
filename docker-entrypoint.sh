@@ -2,11 +2,11 @@
 set -e
 
 echo "==> Running Prisma Database Migrations..."
-npx prisma migrate deploy || echo "Warning: Prisma migration deploy skipped or failed."
+npx prisma migrate deploy
 
 if [ -n "$INITIAL_ADMIN_EMAIL" ] && [ -n "$INITIAL_ADMIN_PASSWORD" ]; then
-  echo "==> Seeding initial admin user..."
-  node scripts/seed.mjs || echo "Warning: User seeding skipped."
+  echo "==> Seeding initial admin user from environment variables..."
+  node scripts/seed.mjs
 fi
 
 echo "==> Starting IzzyCheck Node.js server..."

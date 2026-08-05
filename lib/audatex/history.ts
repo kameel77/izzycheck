@@ -215,19 +215,27 @@ export class AudatexHistoryAdapter {
 
         if (!res.ok) {
           const errText = await res.text();
-          throw new Error(`SOAP Fault CHE (${res.status}): ${errText}`);
+          const err = new Error(`SOAP Fault CHE (${res.status}): ${errText}`);
+          if (res.status < 502 || res.status > 504) {
+            throw err;
+          }
+          lastError = err;
+          if (attempt === this.maxRetries) throw err;
+        } else {
+          return await res.text();
         }
-
-        return await res.text();
       } catch (err: any) {
         clearTimeout(timer);
         lastError = err;
+        if (err.name === "AbortError") {
+          lastError = new Error(`Przekroczono limit czasu oczekiwania SOAP CHE (${this.timeoutMs}ms).`);
+        }
         if (attempt === this.maxRetries) break;
         await new Promise((r) => setTimeout(r, attempt * 1000));
       }
     }
 
-    throw new Error(`Usługa Audatex CHE SOAP nie odpowiedziała po ${this.maxRetries} próbach. Błąd: ${lastError?.message || lastError}`);
+    throw new Error(`Usługa Audatex CHE SOAP nie odpowiedziała: ${lastError?.message || lastError}`);
   }
 
   public translateMandateCode(code: string): string {

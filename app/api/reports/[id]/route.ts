@@ -25,7 +25,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       return NextResponse.json({ error: "Nie odnaleziono raportu w bazie danych." }, { status: 404 });
     }
 
-    // Role-based check: Non-admin users can view reports created by operators in their organization
+    // Strict RBAC Access Policy for Reports:
+    // ADMIN role: can view any report
+    // OPERATOR role: can view ONLY reports created by themselves (createdById === user.userId)
+    if (user.role !== "ADMIN" && report.createdById !== user.userId) {
+      return NextResponse.json(
+        { error: "Dostęp zabroniony. Nie posiadasz uprawnień do przeglądania tego raportu." },
+        { status: 403 }
+      );
+    }
+
     return NextResponse.json({ success: true, report });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Błąd pobierania raportu z bazy." }, { status: 500 });

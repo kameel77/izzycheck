@@ -17,7 +17,6 @@ export class AudatexValuationAdapter {
   private maxRetries: number;
 
   constructor() {
-    // Mock mode is enabled ONLY if explicitly set to "true"
     this.isMockMode = process.env.AUDATEX_MOCK_MODE === "true";
     this.timeoutMs = parseInt(process.env.AUDATEX_TIMEOUT_MS || "15000", 10);
     this.maxRetries = parseInt(process.env.AUDATEX_MAX_RETRIES || "2", 10);
@@ -38,7 +37,6 @@ export class AudatexValuationAdapter {
     const marketCode = input.marketCode || process.env.AUDATEX_MARKET_CODE || "PL";
     const language = input.language || process.env.AUDATEX_LANGUAGE || "PL";
 
-    // Live SOAP Calls with timeout & retry
     const carVinResult = await this.getCarByVinWs(input, marketCode, language);
     const evaluationResult = await this.evaluateCarFull(input, carVinResult.ibsCode, carVinResult.equipments, carVinResult.packets, language);
     const classificationResult = await this.getClassificationByIBSCode(input, carVinResult.ibsCode, marketCode, language);
@@ -147,8 +145,7 @@ export class AudatexValuationAdapter {
 
   private async getClassificationByIBSCode(input: VinValuationInput, ibsCode: string, marketCode: string, language: string) {
     const endpoint = process.env.AUDATEX_VEHICLE_DATA_ENDPOINT || "https://te5wseu.taxexpert.cz/TE5_VehicleData.asmx";
-    
-    // Separation: Use explicit manufactureDate if supplied, otherwise do not send unconfirmed production date
+
     let monthXml = "";
     let yearXml = "";
     if (input.manufactureDate && /^\d{4}-\d{2}/.test(input.manufactureDate)) {
@@ -237,22 +234,32 @@ export class AudatexValuationAdapter {
 
         clearTimeout(timer);
 
+        // Do NOT retry client errors (4xx) or SOAP Faults (500)
         if (!res.ok) {
           const errText = await res.text();
-          throw new Error(`SOAP Fault (${res.status}): ${errText}`);
+          const err = new Error(`SOAP Fault (${res.status}): ${errText}`);
+          // If status is 4xx or 500 (SOAP Fault), throw immediately without retrying
+          if (res.status < 502 || res.status > 504) {
+            throw err;
+          }
+          lastError = err;
+          if (attempt === this.maxRetries) throw err;
+        } else {
+          return await res.text();
         }
-
-        return await res.text();
       } catch (err: any) {
         clearTimeout(timer);
         lastError = err;
+        // Do NOT retry aborts/timeouts if maxRetries reached or if non-transient error
+        if (err.name === "AbortError") {
+          lastError = new Error(`Przekroczono limit czasu oczekiwania SOAP (${this.timeoutMs}ms).`);
+        }
         if (attempt === this.maxRetries) break;
-        // Exponential backoff
         await new Promise((r) => setTimeout(r, attempt * 1000));
       }
     }
 
-    throw new Error(`Usługa AudaValuation SOAP nie odpowiedziała po ${this.maxRetries} próbach. Błąd: ${lastError?.message || lastError}`);
+    throw new Error(`Usługa AudaValuation SOAP nie odpowiedziała: ${lastError?.message || lastError}`);
   }
 
   private extractStringArray(node: any): string[] {

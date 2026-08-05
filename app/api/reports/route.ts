@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { AudatexValuationAdapter } from "@/lib/audatex/valuation";
 import { AudatexHistoryAdapter } from "@/lib/audatex/history";
 import { prisma } from "@/lib/db";
+import { isRateLimited } from "@/lib/rate-limit";
 
 const valuationAdapter = new AudatexValuationAdapter();
 const historyAdapter = new AudatexHistoryAdapter();
@@ -12,6 +13,15 @@ export async function POST(req: Request) {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Brak autoryzacji. Zaloguj się ponownie." }, { status: 401 });
+    }
+
+    // Rate Limit: max 10 report creations per minute per user
+    const rateCheck = isRateLimited("reports_create", user.userId, 10, 60000);
+    if (rateCheck.limited) {
+      return NextResponse.json(
+        { error: `Zbyt wiele zapytań o raporty. Odczekaj ${Math.ceil(rateCheck.resetMs / 1000)} sekund przed kolejnym zapytaniem.` },
+        { status: 429 }
+      );
     }
 
     const body = await req.json();
@@ -49,11 +59,32 @@ export async function POST(req: Request) {
       );
     }
 
+    // Idempotency / Deduplication check: prevent duplicate paid SOAP calls on double clicks within 30 seconds
+    const thirtySecondsAgo = new Date(Date.now() - 30000);
+    const existingRecentReport = await prisma.report.findFirst({
+      where: {
+        vin,
+        createdById: user.userId,
+        createdAt: { gte: thirtySecondsAgo },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (existingRecentReport) {
+      return NextResponse.json({
+        success: true,
+        reportId: existingRecentReport.id,
+        vin: existingRecentReport.vin,
+        status: existingRecentReport.status,
+        isDuplicateDeduplicated: true,
+      });
+    }
+
     const mileageNum = mileage ? parseInt(String(mileage), 10) : undefined;
     const todayStr = new Date().toISOString().split("T")[0];
     const valDate = valuationDate || todayStr;
 
-    // 4. Create Report record in Database (Throw HTTP 500 if DB is down)
+    // 4. Create Report record in Database
     const report = await prisma.report.create({
       data: {
         vin,

@@ -12,8 +12,19 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const searchVin = searchParams.get("vin")?.trim().toUpperCase();
 
+    // Strict RBAC: Operators see ONLY their own reports; Admin sees all
+    const whereClause: any = {};
+
+    if (user.role !== "ADMIN") {
+      whereClause.createdById = user.userId;
+    }
+
+    if (searchVin) {
+      whereClause.vin = { contains: searchVin };
+    }
+
     const reports = await prisma.report.findMany({
-      where: searchVin ? { vin: { contains: searchVin } } : undefined,
+      where: whereClause,
       orderBy: { createdAt: "desc" },
       take: 50,
       include: {
