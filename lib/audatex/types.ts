@@ -1,3 +1,11 @@
+export class NonRetryableError extends Error {
+  public isNonRetryable = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "NonRetryableError";
+  }
+}
+
 export interface VinValuationInput {
   vin: string;
   dateOfFirstReg: string; // YYYY-MM-DD

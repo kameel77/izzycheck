@@ -1,5 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
-import { VinValuationInput, ValuationResult, EquipmentItem } from "./types.ts";
+import { VinValuationInput, ValuationResult, EquipmentItem, NonRetryableError } from "./types.ts";
 import {
   AUDAVIN_GET_CAR_BY_VIN_RESPONSE,
   AUDAVALUATION_EVALUATE_CAR_RESPONSE,
@@ -80,7 +80,7 @@ export class AudatexValuationAdapter {
     const resultNode = parsed["soap:Envelope"]?.["soap:Body"]?.["GetCarByVinWsResponse"]?.["GetCarByVinWsResult"];
 
     if (!resultNode || !resultNode["IbsCode"]) {
-      throw new Error("Identyfikacja AUDAVIN nie zwróciła IBSCode dla podanego VIN.");
+      throw new NonRetryableError("Identyfikacja AUDAVIN nie zwróciła IBSCode dla podanego VIN.");
     }
 
     const eqCodes = this.extractStringArray(resultNode["AdditionalEquipmentsCodes"]);
@@ -214,7 +214,7 @@ export class AudatexValuationAdapter {
     return { make, model, variant, standardEquipment, optionalEquipment };
   }
 
-  private async postSoapWithRetry(url: string, body: string, soapAction: string): Promise<string> {
+  public async postSoapWithRetry(url: string, body: string, soapAction: string): Promise<string> {
     let lastError: any = null;
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
@@ -234,23 +234,25 @@ export class AudatexValuationAdapter {
 
         clearTimeout(timer);
 
-        // Do NOT retry client errors (4xx) or SOAP Faults (500)
         if (!res.ok) {
           const errText = await res.text();
-          const err = new Error(`SOAP Fault (${res.status}): ${errText}`);
-          // If status is 4xx or 500 (SOAP Fault), throw immediately without retrying
+          // Client errors (4xx) and SOAP Faults (500) are NON-RETRYABLE!
+          const nonRetryable = new NonRetryableError(`SOAP Fault (${res.status}): ${errText}`);
           if (res.status < 502 || res.status > 504) {
-            throw err;
+            throw nonRetryable;
           }
-          lastError = err;
-          if (attempt === this.maxRetries) throw err;
+          lastError = nonRetryable;
         } else {
           return await res.text();
         }
       } catch (err: any) {
         clearTimeout(timer);
+        // NonRetryableError immediately re-throws without retrying!
+        if (err instanceof NonRetryableError || err.isNonRetryable) {
+          throw err;
+        }
+
         lastError = err;
-        // Do NOT retry aborts/timeouts if maxRetries reached or if non-transient error
         if (err.name === "AbortError") {
           lastError = new Error(`Przekroczono limit czasu oczekiwania SOAP (${this.timeoutMs}ms).`);
         }
@@ -259,7 +261,7 @@ export class AudatexValuationAdapter {
       }
     }
 
-    throw new Error(`Usługa AudaValuation SOAP nie odpowiedziała: ${lastError?.message || lastError}`);
+    throw lastError || new Error(`Usługa AudaValuation SOAP nie odpowiedziała.`);
   }
 
   private extractStringArray(node: any): string[] {

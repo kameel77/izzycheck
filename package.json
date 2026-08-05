@@ -9,7 +9,7 @@
     "lint": "next lint",
     "db:push": "prisma db push",
     "db:seed": "node scripts/seed.mjs",
-    "test": "node --import tsx/esm --test lib/audatex/tests/parser.test.ts"
+    "test": "node --import tsx/esm --test lib/audatex/tests/*.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",

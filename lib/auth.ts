@@ -5,11 +5,7 @@ import { cookies } from "next/headers";
 function getJwtSecret(): Uint8Array {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error("KRYTYCZNY BŁĄD KONFIGURACJI: Zmienna JWT_SECRET nie została ustawiona w środowisku produkcyjnym.");
-    }
-    // Only in local development fallback
-    return new TextEncoder().encode("izzycheck-dev-secret-only-for-local-testing");
+    throw new Error("KRYTYCZNY BŁĄD KONFIGURACJI: Zmienna środowiskowa JWT_SECRET nie została skonfigurowana.");
   }
   return new TextEncoder().encode(secret);
 }

@@ -1,5 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
-import { ClaimCheckInput, ClaimCheckResult, ClaimDetailsResult, DamageClaimDetail } from "./types.ts";
+import { ClaimCheckInput, ClaimCheckResult, ClaimDetailsResult, DamageClaimDetail, NonRetryableError } from "./types.ts";
 import {
   CHE_HAS_HISTORY_POSITIVE_RESPONSE,
   CHE_HAS_HISTORY_NEGATIVE_RESPONSE,
@@ -107,7 +107,7 @@ export class AudatexHistoryAdapter {
     const returnVal = outerObj["SOAP-ENV:Envelope"]?.["SOAP-ENV:Body"]?.["ns2:hasHistoryResponse"]?.["ns2:hasHistoryReturn"];
 
     if (!returnVal) {
-      throw new Error("Brak odpowiedzi hasHistoryReturn w komunikacie SOAP CHE.");
+      throw new NonRetryableError("Brak odpowiedzi hasHistoryReturn w komunikacie SOAP CHE.");
     }
 
     const innerXml = typeof returnVal === "string" ? returnVal : String(returnVal);
@@ -115,7 +115,7 @@ export class AudatexHistoryAdapter {
     const rootNode = innerObj["claim-history"];
 
     if (!rootNode) {
-      throw new Error("Wewnętrzny XML CDATA nie zawiera elementu claim-history.");
+      throw new NonRetryableError("Wewnętrzny XML CDATA nie zawiera elementu claim-history.");
     }
 
     const hasHistory = String(rootNode["result"]) === "true";
@@ -137,7 +137,7 @@ export class AudatexHistoryAdapter {
     const returnVal = outerObj["SOAP-ENV:Envelope"]?.["SOAP-ENV:Body"]?.["ns2:getDetailsResponse"]?.["ns2:getDetailsReturn"];
 
     if (!returnVal) {
-      throw new Error("Brak odpowiedzi getDetailsReturn w komunikacie SOAP CHE.");
+      throw new NonRetryableError("Brak odpowiedzi getDetailsReturn w komunikacie SOAP CHE.");
     }
 
     const innerXml = typeof returnVal === "string" ? returnVal : String(returnVal);
@@ -194,7 +194,7 @@ export class AudatexHistoryAdapter {
     return { claims };
   }
 
-  private async postSoapWithRetry(url: string, body: string): Promise<string> {
+  public async postSoapWithRetry(url: string, body: string): Promise<string> {
     let lastError: any = null;
 
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
@@ -215,17 +215,20 @@ export class AudatexHistoryAdapter {
 
         if (!res.ok) {
           const errText = await res.text();
-          const err = new Error(`SOAP Fault CHE (${res.status}): ${errText}`);
+          const nonRetryable = new NonRetryableError(`SOAP Fault CHE (${res.status}): ${errText}`);
           if (res.status < 502 || res.status > 504) {
-            throw err;
+            throw nonRetryable;
           }
-          lastError = err;
-          if (attempt === this.maxRetries) throw err;
+          lastError = nonRetryable;
         } else {
           return await res.text();
         }
       } catch (err: any) {
         clearTimeout(timer);
+        if (err instanceof NonRetryableError || err.isNonRetryable) {
+          throw err;
+        }
+
         lastError = err;
         if (err.name === "AbortError") {
           lastError = new Error(`Przekroczono limit czasu oczekiwania SOAP CHE (${this.timeoutMs}ms).`);
@@ -235,7 +238,7 @@ export class AudatexHistoryAdapter {
       }
     }
 
-    throw new Error(`Usługa Audatex CHE SOAP nie odpowiedziała: ${lastError?.message || lastError}`);
+    throw lastError || new Error(`Usługa Audatex CHE SOAP nie odpowiedziała.`);
   }
 
   public translateMandateCode(code: string): string {

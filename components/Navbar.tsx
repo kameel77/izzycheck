@@ -9,7 +9,7 @@ export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const isMockEnv = process.env.NEXT_PUBLIC_AUDATEX_MOCK_MODE === "true";
+  const [isMockEnv, setIsMockEnv] = useState<boolean>(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -17,6 +17,15 @@ export function Navbar() {
       .then((data) => {
         if (data.authenticated) {
           setCurrentUser(data.user);
+        }
+      })
+      .catch(() => {});
+
+    fetch("/api/config")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && typeof data.isMockMode === "boolean") {
+          setIsMockEnv(data.isMockMode);
         }
       })
       .catch(() => {});
@@ -112,7 +121,6 @@ export function Navbar() {
               <div className="flex items-center gap-3 pl-4 border-l border-slate-800">
                 <div className="hidden sm:block text-right">
                   <p className="text-xs font-semibold text-white">{currentUser.name}</p>
-
                   <p className="text-[10px] text-slate-400">
                     {currentUser.email} ({currentUser.role})
                   </p>

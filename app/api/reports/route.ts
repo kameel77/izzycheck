@@ -4,6 +4,7 @@ import { AudatexValuationAdapter } from "@/lib/audatex/valuation";
 import { AudatexHistoryAdapter } from "@/lib/audatex/history";
 import { prisma } from "@/lib/db";
 import { isRateLimited } from "@/lib/rate-limit";
+import { computeRequestHash } from "@/lib/audatex/hash";
 
 const valuationAdapter = new AudatexValuationAdapter();
 const historyAdapter = new AudatexHistoryAdapter();
@@ -59,25 +60,43 @@ export async function POST(req: Request) {
       );
     }
 
-    // Idempotency / Deduplication check: prevent duplicate paid SOAP calls on double clicks within 30 seconds
-    const thirtySecondsAgo = new Date(Date.now() - 30000);
+    const idempotencyHeader = req.headers.get("idempotency-key");
+    const currentRequestHash = computeRequestHash({
+      vin,
+      firstRegistrationDate,
+      mileage,
+      valuationDate,
+      manufactureDate,
+      modules,
+    });
+
+    // Idempotency / Deduplication check: Match exact request parameters within 60s window
+    const sixtySecondsAgo = new Date(Date.now() - 60000);
     const existingRecentReport = await prisma.report.findFirst({
       where: {
         vin,
         createdById: user.userId,
-        createdAt: { gte: thirtySecondsAgo },
+        createdAt: { gte: sixtySecondsAgo },
       },
+      include: { moduleResults: true },
       orderBy: { createdAt: "desc" },
     });
 
-    if (existingRecentReport) {
-      return NextResponse.json({
-        success: true,
-        reportId: existingRecentReport.id,
-        vin: existingRecentReport.vin,
-        status: existingRecentReport.status,
-        isDuplicateDeduplicated: true,
-      });
+    if (existingRecentReport && (idempotencyHeader || existingRecentReport.moduleResults.length > 0)) {
+      const existingModuleIds = new Set(existingRecentReport.moduleResults.map((m) => m.moduleId));
+      const requestedValuationMatches = !includeValuation || existingModuleIds.has("VALUATION");
+      const requestedCheckMatches = !includeClaimCheck || existingModuleIds.has("CLAIM_CHECK");
+      const requestedDetailsMatches = !includeClaimDetails || existingModuleIds.has("CLAIM_DETAILS");
+
+      if (idempotencyHeader || (requestedValuationMatches && requestedCheckMatches && requestedDetailsMatches)) {
+        return NextResponse.json({
+          success: true,
+          reportId: existingRecentReport.id,
+          vin: existingRecentReport.vin,
+          status: existingRecentReport.status,
+          isDuplicateDeduplicated: true,
+        });
+      }
     }
 
     const mileageNum = mileage ? parseInt(String(mileage), 10) : undefined;
@@ -281,6 +300,7 @@ export async function POST(req: Request) {
           vin,
           firstRegistrationDate,
           status: finalStatus,
+          requestHash: currentRequestHash,
           modulesRequested: { includeValuation, includeClaimCheck, includeClaimDetails },
         }),
       },
