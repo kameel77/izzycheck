@@ -6,12 +6,12 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: always
-    ports:
-      - "3000:3000"
     environment:
       - NODE_ENV=production
       - DATABASE_URL=${DATABASE_URL}
       - JWT_SECRET=${JWT_SECRET}
+      - INITIAL_ADMIN_EMAIL=${INITIAL_ADMIN_EMAIL}
+      - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD}
       - AUDATEX_MOCK_MODE=${AUDATEX_MOCK_MODE:-false}
       - AUDATEX_VALUATION_ENDPOINT=${AUDATEX_VALUATION_ENDPOINT}
       - AUDATEX_VALUATION_SERVICE_ENDPOINT=${AUDATEX_VALUATION_SERVICE_ENDPOINT}
@@ -19,6 +19,8 @@ services:
       - AUDATEX_CHE_ENDPOINT=${AUDATEX_CHE_ENDPOINT}
       - AUDATEX_CHE_USERNAME=${AUDATEX_CHE_USERNAME}
       - AUDATEX_CHE_PASSWORD=${AUDATEX_CHE_PASSWORD}
+      - AUDATEX_CERTIFICATE_HASH=${AUDATEX_CERTIFICATE_HASH}
+      - AUDATEX_LICENCE_NUMBER=${AUDATEX_LICENCE_NUMBER}
       - AUDATEX_MARKET_CODE=${AUDATEX_MARKET_CODE:-PL}
       - AUDATEX_LANGUAGE=${AUDATEX_LANGUAGE:-PL}
     depends_on:
@@ -29,21 +31,37 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.izzycheck.rule=Host(`cool.izzycars.pl`)"
+      - "traefik.http.routers.izzycheck.entrypoints=https"
+      - "traefik.http.routers.izzycheck.tls=true"
+      - "traefik.http.routers.izzycheck.tls.certresolver=letsencrypt"
+      - "traefik.http.services.izzycheck.loadbalancer.server.port=3000"
+    networks:
+      - default
+      - coolify
 
   postgres:
     image: postgres:16-alpine
     restart: always
     environment:
-      POSTGRES_USER: izzycheck
+      POSTGRES_USER: ${POSTGRES_USER:-izzycheck}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: izzycheck
+      POSTGRES_DB: ${POSTGRES_DB:-izzycheck}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U izzycheck -d izzycheck"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-izzycheck} -d ${POSTGRES_DB:-izzycheck}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - default
 
 volumes:
   postgres_data:
+
+networks:
+  coolify:
+    external: true
