@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://izzycheck:izzycheck_pass_2026@postgres:5432/izzycheck?schema=public
+      - JWT_SECRET=izzycheck-coolify-secret-key-change-in-production
+      - AUDATEX_MOCK_MODE=true
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: izzycheck
+      POSTGRES_PASSWORD: izzycheck_pass_2026
+      POSTGRES_DB: izzycheck
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:

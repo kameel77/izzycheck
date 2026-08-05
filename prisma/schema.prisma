@@ -1,0 +1,135 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  OPERATOR
+  ADMIN
+}
+
+enum ReportModuleId {
+  VALUATION
+  CLAIM_CHECK
+  CLAIM_DETAILS
+}
+
+enum ModuleStatus {
+  NOT_REQUESTED
+  PENDING
+  SUCCEEDED
+  NO_DATA
+  FAILED
+}
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  name         String
+  passwordHash String
+  role         Role         @default(OPERATOR)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  reports      Report[]
+  auditEvents  AuditEvent[]
+
+  @@map("users")
+}
+
+model Report {
+  id                    String               @id @default(uuid())
+  vin                   String
+  firstRegistrationDate String
+  mileage               Int?
+  valuationDate         String
+  status                String               @default("COMPLETED")
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  createdById           String
+  createdBy             User                 @relation(fields: [createdById], references: [id])
+  moduleResults         ReportModuleResult[]
+  vehicleSnapshot       VehicleSnapshot?
+  damageClaims          DamageClaim[]
+
+  @@index([vin])
+  @@index([createdById])
+  @@map("reports")
+}
+
+model ReportModuleResult {
+  id               String         @id @default(uuid())
+  reportId         String
+  report           Report         @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  moduleId         ReportModuleId
+  status           ModuleStatus   @default(PENDING)
+  rawXml           String?
+  responseMetadata String?
+  errorMessage     String?
+  createdAt        DateTime       @default(now())
+
+  @@unique([reportId, moduleId])
+  @@map("report_module_results")
+}
+
+model VehicleSnapshot {
+  id                   String   @id @default(uuid())
+  reportId             String   @unique
+  report               Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  ibsCode              String?
+  make                 String?
+  model                String?
+  variant              String?
+  newPriceCv           Float?
+  marketPriceCob       Float?
+  technicalValueTh     Float?
+  mileageUsed          Int?
+  isAverageMileageUsed Boolean  @default(false)
+  standardEquipment    String?  // JSON string
+  optionalEquipment    String?  // JSON string
+  createdAt            DateTime @default(now())
+
+  @@map("vehicle_snapshots")
+}
+
+model DamageClaim {
+  id                 String   @id @default(uuid())
+  reportId           String
+  report             Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  claimId            String
+  accidentDate       String?
+  claimDate          String?
+  country            String?
+  makeModel          String?
+  mileage            Int?
+  damageValue        Float?
+  currency           String?
+  isTotalLoss        Boolean  @default(false)
+  mandateCode        String?
+  mandateDescription String?
+  damageZones        String?  // JSON string of affected 28 body zones & glass zones
+  significantParts   String?  // JSON string of part group IDs (001-015)
+  createdAt          DateTime @default(now())
+
+  @@index([reportId])
+  @@map("damage_claims")
+}
+
+model AuditEvent {
+  id           String   @id @default(uuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userEmail    String
+  action       String
+  resource     String
+  metadataJson String?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@map("audit_events")
+}
