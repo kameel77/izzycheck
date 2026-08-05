@@ -59,7 +59,7 @@ model Report {
 
   @@index([vin])
   @@index([createdById])
-  @@index([createdById, idempotencyKey])
+  @@unique([createdById, idempotencyKey])
   @@index([createdById, requestHash])
   @@map("reports")
 }

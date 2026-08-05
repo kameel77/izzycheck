@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { createHash } from "crypto";
 import { ClaimCheckInput, ClaimCheckResult, ClaimDetailsResult, DamageClaimDetail, NonRetryableError } from "./types.ts";
 import {
   CHE_HAS_HISTORY_POSITIVE_RESPONSE,
@@ -215,10 +216,10 @@ export class AudatexHistoryAdapter {
 
         if (!res.ok) {
           const errText = await res.text();
-          // Log raw technical details on server side ONLY
-          console.error(`[AUDATEX_CHE_SOAP_ERROR ${res.status}]:`, errText);
+          // SECURITY COMPLIANCE: Log ONLY operational metadata + payload hash. NEVER log raw XML/HTML body or VIN!
+          const responseHash = createHash("sha256").update(errText).digest("hex").substring(0, 12);
+          console.error(`[AUDATEX_CHE_ERROR] Service: Audatex CHE | HTTP Status: ${res.status} | ResponseHash: ${responseHash} | Attempt: ${attempt}`);
 
-          // Return sanitized user-safe error message to client without raw XML
           const sanitizedMessage = `AUDATEX_CHE_ERROR: Błąd serwera historii szkód Audatex (HTTP ${res.status}).`;
           const nonRetryable = new NonRetryableError(sanitizedMessage);
 

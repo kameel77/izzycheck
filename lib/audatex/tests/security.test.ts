@@ -31,7 +31,6 @@ describe("Production Security & Resilience Tests", () => {
       assert.strictEqual(err.isNonRetryable, true);
       assert.strictEqual(callCount, 1, "401 Unauthorized must NOT be retried");
 
-      // CRITICAL SECURITY ASSERTION: Confirm raw XML content is masked and NOT leaked in error.message!
       assert.strictEqual(err.message.includes("<soapenv:Envelope>"), false, "Raw XML response body MUST NOT be exposed in error.message");
       assert.strictEqual(err.message.includes("Access Denied XML Payload"), false, "Internal XML faultstring MUST NOT be exposed in error.message");
       assert.strictEqual(err.message.includes("AUDATEX_VALUATION_ERROR"), true, "Error message must contain clean sanitized error code");
@@ -67,7 +66,7 @@ describe("Production Security & Resilience Tests", () => {
     }
   });
 
-  test("Computes request hashes correctly for idempotency deduplication", () => {
+  test("Computes canonical request hashes correctly regardless of object key order", () => {
     const payload1 = {
       vin: "WBA3N51030KS15173",
       firstRegistrationDate: "2021-04-15",
@@ -76,12 +75,12 @@ describe("Production Security & Resilience Tests", () => {
       modules: { includeValuation: true, includeClaimCheck: true },
     };
 
-    const payload2 = {
-      vin: "WBA3N51030KS15173",
+    const payloadUnsortedKeys = {
+      vin: "wba-3n51030ks15173",
       firstRegistrationDate: "2021-04-15",
       mileage: 45200,
       valuationDate: "2026-08-05",
-      modules: { includeValuation: true, includeClaimCheck: true },
+      modules: { includeClaimCheck: true, includeValuation: true }, // Reversed key order!
     };
 
     const payloadDifferentModule = {
@@ -93,11 +92,11 @@ describe("Production Security & Resilience Tests", () => {
     };
 
     const hash1 = computeRequestHash(payload1);
-    const hash2 = computeRequestHash(payload2);
+    const hashUnsorted = computeRequestHash(payloadUnsortedKeys);
     const hashDiff = computeRequestHash(payloadDifferentModule);
 
-    assert.strictEqual(hash1, hash2, "Identical requests must yield identical hashes");
-    assert.notStrictEqual(hash1, hashDiff, "Different module selections MUST yield different hashes so they do not falsely deduplicate");
+    assert.strictEqual(hash1, hashUnsorted, "Canonical hashing MUST produce identical hashes for semantically identical payloads regardless of key ordering");
+    assert.notStrictEqual(hash1, hashDiff, "Different module selections MUST yield different hashes");
   });
 
   test("Negative claim check returns hasHistory: false for WVW vin", async () => {

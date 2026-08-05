@@ -5,6 +5,7 @@ import { AudatexHistoryAdapter } from "@/lib/audatex/history";
 import { prisma } from "@/lib/db";
 import { isRateLimited } from "@/lib/rate-limit";
 import { computeRequestHash } from "@/lib/audatex/hash";
+import { Prisma } from "@prisma/client";
 
 const valuationAdapter = new AudatexValuationAdapter();
 const historyAdapter = new AudatexHistoryAdapter();
@@ -76,7 +77,7 @@ export async function POST(req: Request) {
 
     // 4. Strictly checked Idempotency & Deduplication
     if (idempotencyHeader) {
-      // Direct Idempotency-Key lookup per user
+      // Atomic unique lookup per user + idempotency key
       const existingByKey = await prisma.report.findFirst({
         where: {
           createdById: user.userId,
@@ -94,7 +95,7 @@ export async function POST(req: Request) {
         });
       }
     } else {
-      // Request hash lookup per user within 60s window
+      // Short-window request hash lookup per user within 60s window
       const sixtySecondsAgo = new Date(Date.now() - 60000);
       const existingByHash = await prisma.report.findFirst({
         where: {
@@ -116,19 +117,43 @@ export async function POST(req: Request) {
       }
     }
 
-    // 5. Create Report record in Database with stored idempotencyKey & requestHash
-    const report = await prisma.report.create({
-      data: {
-        vin,
-        firstRegistrationDate,
-        mileage: mileageNum,
-        valuationDate: valDate,
-        createdById: user.userId,
-        idempotencyKey: idempotencyHeader || null,
-        requestHash: currentRequestHash,
-        status: "PROCESSING",
-      },
-    });
+    // 5. Create Report record in Database with atomic unique constraint protection
+    let report;
+    try {
+      report = await prisma.report.create({
+        data: {
+          vin,
+          firstRegistrationDate,
+          mileage: mileageNum,
+          valuationDate: valDate,
+          createdById: user.userId,
+          idempotencyKey: idempotencyHeader || null,
+          requestHash: currentRequestHash,
+          status: "PROCESSING",
+        },
+      });
+    } catch (err: any) {
+      // Race condition handling: Unique constraint violation (code P2002) on createdById + idempotencyKey
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" && idempotencyHeader) {
+        const winningReport = await prisma.report.findFirst({
+          where: {
+            createdById: user.userId,
+            idempotencyKey: idempotencyHeader,
+          },
+        });
+        if (winningReport) {
+          return NextResponse.json({
+            success: true,
+            reportId: winningReport.id,
+            vin: winningReport.vin,
+            status: winningReport.status,
+            isDuplicateDeduplicated: true,
+            raceConditionResolved: true,
+          });
+        }
+      }
+      throw err;
+    }
 
     let valuationResultData: any = null;
     let claimCheckResultData: any = null;

@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { createHash } from "crypto";
 import { VinValuationInput, ValuationResult, EquipmentItem, NonRetryableError } from "./types.ts";
 import {
   AUDAVIN_GET_CAR_BY_VIN_RESPONSE,
@@ -236,10 +237,10 @@ export class AudatexValuationAdapter {
 
         if (!res.ok) {
           const errText = await res.text();
-          // Log raw technical details on server side ONLY
-          console.error(`[AUDATEX_VALUATION_SOAP_ERROR ${res.status}]:`, errText);
+          // SECURITY COMPLIANCE: Log ONLY operational metadata + payload hash. NEVER log raw XML/HTML body or VIN!
+          const responseHash = createHash("sha256").update(errText).digest("hex").substring(0, 12);
+          console.error(`[AUDATEX_VALUATION_ERROR] Service: AudaValuation | Action: ${soapAction} | HTTP Status: ${res.status} | ResponseHash: ${responseHash} | Attempt: ${attempt}`);
 
-          // Return sanitized user-safe error message to client without raw XML
           const sanitizedMessage = `AUDATEX_VALUATION_ERROR: Błąd komunikacji z serwisem wycen Audatex (HTTP ${res.status}).`;
           const nonRetryable = new NonRetryableError(sanitizedMessage);
 
