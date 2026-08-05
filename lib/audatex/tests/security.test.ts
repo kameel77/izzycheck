@@ -30,7 +30,7 @@ describe("Production Security & Resilience Tests", () => {
       assert.strictEqual(err instanceof NonRetryableError, true);
       assert.strictEqual(err.isNonRetryable, true);
       assert.strictEqual(callCount, 1, "401 Unauthorized must NOT be retried");
-      
+
       // CRITICAL SECURITY ASSERTION: Confirm raw XML content is masked and NOT leaked in error.message!
       assert.strictEqual(err.message.includes("<soapenv:Envelope>"), false, "Raw XML response body MUST NOT be exposed in error.message");
       assert.strictEqual(err.message.includes("Access Denied XML Payload"), false, "Internal XML faultstring MUST NOT be exposed in error.message");
