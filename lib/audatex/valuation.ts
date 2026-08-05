@@ -80,7 +80,7 @@ export class AudatexValuationAdapter {
     const resultNode = parsed["soap:Envelope"]?.["soap:Body"]?.["GetCarByVinWsResponse"]?.["GetCarByVinWsResult"];
 
     if (!resultNode || !resultNode["IbsCode"]) {
-      throw new NonRetryableError("Identyfikacja AUDAVIN nie zwróciła IBSCode dla podanego VIN.");
+      throw new NonRetryableError("AUDATEX_VALUATION_ERROR: Identyfikacja AUDAVIN nie zwróciła IBSCode dla podanego VIN.");
     }
 
     const eqCodes = this.extractStringArray(resultNode["AdditionalEquipmentsCodes"]);
@@ -236,8 +236,13 @@ export class AudatexValuationAdapter {
 
         if (!res.ok) {
           const errText = await res.text();
-          // Client errors (4xx) and SOAP Faults (500) are NON-RETRYABLE!
-          const nonRetryable = new NonRetryableError(`SOAP Fault (${res.status}): ${errText}`);
+          // Log raw technical details on server side ONLY
+          console.error(`[AUDATEX_VALUATION_SOAP_ERROR ${res.status}]:`, errText);
+
+          // Return sanitized user-safe error message to client without raw XML
+          const sanitizedMessage = `AUDATEX_VALUATION_ERROR: Błąd komunikacji z serwisem wycen Audatex (HTTP ${res.status}).`;
+          const nonRetryable = new NonRetryableError(sanitizedMessage);
+
           if (res.status < 502 || res.status > 504) {
             throw nonRetryable;
           }
@@ -247,21 +252,20 @@ export class AudatexValuationAdapter {
         }
       } catch (err: any) {
         clearTimeout(timer);
-        // NonRetryableError immediately re-throws without retrying!
         if (err instanceof NonRetryableError || err.isNonRetryable) {
           throw err;
         }
 
         lastError = err;
         if (err.name === "AbortError") {
-          lastError = new Error(`Przekroczono limit czasu oczekiwania SOAP (${this.timeoutMs}ms).`);
+          lastError = new Error(`AUDATEX_TIMEOUT_ERROR: Przekroczono limit czasu oczekiwania SOAP (${this.timeoutMs}ms).`);
         }
         if (attempt === this.maxRetries) break;
         await new Promise((r) => setTimeout(r, attempt * 1000));
       }
     }
 
-    throw lastError || new Error(`Usługa AudaValuation SOAP nie odpowiedziała.`);
+    throw lastError || new Error(`AUDATEX_VALUATION_ERROR: Usługa AudaValuation SOAP nie odpowiedziała.`);
   }
 
   private extractStringArray(node: any): string[] {

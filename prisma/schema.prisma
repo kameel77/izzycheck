@@ -47,6 +47,8 @@ model Report {
   mileage               Int?
   valuationDate         String
   status                String               @default("COMPLETED") // COMPLETED | PARTIALLY_FAILED | FAILED
+  idempotencyKey        String?
+  requestHash           String?
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   createdById           String
@@ -57,6 +59,8 @@ model Report {
 
   @@index([vin])
   @@index([createdById])
+  @@index([createdById, idempotencyKey])
+  @@index([createdById, requestHash])
   @@map("reports")
 }
 
@@ -65,9 +69,9 @@ model ReportModuleResult {
   reportId         String
   report           Report         @relation(fields: [reportId], references: [id], onDelete: Cascade)
   moduleId         ReportModuleId
-  status           ModuleStatus   @default(PENDING)
-  responseMetadata String?
-  errorMessage     String?
+  status           ModuleStatus
+  responseMetadata String?        @db.Text
+  errorMessage     String?        @db.Text
   createdAt        DateTime       @default(now())
 
   @@unique([reportId, moduleId])
@@ -78,18 +82,18 @@ model VehicleSnapshot {
   id                   String   @id @default(uuid())
   reportId             String   @unique
   report               Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  ibsCode              String?
-  make                 String?
-  model                String?
-  variant              String?
-  newPriceCv           Float?
-  marketPriceCob       Float?
-  technicalValueTh     Float?
-  mileageUsed          Int?
-  isAverageMileageUsed Boolean  @default(false)
-  manufactureDate      String?  // Dedykowane potwierdzone źródło daty produkcji (lub null)
-  standardEquipment    String?  // JSON string
-  optionalEquipment    String?  // JSON string
+  ibsCode              String
+  make                 String
+  model                String
+  variant              String
+  newPriceCv           Float
+  marketPriceCob       Float
+  technicalValueTh     Float
+  mileageUsed          Int
+  isAverageMileageUsed Boolean
+  manufactureDate      String?
+  standardEquipment    String   @db.Text
+  optionalEquipment    String   @db.Text
   createdAt            DateTime @default(now())
 
   @@map("vehicle_snapshots")
@@ -106,27 +110,25 @@ model DamageClaim {
   makeModel          String?
   mileage            Int?
   damageValue        Float?
-  currency           String?
+  currency           String?  @default("PLN")
   isTotalLoss        Boolean  @default(false)
   mandateCode        String?
   mandateDescription String?
-  damageZones        String?  // JSON string 28 stref
-  significantParts   String?  // JSON string grup części (001-015)
+  damageZones        String   @db.Text
+  significantParts   String   @db.Text
   createdAt          DateTime @default(now())
 
-  @@index([reportId])
   @@map("damage_claims")
 }
 
 model AuditEvent {
   id           String   @id @default(uuid())
-  userId       String?
-  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
   userEmail    String
   action       String
   resource     String
-  metadataJson String?
-  ipAddress    String?
+  metadataJson String?  @db.Text
   createdAt    DateTime @default(now())
 
   @@index([userId])

@@ -12,7 +12,6 @@ describe("Production Security & Resilience Tests", () => {
   test("NonRetryableError is immediately re-thrown without retrying", async () => {
     const valuationAdapter = new AudatexValuationAdapter();
 
-    // Mock fetch that returns a 401 Unauthorized
     let callCount = 0;
     const originalFetch = global.fetch;
     global.fetch = (async () => {
@@ -20,7 +19,7 @@ describe("Production Security & Resilience Tests", () => {
       return {
         ok: false,
         status: 401,
-        text: async () => "<SOAP-ENV:Envelope><faultstring>Not Authorized</faultstring></SOAP-ENV:Envelope>",
+        text: async () => "<soapenv:Envelope><soapenv:Body><soapenv:Fault><faultstring>Access Denied XML Payload</faultstring></soapenv:Fault></soapenv:Body></soapenv:Envelope>",
       } as Response;
     }) as typeof fetch;
 
@@ -30,8 +29,39 @@ describe("Production Security & Resilience Tests", () => {
     } catch (err: any) {
       assert.strictEqual(err instanceof NonRetryableError, true);
       assert.strictEqual(err.isNonRetryable, true);
-      // CALL COUNT MUST BE DEDICATED TO 1 (NO RETRY FOR 401!)
       assert.strictEqual(callCount, 1, "401 Unauthorized must NOT be retried");
+      
+      // CRITICAL SECURITY ASSERTION: Confirm raw XML content is masked and NOT leaked in error.message!
+      assert.strictEqual(err.message.includes("<soapenv:Envelope>"), false, "Raw XML response body MUST NOT be exposed in error.message");
+      assert.strictEqual(err.message.includes("Access Denied XML Payload"), false, "Internal XML faultstring MUST NOT be exposed in error.message");
+      assert.strictEqual(err.message.includes("AUDATEX_VALUATION_ERROR"), true, "Error message must contain clean sanitized error code");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  test("Sanitizes Audatex CHE SOAP error messages", async () => {
+    const historyAdapter = new AudatexHistoryAdapter();
+
+    let callCount = 0;
+    const originalFetch = global.fetch;
+    global.fetch = (async () => {
+      callCount++;
+      return {
+        ok: false,
+        status: 500,
+        text: async () => "<ns2:Fault><ns2:message>Secret Database Credentials Exception</ns2:message></ns2:Fault>",
+      } as Response;
+    }) as typeof fetch;
+
+    try {
+      await historyAdapter.postSoapWithRetry("https://example.com/che", "<xml/>");
+      assert.fail("Should have thrown NonRetryableError");
+    } catch (err: any) {
+      assert.strictEqual(err instanceof NonRetryableError, true);
+      assert.strictEqual(callCount, 1, "500 SOAP Fault must NOT be retried");
+      assert.strictEqual(err.message.includes("Secret Database Credentials Exception"), false, "Internal XML must be masked");
+      assert.strictEqual(err.message.includes("AUDATEX_CHE_ERROR"), true, "Error message must contain clean sanitized code");
     } finally {
       global.fetch = originalFetch;
     }
@@ -59,7 +89,7 @@ describe("Production Security & Resilience Tests", () => {
       firstRegistrationDate: "2021-04-15",
       mileage: 45200,
       valuationDate: "2026-08-05",
-      modules: { includeValuation: true, includeClaimCheck: true, includeClaimDetails: true }, // Added details!
+      modules: { includeValuation: true, includeClaimCheck: true, includeClaimDetails: true },
     };
 
     const hash1 = computeRequestHash(payload1);

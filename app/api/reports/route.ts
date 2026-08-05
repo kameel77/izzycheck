@@ -64,7 +64,7 @@ export async function POST(req: Request) {
     const todayStr = new Date().toISOString().split("T")[0];
     const valDate = valuationDate || todayStr;
 
-    const idempotencyHeader = req.headers.get("idempotency-key");
+    const idempotencyHeader = req.headers.get("idempotency-key") || req.headers.get("x-idempotency-key");
     const currentRequestHash = computeRequestHash({
       vin,
       firstRegistrationDate,
@@ -74,40 +74,49 @@ export async function POST(req: Request) {
       modules,
     });
 
-    // Idempotency / Deduplication check: Match exact request parameters (dates, mileage, modules) within 60s window
-    const sixtySecondsAgo = new Date(Date.now() - 60000);
-    const existingRecentReport = await prisma.report.findFirst({
-      where: {
-        vin,
-        createdById: user.userId,
-        firstRegistrationDate,
-        createdAt: { gte: sixtySecondsAgo },
-      },
-      include: { moduleResults: true },
-      orderBy: { createdAt: "desc" },
-    });
-
-    if (existingRecentReport && (idempotencyHeader || existingRecentReport.moduleResults.length > 0)) {
-      const mileageMatches = (mileageNum === undefined && existingRecentReport.mileage === null) || existingRecentReport.mileage === mileageNum;
-      const valDateMatches = existingRecentReport.valuationDate === valDate;
-
-      const existingModuleIds = new Set(existingRecentReport.moduleResults.map((m) => m.moduleId));
-      const requestedValuationMatches = !includeValuation || existingModuleIds.has("VALUATION");
-      const requestedCheckMatches = !includeClaimCheck || existingModuleIds.has("CLAIM_CHECK");
-      const requestedDetailsMatches = !includeClaimDetails || existingModuleIds.has("CLAIM_DETAILS");
-
-      if (idempotencyHeader || (mileageMatches && valDateMatches && requestedValuationMatches && requestedCheckMatches && requestedDetailsMatches)) {
+    // 4. Strictly checked Idempotency & Deduplication
+    if (idempotencyHeader) {
+      // Direct Idempotency-Key lookup per user
+      const existingByKey = await prisma.report.findFirst({
+        where: {
+          createdById: user.userId,
+          idempotencyKey: idempotencyHeader,
+        },
+      });
+      if (existingByKey) {
         return NextResponse.json({
           success: true,
-          reportId: existingRecentReport.id,
-          vin: existingRecentReport.vin,
-          status: existingRecentReport.status,
+          reportId: existingByKey.id,
+          vin: existingByKey.vin,
+          status: existingByKey.status,
           isDuplicateDeduplicated: true,
+          idempotencyKeyMatched: true,
+        });
+      }
+    } else {
+      // Request hash lookup per user within 60s window
+      const sixtySecondsAgo = new Date(Date.now() - 60000);
+      const existingByHash = await prisma.report.findFirst({
+        where: {
+          createdById: user.userId,
+          requestHash: currentRequestHash,
+          createdAt: { gte: sixtySecondsAgo },
+        },
+      });
+
+      if (existingByHash) {
+        return NextResponse.json({
+          success: true,
+          reportId: existingByHash.id,
+          vin: existingByHash.vin,
+          status: existingByHash.status,
+          isDuplicateDeduplicated: true,
+          requestHashMatched: true,
         });
       }
     }
 
-    // 4. Create Report record in Database
+    // 5. Create Report record in Database with stored idempotencyKey & requestHash
     const report = await prisma.report.create({
       data: {
         vin,
@@ -115,6 +124,8 @@ export async function POST(req: Request) {
         mileage: mileageNum,
         valuationDate: valDate,
         createdById: user.userId,
+        idempotencyKey: idempotencyHeader || null,
+        requestHash: currentRequestHash,
         status: "PROCESSING",
       },
     });
@@ -172,7 +183,7 @@ export async function POST(req: Request) {
             reportId: report.id,
             moduleId: "VALUATION",
             status: "FAILED",
-            errorMessage: err.message || "Błąd wyceny AudaValuation.",
+            errorMessage: err.message || "AUDATEX_VALUATION_ERROR: Błąd modułu wyceny.",
           },
         });
       }
@@ -251,7 +262,7 @@ export async function POST(req: Request) {
                   reportId: report.id,
                   moduleId: "CLAIM_DETAILS",
                   status: "FAILED",
-                  errorMessage: err.message || "Błąd pobierania szczegółów szkód getDetails.",
+                  errorMessage: err.message || "AUDATEX_CHE_ERROR: Błąd pobierania szczegółów szkód getDetails.",
                 },
               });
             }
@@ -274,7 +285,7 @@ export async function POST(req: Request) {
             reportId: report.id,
             moduleId: "CLAIM_CHECK",
             status: "FAILED",
-            errorMessage: err.message || "Błąd kontroli historii szkód Audatex CHE.",
+            errorMessage: err.message || "AUDATEX_CHE_ERROR: Błąd kontroli historii szkód Audatex CHE.",
           },
         });
       }
@@ -304,6 +315,7 @@ export async function POST(req: Request) {
           vin,
           firstRegistrationDate,
           status: finalStatus,
+          idempotencyKey: idempotencyHeader || null,
           requestHash: currentRequestHash,
           modulesRequested: { includeValuation, includeClaimCheck, includeClaimDetails },
         }),
