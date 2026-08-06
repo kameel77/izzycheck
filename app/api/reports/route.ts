@@ -268,6 +268,7 @@ export async function POST(req: Request) {
                     mandateDescription: claim.mandateDescription,
                     damageZones: JSON.stringify(claim.affectedZones),
                     significantParts: JSON.stringify(claim.significantParts),
+                    damageAssessmentJson: claim.damageAssessment ? JSON.stringify(claim.damageAssessment) : null,
                   },
                 });
               }

@@ -6,13 +6,14 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "tsc --noEmit",
     "db:push": "prisma db push",
     "db:seed": "node scripts/seed.mjs",
-    "test": "node --import tsx/esm --test lib/audatex/tests/*.test.ts"
+    "test": "node --import tsx/esm --test lib/audatex/tests/*.test.ts lib/damage/tests/*.test.ts lib/pdf/tests/*.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",
+    "@react-pdf/renderer": "^4.5.1",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
     "fast-xml-parser": "^5.10.1",

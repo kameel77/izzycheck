@@ -1,6 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { createHash } from "crypto";
 import { ClaimCheckInput, ClaimCheckResult, ClaimDetailsResult, DamageClaimDetail, NonRetryableError } from "./types.ts";
+import { normalizeDamageAssessment } from "../damage/normalize-damage-assessment.ts";
 import {
   CHE_HAS_HISTORY_POSITIVE_RESPONSE,
   CHE_HAS_HISTORY_NEGATIVE_RESPONSE,
@@ -173,6 +174,38 @@ export class AudatexHistoryAdapter {
 
       const damageVal = parseFloat(assessment["damage-value"] || 0);
 
+      // Extract raw flags and codes for damageAssessment
+      const generalFlags: Record<string, boolean> = {};
+      const genNode = damage["general"];
+      if (genNode && typeof genNode === "object") {
+        for (const [k, v] of Object.entries(genNode)) {
+          if (String(v) === "Y" || String(v) === "true") generalFlags[k] = true;
+        }
+      }
+
+      const glassFlags: Record<string, boolean> = {};
+      const glassNode = damage["glass"];
+      if (glassNode && typeof glassNode === "object") {
+        for (const [k, v] of Object.entries(glassNode)) {
+          if (String(v) === "Y" || String(v) === "true") glassFlags[k] = true;
+        }
+      }
+
+      const damagePositionCodes = damagePositionsStr
+        ? damagePositionsStr.split(",").map((s: string) => s.trim()).filter(Boolean)
+        : [];
+
+      const significantPartGroupCodes = damageGroupsStr
+        ? damageGroupsStr.split(",").map((s: string) => s.trim()).filter(Boolean)
+        : [];
+
+      const damageAssessment = normalizeDamageAssessment({
+        generalFlags,
+        glassFlags,
+        damagePositionCodes,
+        significantPartGroupCodes,
+      });
+
       return {
         claimId,
         accidentDate: claimInner["accident-date"] ? String(claimInner["accident-date"]) : undefined,
@@ -189,6 +222,7 @@ export class AudatexHistoryAdapter {
         mandateDescription: mandateDesc,
         affectedZones,
         significantParts,
+        damageAssessment,
       };
     });
 

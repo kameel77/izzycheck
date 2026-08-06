@@ -19,6 +19,8 @@ import {
   Printer,
 } from "lucide-react";
 import { getClaimsHistoryPresentation } from "@/lib/report-claims-summary";
+import { DamageClaimVisualization } from "@/components/report/DamageClaimVisualization";
+import { DownloadReportPdfButton } from "@/components/report/DownloadReportPdfButton";
 
 export default function ReportDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -102,12 +104,15 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
           <ArrowLeft className="h-4 w-4" /> Powrót do pulpitu
         </Link>
 
-        <button
-          onClick={() => window.print()}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
-        >
-          <Printer className="h-4 w-4" /> Drukuj Raport
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+          >
+            <Printer className="h-4 w-4" /> Drukuj Raport
+          </button>
+          <DownloadReportPdfButton reportId={report.id} vin={report.vin} />
+        </div>
       </div>
 
       {/* Main Header Banner */}
@@ -426,31 +431,11 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                       </div>
 
-                      {affectedZonesList.length > 0 && (
-                        <div className="space-y-2 pt-2 border-t border-slate-800/60">
-                          <span className="text-xs font-bold text-slate-300">Uszkodzone Strefy Nadwozia i Szyb (Part Zones):</span>
-                          <div className="flex flex-wrap gap-2">
-                            {affectedZonesList.map((z: string, zIdx: number) => (
-                              <span key={zIdx} className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-300">
-                                {z}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {sigPartsList.length > 0 && (
-                        <div className="space-y-2 pt-2 border-t border-slate-800/60">
-                          <span className="text-xs font-bold text-slate-300">Istotne Grupy Części Objęte Kalkulacją:</span>
-                          <div className="flex flex-wrap gap-2">
-                            {sigPartsList.map((p: string, pIdx: number) => (
-                              <span key={pIdx} className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-300">
-                                {p}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                      {/* Audatex Damage Visualization Section */}
+                      <DamageClaimVisualization
+                        claim={c}
+                        vehicleMakeModel={snapshot?.make ? `${snapshot.make} ${snapshot.model || ""}` : undefined}
+                      />
                     </div>
                   );
                 })}

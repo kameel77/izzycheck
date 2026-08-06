@@ -116,6 +116,7 @@ model DamageClaim {
   mandateDescription String?
   damageZones        String   @db.Text
   significantParts   String   @db.Text
+  damageAssessmentJson String? @db.Text
   createdAt          DateTime @default(now())
 
   @@map("damage_claims")

@@ -57,6 +57,8 @@ export interface ClaimCheckResult {
   rawXml?: string;
 }
 
+import { DamageAssessment } from "../damage/normalize-damage-assessment.ts";
+
 export interface DamageClaimDetail {
   claimId: string;
   accidentDate?: string;
@@ -71,6 +73,7 @@ export interface DamageClaimDetail {
   mandateDescription?: string;
   affectedZones: string[]; // List of 28 body zones & glass zones
   significantParts: string[]; // List of part group names (e.g. Passive safety, Braking system)
+  damageAssessment?: DamageAssessment;
 }
 
 export interface ClaimDetailsResult {

@@ -17,6 +17,10 @@ export interface JWTPayload {
   role: "OPERATOR" | "ADMIN";
 }
 
+declare global {
+  var __mockCurrentUser: JWTPayload | null | undefined;
+}
+
 export async function hashPassword(password: string): Promise<string> {
   return await bcrypt.hash(password, 10);
 }
@@ -45,6 +49,9 @@ export async function verifyToken(token: string): Promise<JWTPayload | null> {
 }
 
 export async function getCurrentUser(): Promise<JWTPayload | null> {
+  if (globalThis.__mockCurrentUser !== undefined) {
+    return globalThis.__mockCurrentUser;
+  }
   const cookieStore = await cookies();
   const token = cookieStore.get("izzycheck_session")?.value;
   if (!token) return null;
