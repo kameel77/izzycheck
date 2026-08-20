@@ -39,9 +39,9 @@ describe("Audatex Integration Adapters", () => {
     assert.strictEqual(val.technicalSpec.engineCapacityCm3, 1997);
     assert.strictEqual(val.technicalSpec.enginePowerKw, 180);
     assert.strictEqual(val.technicalSpec.enginePowerHp, 245);
-    assert.strictEqual(val.technicalSpec.isEnginePowerHpCalculated, true);
+    assert.strictEqual(val.technicalSpec.isEnginePowerHpCalculated, false);
     assert.strictEqual(val.technicalSpec.fuelType, "Benzyna");
-    assert.strictEqual(val.technicalSpec.driveType, "4x4 (xDrive)");
+    assert.strictEqual(val.technicalSpec.driveType, "4x4");
     assert.strictEqual(val.technicalSpec.gearboxType, "Automatyczna");
     assert.strictEqual(val.technicalSpec.bodyType, "Coupé");
     assert.ok(val.technicalSpec.rawAttributes);

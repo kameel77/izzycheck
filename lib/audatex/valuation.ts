@@ -226,55 +226,71 @@ export class AudatexValuationAdapter {
         } else if (desc === "engineCapacity") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) engineCapacityCm3 = num;
-        } else if (desc === "enginePowerKw") {
+        } else if (desc === "engineKW" || desc === "enginePowerKw") {
           const num = parseFloat(val);
           if (!isNaN(num)) enginePowerKw = Math.round(num);
-        } else if (desc === "enginePowerHp") {
+        } else if (desc === "engineHP" || desc === "enginePowerHp") {
           const num = parseFloat(val);
           if (!isNaN(num)) {
             enginePowerHp = Math.round(num);
             isEnginePowerHpCalculated = false;
           }
-        } else if (desc === "fuelType") {
-          fuelType = val;
-        } else if (desc === "driveType") {
-          driveType = val;
-        } else if (desc === "gearboxType") {
-          gearboxType = val;
-        } else if (desc === "gearCount") {
+        } else if (desc === "engineFuelType" || desc === "fuelType") {
+          if (val === "BA") fuelType = "Benzyna";
+          else if (val === "NM") fuelType = "Diesel";
+          else if (val === "EL") fuelType = "Elektryczny";
+          else if (val === "HY") fuelType = "Hybrydowy";
+          else if (val === "LPG") fuelType = "LPG / Benzyna";
+          else if (val === "CNG") fuelType = "CNG";
+          else fuelType = val;
+        } else if (desc === "axlePowered" || desc === "driveType") {
+          if (val === "4x4") driveType = "4x4";
+          else if (val === "P1") driveType = "Napęd przedni (FWD)";
+          else if (val === "Z1") driveType = "Napęd tylny (RWD)";
+          else driveType = val;
+        } else if (desc === "gearBox" || desc === "gearBoxType" || desc === "gearboxType") {
+          if (val === "A") gearboxType = "Automatyczna";
+          else if (val === "M") gearboxType = "Manualna";
+          else if (val !== "n/a" && val) gearboxType = val;
+        } else if (desc === "gearNumber" || desc === "gearCount") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) gearCount = num;
-        } else if (desc === "bodyType") {
-          bodyType = val;
-        } else if (desc === "doorsCount") {
+        } else if (desc === "carBodyType" || desc === "carBodyKind" || desc === "bodyType") {
+          if (val === "kupe") bodyType = "Coupé";
+          else if (val === "kombi") bodyType = "Kombi";
+          else if (val === "sedan") bodyType = "Sedan";
+          else if (val === "hatchback") bodyType = "Hatchback";
+          else if (val === "suv") bodyType = "SUV";
+          else bodyType = val;
+        } else if (desc === "carDoorNr" || desc === "doorsCount") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) doorsCount = num;
-        } else if (desc === "seatsCount") {
+        } else if (desc === "sittingPlaceNr" || desc === "seatsCount") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) seatsCount = num;
-        } else if (desc === "curbWeightKg") {
+        } else if (desc === "weightServiceAble" || desc === "curbWeightKg") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) curbWeightKg = num;
-        } else if (desc === "grossWeightKg") {
+        } else if (desc === "weightTotal" || desc === "grossWeightKg") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) grossWeightKg = num;
-        } else if (desc === "lengthMm") {
+        } else if (desc === "length" || desc === "lengthMm") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) lengthMm = num;
-        } else if (desc === "widthMm") {
+        } else if (desc === "width" || desc === "widthMm") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) widthMm = num;
-        } else if (desc === "heightMm") {
+        } else if (desc === "height" || desc === "heightMm") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) heightMm = num;
-        } else if (desc === "wheelbaseMm") {
+        } else if (desc === "wheelBase" || desc === "wheelbaseMm") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) wheelbaseMm = num;
-        } else if (desc === "wheelSize") {
+        } else if (desc === "tireFront" || desc === "wheelSize") {
           wheelSize = val;
-        } else if (desc === "emissionStandard") {
+        } else if (desc === "katalyzatorUS_EuroNorm" || desc === "emissionStandard") {
           emissionStandard = val;
-        } else if (desc === "maxSpeedKmh") {
+        } else if (desc === "speedMax" || desc === "maxSpeedKmh") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) maxSpeedKmh = num;
         } else {

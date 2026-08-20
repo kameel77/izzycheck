@@ -69,25 +69,9 @@ describe("Report Finalization & PDF Immutability Rules", () => {
     assert.strictEqual(updatePayload.pdfGeneratedAt, undefined);
   });
 
-  test("Invariant D-4 & D-6: Module retry resets pdfBytes cache to enforce fresh generation", async () => {
-    // When a module retry succeeds in Slice 4, it executes:
-    // prisma.report.update({ where: { id }, data: { pdfBytes: null, pdfGeneratedAt: null, pdfGeneratorVersion: null } })
-    const initialReport = {
-      id: "rep-retry-1",
-      status: "PARTIALLY_FAILED",
-      pdfBytes: Buffer.from("%PDF-1.4 OLD STALE BYTES"),
-      pdfGeneratedAt: new Date(),
-    };
-
-    const retryResetPayload = {
-      pdfBytes: null,
-      pdfGeneratedAt: null,
-      pdfGeneratorVersion: null,
-    };
-
-    const updatedReport = { ...initialReport, ...retryResetPayload };
-
-    assert.strictEqual(updatedReport.pdfBytes, null);
-    assert.strictEqual(updatedReport.pdfGeneratedAt, null);
+  test.skip("Slice 4: Module retry endpoint clears pdfBytes, pdfGeneratedAt and pdfGeneratorVersion on successful retry", async () => {
+    // Pending implementation in Slice 4 (app/api/reports/[id]/modules/[moduleId]/retry/route.ts)
+    // Upon successful retry of a failed module, the handler MUST execute:
+    // await prisma.report.update({ where: { id }, data: { pdfBytes: null, pdfGeneratedAt: null, pdfGeneratorVersion: null } });
   });
 });

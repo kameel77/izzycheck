@@ -74,92 +74,87 @@ export const VEHICLE_DATA_CLASSIFICATION_RESPONSE = `<?xml version="1.0" encodin
               <Parameter>
                 <Value>1997</Value>
                 <Description>engineCapacity</Description>
-                <Id>291</Id>
+                <Id>20</Id>
               </Parameter>
               <Parameter>
                 <Value>180</Value>
-                <Description>enginePowerKw</Description>
-                <Id>292</Id>
+                <Description>engineKW</Description>
+                <Id>22</Id>
               </Parameter>
               <Parameter>
-                <Value>Benzyna</Value>
-                <Description>fuelType</Description>
-                <Id>293</Id>
+                <Value>245</Value>
+                <Description>engineHP</Description>
+                <Id>21</Id>
               </Parameter>
               <Parameter>
-                <Value>4x4 (xDrive)</Value>
-                <Description>driveType</Description>
-                <Id>294</Id>
+                <Value>BA</Value>
+                <Description>engineFuelType</Description>
+                <Id>37</Id>
               </Parameter>
               <Parameter>
-                <Value>Automatyczna</Value>
-                <Description>gearboxType</Description>
-                <Id>295</Id>
+                <Value>4x4</Value>
+                <Description>axlePowered</Description>
+                <Id>59</Id>
+              </Parameter>
+              <Parameter>
+                <Value>A</Value>
+                <Description>gearBox</Description>
+                <Id>53</Id>
               </Parameter>
               <Parameter>
                 <Value>8</Value>
-                <Description>gearCount</Description>
-                <Id>296</Id>
+                <Description>gearNumber</Description>
+                <Id>55</Id>
               </Parameter>
               <Parameter>
-                <Value>Coupé</Value>
-                <Description>bodyType</Description>
-                <Id>297</Id>
+                <Value>kupe</Value>
+                <Description>carBodyKind</Description>
+                <Id>109</Id>
               </Parameter>
               <Parameter>
                 <Value>2</Value>
-                <Description>doorsCount</Description>
-                <Id>298</Id>
+                <Description>carDoorNr</Description>
+                <Id>82</Id>
               </Parameter>
               <Parameter>
                 <Value>4</Value>
-                <Description>seatsCount</Description>
-                <Id>299</Id>
+                <Description>sittingPlaceNr</Description>
+                <Id>83</Id>
               </Parameter>
               <Parameter>
-                <Value>1570</Value>
-                <Description>curbWeightKg</Description>
-                <Id>300</Id>
+                <Value>1540</Value>
+                <Description>weightServiceAble</Description>
+                <Id>70</Id>
               </Parameter>
               <Parameter>
-                <Value>2065</Value>
-                <Description>grossWeightKg</Description>
-                <Id>301</Id>
+                <Value>2060</Value>
+                <Description>weightTotal</Description>
+                <Id>69</Id>
               </Parameter>
               <Parameter>
                 <Value>4638</Value>
-                <Description>lengthMm</Description>
-                <Id>302</Id>
+                <Description>length</Description>
+                <Id>50</Id>
               </Parameter>
               <Parameter>
                 <Value>1825</Value>
-                <Description>widthMm</Description>
-                <Id>303</Id>
+                <Description>width</Description>
+                <Id>51</Id>
               </Parameter>
               <Parameter>
                 <Value>1377</Value>
-                <Description>heightMm</Description>
-                <Id>304</Id>
+                <Description>height</Description>
+                <Id>52</Id>
               </Parameter>
               <Parameter>
                 <Value>2810</Value>
-                <Description>wheelbaseMm</Description>
-                <Id>305</Id>
-              </Parameter>
-              <Parameter>
-                <Value>225/45 R18</Value>
-                <Description>wheelSize</Description>
-                <Id>306</Id>
-              </Parameter>
-              <Parameter>
-                <Value>Euro 6</Value>
-                <Description>emissionStandard</Description>
-                <Id>307</Id>
+                <Description>wheelBase</Description>
+                <Id>57</Id>
               </Parameter>
               <Parameter>
                 <Value>250</Value>
-                <Description>maxSpeedKmh</Description>
-                <Id>308</Id>
+                <Description>speedMax</Description>
+                <Id>64</Id>
               </Parameter>
             </Parameteres>
           </CarInfo>
