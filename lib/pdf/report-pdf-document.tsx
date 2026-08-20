@@ -15,6 +15,7 @@ import {
   Font,
 } from "@react-pdf/renderer";
 import { ReportPdfViewModel, ReportPdfClaimItem } from "./report-pdf-view-model.ts";
+import { ISSUER_CONFIG } from "../config/issuer.ts";
 import pkg from "../../package.json" with { type: "json" };
 
 // Register local Unicode TTF font for Polish characters (ą ć ę ł ń ó ś ź ż Ą Ć Ę Ł Ń Ó Ś Ź Ż)
@@ -343,7 +344,7 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
 
         <View style={styles.disclaimerBox}>
           <Text style={{ fontWeight: "bold", marginBottom: 3, color: "#78350f" }}>
-            KLAUZULA PRAWNA I OGRANICZENIE ODPOWIEDZIALNOŚCI:
+            [TYMCZASOWY SZABLON INFORMACYJNY - DO WERYFIKACJI I ZASTĄPIENIA PRZEZ KANCELARIĘ PRAWNĄ]
           </Text>
           <Text style={{ marginBottom: 2 }}>
             1. Niniejszy raport ma charakter analityczno-informacyjny i został sporządzony na podstawie danych dostarczonych przez system Audatex (AudaValuation oraz Claims History Engine). Dokument nie stanowi urzędowej opinii biegłego rzeczoznawcy majątkowego ani gwarancji bezwypadkowości pojazdu.
@@ -352,7 +353,7 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
             2. Wszelkie zaprezentowane wartości kwotowe są wartościami bazowymi netto (bez VAT), zgodnie z danymi źródłowymi Audatex. System IzzyCheck nie dokonuje wyliczeń ani korekt stawek podatku od towarów i usług.
           </Text>
           <Text>
-            3. Izzy Lease Sp. z o.o. nie ponosi odpowiedzialności za decyzje finansowe, ubezpieczeniowe lub kredytowe podejmowane na podstawie niniejszego raportu przez nabywcę bądź podmioty trzecie.
+            3. Zastrzeżenie prawne (wersja robocza): Zakres odpowiedzialności wystawcy wobec nabywcy raportu (w szczególności konsumenta) podlega ostatecznej regulacji w regulaminie usługi zgodnie z prawem właściwym.
           </Text>
         </View>
 
@@ -446,19 +447,21 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
               </View>
             </View>
 
-            {/* Optional Underbody View (Larger height for PDF readability) */}
+            {/* Underbody Schematic View if underbody damage present */}
             {claim.presentation.hasUnderbodyView && (
-              <View style={{ border: "1px solid #c084fc", borderRadius: 4, padding: 6, marginBottom: 8, backgroundColor: "#faf5ff" }}>
-                <Text style={{ fontSize: 8, fontWeight: "bold", color: "#7e22ce", marginBottom: 4 }}>
-                  Widok od spodu (Podwozie)
+              <View style={{ marginBottom: 10 }}>
+                <Text style={{ fontSize: 8, fontWeight: "bold", color: "#6b21a8", marginBottom: 3 }}>
+                  Schemat Podwozia Pojazdu (Elementy Nośne / Zawieszenie / Rama)
                 </Text>
-                <PdfUnderbodySvg claimItem={claim} />
+                <View style={{ border: "1px solid #ddd6fe", borderRadius: 4, padding: 4, backgroundColor: "#faf5ff" }}>
+                  <PdfUnderbodySvg claimItem={claim} />
+                </View>
               </View>
             )}
 
-            {/* Marker Table */}
-            <Text style={{ fontSize: 8, fontWeight: "bold", marginTop: 4, marginBottom: 4 }}>
-              Wykaz Markerów i Grup Części w Kalkulacji:
+            {/* Damage Details Table */}
+            <Text style={{ fontSize: 9, fontWeight: "bold", marginBottom: 4, color: "#0f172a" }}>
+              Zarejestrowane Strefy i Grupy Części (Kolejność Narastająca):
             </Text>
 
             <View style={styles.table}>
@@ -498,7 +501,7 @@ function PdfHeader({ model }: { model: ReportPdfViewModel }) {
         <Text style={styles.logoText}>IzzyCheck</Text>
         <Text style={styles.logoSub}>RAPORT HISTORII I WYCENY POJAZDU</Text>
         <Text style={{ fontSize: 6.5, color: "#64748b", marginTop: 2 }}>
-          Wystawca: Izzy Lease Sp. z o.o. | NIP: 5213904562 | www.izzylease.pl
+          Wystawca: {ISSUER_CONFIG.companyName} | NIP: {ISSUER_CONFIG.taxId} | {ISSUER_CONFIG.website}
         </Text>
       </View>
       <View style={styles.reportMeta}>

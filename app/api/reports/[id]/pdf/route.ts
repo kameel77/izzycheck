@@ -46,7 +46,7 @@ export async function GET(
     let pdfBuffer: Buffer;
 
     // 1. If PDF bytes are already immutable in the database, serve them directly
-    if (report.pdfBytes && !globalThis.__mockRenderToBuffer) {
+    if (report.pdfBytes) {
       pdfBuffer = Buffer.from(report.pdfBytes);
     } else {
       // 2. Otherwise generate PDF view model & render buffer
@@ -59,8 +59,10 @@ export async function GET(
         const { renderToBuffer } = await import("@react-pdf/renderer");
         const pdfElement = React.createElement(ReportPdfDocument, { model: viewModel }) as any;
         pdfBuffer = await renderToBuffer(pdfElement);
+      }
 
-        // 3. Persist generated PDF bytes to PostgreSQL for guaranteed document immutability
+      // 3. Persist generated PDF bytes to PostgreSQL only if the report is in a terminal status
+      if (report.status === "COMPLETED" || report.status === "PARTIALLY_FAILED") {
         await prisma.report.update({
           where: { id: report.id },
           data: {

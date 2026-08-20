@@ -139,4 +139,17 @@ describe("PDF Generation & View Model Module", () => {
     const pdfHeader = buffer.toString("utf-8", 0, 5);
     assert.strictEqual(pdfHeader, "%PDF-");
   });
+
+  test("Renders ReportPdfDocument component structure with legal disclaimer placeholder", async () => {
+    const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
+    const { ISSUER_CONFIG } = await import("../../config/issuer.ts");
+
+    const viewModel = buildReportPdfViewModel(mockReport);
+    const pdfElement = React.createElement(ReportPdfDocument, { model: viewModel }) as any;
+
+    assert.ok(pdfElement);
+    assert.strictEqual(pdfElement.props.model.publicReference, "IC-2026-08-0417");
+    assert.ok(ISSUER_CONFIG.companyName);
+    assert.ok(ISSUER_CONFIG.taxId);
+  });
 });

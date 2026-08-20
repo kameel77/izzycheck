@@ -129,15 +129,23 @@ model DamageClaim {
 
 model AuditEvent {
   id           String   @id @default(uuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id])
-  userEmail    String
+  userId       String?
+  userEmail    String?
   action       String
   resource     String
   metadataJson String?  @db.Text
   createdAt    DateTime @default(now())
+  user         User?    @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([action])
+  @@index([createdAt])
   @@map("audit_events")
+}
+
+model ReportReferenceSequence {
+  period     String @id // Format: "YYYY-MM"
+  currentVal Int    @default(0)
+
+  @@map("report_reference_sequences")
 }

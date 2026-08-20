@@ -13,7 +13,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
     const report = await prisma.report.findUnique({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        publicReference: true,
+        vin: true,
+        firstRegistrationDate: true,
+        mileage: true,
+        valuationDate: true,
+        status: true,
+        idempotencyKey: true,
+        requestHash: true,
+        pdfGeneratedAt: true,
+        pdfGeneratorVersion: true,
+        createdAt: true,
+        updatedAt: true,
+        createdById: true,
         createdBy: { select: { id: true, name: true, email: true } },
         moduleResults: { select: { moduleId: true, status: true, responseMetadata: true, errorMessage: true } },
         vehicleSnapshot: true,

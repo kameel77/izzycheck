@@ -5,17 +5,23 @@ import { prisma } from "../../db.ts";
 
 describe("PDF API Endpoint GET Route Handler (Direct app/api/reports/[id]/pdf/route.ts execution)", () => {
   let originalFindUnique: any;
+  let originalUpdateReport: any;
   let originalCreateAudit: any;
 
   beforeEach(() => {
     originalFindUnique = prisma.report.findUnique;
+    originalUpdateReport = prisma.report.update;
     originalCreateAudit = prisma.auditEvent.create;
+
+    (prisma.report as any).update = async ({ data }: any) => ({ id: "rep-mock", ...data });
+    (prisma.auditEvent as any).create = async ({ data }: any) => ({ id: "audit-mock", ...data });
   });
 
   afterEach(() => {
     globalThis.__mockCurrentUser = undefined;
     globalThis.__mockRenderToBuffer = undefined;
     (prisma.report as any).findUnique = originalFindUnique;
+    (prisma.report as any).update = originalUpdateReport;
     (prisma.auditEvent as any).create = originalCreateAudit;
   });
 
@@ -114,5 +120,56 @@ describe("PDF API Endpoint GET Route Handler (Direct app/api/reports/[id]/pdf/ro
     assert.strictEqual(auditRecorded.action, "DOWNLOAD_REPORT_PDF");
     assert.strictEqual(auditRecorded.resource, "REPORT:rep-valid-100");
     assert.strictEqual(auditRecorded.userId, "user-admin-1");
+  });
+
+  test("Serves cached immutable pdfBytes directly from database without calling renderToBuffer", async () => {
+    globalThis.__mockCurrentUser = {
+      userId: "user-admin-1",
+      email: "admin@izzylease.pl",
+      name: "Admin User",
+      role: "ADMIN",
+    };
+
+    const cachedPdfBytes = Buffer.from("%PDF-1.4 CACHED IMMUTABLE BYTES FROM DB");
+
+    let rendererCalled = false;
+    globalThis.__mockRenderToBuffer = async () => {
+      rendererCalled = true;
+      return Buffer.from("%PDF-1.4 FRESH RENDER");
+    };
+
+    (prisma.report as any).findUnique = async () => ({
+      id: "rep-cached-200",
+      publicReference: "IC-2026-08-0042",
+      vin: "WBA3N51030KS15173",
+      createdById: "user-admin-1",
+      firstRegistrationDate: "2021-05-10",
+      valuationDate: "2026-08-06",
+      status: "COMPLETED",
+      pdfBytes: cachedPdfBytes,
+      pdfGeneratedAt: new Date("2026-08-20T18:00:00Z"),
+      pdfGeneratorVersion: "0.1.0",
+      createdAt: new Date().toISOString(),
+      createdBy: { id: "user-admin-1", name: "Admin", email: "admin@izzylease.pl" },
+      vehicleSnapshot: null,
+      moduleResults: [],
+      damageClaims: [],
+    });
+
+    const req = new Request("http://localhost:3000/api/reports/rep-cached-200/pdf");
+    const params = Promise.resolve({ id: "rep-cached-200" });
+
+    const res = await GET(req, { params });
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.headers.get("Content-Type"), "application/pdf");
+    assert.strictEqual(
+      res.headers.get("Content-Disposition"),
+      'attachment; filename="Raport-IzzyCheck-IC-2026-08-0042.pdf"'
+    );
+
+    const receivedBytes = Buffer.from(await res.arrayBuffer());
+    assert.strictEqual(receivedBytes.toString(), "%PDF-1.4 CACHED IMMUTABLE BYTES FROM DB");
+    assert.strictEqual(rendererCalled, false, "Renderer must NOT be called when pdfBytes is cached");
   });
 });
