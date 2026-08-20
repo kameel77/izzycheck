@@ -352,47 +352,21 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               </div>
 
               {/* Unmapped Raw Attributes Fallback */}
-              {technicalSpec.rawAttributes && (() => {
-                const KNOWN_ATTRS = new Set([
-                  "manufacturerName", "modelName", "typeName", "marketCode",
-                  "engineCapacity", "Engine", "engineCC",
-                  "enginePowerKw", "Kw", "KW",
-                  "enginePowerHp", "Hp", "HP", "KM",
-                  "fuelType", "FuelType",
-                  "driveType", "DriveType",
-                  "gearboxType", "GearboxType",
-                  "gearCount", "GearCount",
-                  "bodyType", "BodyType",
-                  "doorsCount", "DoorsCount",
-                  "seatsCount", "SeatsCount",
-                  "curbWeightKg", "CurbWeight",
-                  "grossWeightKg", "GrossWeight",
-                  "lengthMm", "Length",
-                  "widthMm", "Width",
-                  "heightMm", "Height",
-                  "wheelbaseMm", "Wheelbase",
-                  "wheelSize", "WheelSize",
-                  "emissionStandard", "EmissionStandard",
-                  "maxSpeedKmh", "MaxSpeed"
-                ]);
-                const unmapped = Object.entries(technicalSpec.rawAttributes).filter(([k]) => !KNOWN_ATTRS.has(k));
-                if (unmapped.length === 0) return null;
-                return (
-                  <div className="pt-3 border-t border-slate-800/80 space-y-2">
-                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-                      Pozostałe parametry od Audatex
-                    </span>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 text-xs">
-                      {unmapped.map(([k, v]) => (
-                        <div key={k} className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
-                          <span className="text-[10px] text-slate-500 font-mono block">{k}</span>
-                          <span className="text-xs font-medium text-slate-300">{String(v)}</span>
-                        </div>
-                      ))}
-                    </div>
+              {technicalSpec.rawAttributes && Object.keys(technicalSpec.rawAttributes).length > 0 && (
+                <div className="pt-3 border-t border-slate-800/80 space-y-2">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+                    Pozostałe parametry od Audatex
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 text-xs">
+                    {Object.entries(technicalSpec.rawAttributes).map(([k, v]) => (
+                      <div key={k} className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
+                        <span className="text-[10px] text-slate-500 font-mono block">{k}</span>
+                        <span className="text-xs font-medium text-slate-300">{String(v)}</span>
+                      </div>
+                    ))}
                   </div>
-                );
-              })()}
+                </div>
+              )}
             </div>
           )}
 

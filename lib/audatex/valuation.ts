@@ -215,67 +215,71 @@ export class AudatexValuationAdapter {
         const val = String(p["Value"] || "").trim();
         if (!desc) continue;
 
-        rawAttributes[desc] = val;
+        let consumed = true;
 
-        if (desc === "manufacturerName") make = val;
-        else if (desc === "modelName") model = val;
-        else if (desc === "typeName") variant = val;
-        else if (desc === "engineCapacity" || desc === "Engine" || desc === "engineCC") {
+        if (desc === "manufacturerName") {
+          make = val;
+        } else if (desc === "modelName") {
+          model = val;
+        } else if (desc === "typeName") {
+          variant = val;
+        } else if (desc === "engineCapacity") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) engineCapacityCm3 = num;
-        } else if (desc === "enginePowerKw" || desc === "Kw" || desc === "KW") {
+        } else if (desc === "enginePowerKw") {
           const num = parseFloat(val);
-          if (!isNaN(num)) {
-            enginePowerKw = Math.round(num);
-          }
-        } else if (desc === "enginePowerHp" || desc === "Hp" || desc === "HP" || desc === "KM") {
+          if (!isNaN(num)) enginePowerKw = Math.round(num);
+        } else if (desc === "enginePowerHp") {
           const num = parseFloat(val);
           if (!isNaN(num)) {
             enginePowerHp = Math.round(num);
             isEnginePowerHpCalculated = false;
           }
-        } else if (desc === "fuelType" || desc === "FuelType") {
+        } else if (desc === "fuelType") {
           fuelType = val;
-        } else if (desc === "driveType" || desc === "DriveType") {
+        } else if (desc === "driveType") {
           driveType = val;
-        } else if (desc === "gearboxType" || desc === "GearboxType") {
+        } else if (desc === "gearboxType") {
           gearboxType = val;
-        } else if (desc === "gearCount" || desc === "GearCount") {
+        } else if (desc === "gearCount") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) gearCount = num;
-        } else if (desc === "bodyType" || desc === "BodyType") {
+        } else if (desc === "bodyType") {
           bodyType = val;
-        } else if (desc === "doorsCount" || desc === "DoorsCount") {
+        } else if (desc === "doorsCount") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) doorsCount = num;
-        } else if (desc === "seatsCount" || desc === "SeatsCount") {
+        } else if (desc === "seatsCount") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) seatsCount = num;
-        } else if (desc === "curbWeightKg" || desc === "CurbWeight") {
+        } else if (desc === "curbWeightKg") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) curbWeightKg = num;
-        } else if (desc === "grossWeightKg" || desc === "GrossWeight") {
+        } else if (desc === "grossWeightKg") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) grossWeightKg = num;
-        } else if (desc === "lengthMm" || desc === "Length") {
+        } else if (desc === "lengthMm") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) lengthMm = num;
-        } else if (desc === "widthMm" || desc === "Width") {
+        } else if (desc === "widthMm") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) widthMm = num;
-        } else if (desc === "heightMm" || desc === "Height") {
+        } else if (desc === "heightMm") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) heightMm = num;
-        } else if (desc === "wheelbaseMm" || desc === "Wheelbase") {
+        } else if (desc === "wheelbaseMm") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) wheelbaseMm = num;
-        } else if (desc === "wheelSize" || desc === "WheelSize") {
+        } else if (desc === "wheelSize") {
           wheelSize = val;
-        } else if (desc === "emissionStandard" || desc === "EmissionStandard") {
+        } else if (desc === "emissionStandard") {
           emissionStandard = val;
-        } else if (desc === "maxSpeedKmh" || desc === "MaxSpeed") {
+        } else if (desc === "maxSpeedKmh") {
           const num = parseInt(val, 10);
           if (!isNaN(num)) maxSpeedKmh = num;
+        } else {
+          consumed = false;
+          rawAttributes[desc] = val;
         }
       }
     }

@@ -15,6 +15,7 @@ import {
   Font,
 } from "@react-pdf/renderer";
 import { ReportPdfViewModel, ReportPdfClaimItem } from "./report-pdf-view-model.ts";
+import pkg from "../../package.json" with { type: "json" };
 
 // Register local Unicode TTF font for Polish characters (ą ć ę ł ń ó ś ź ż Ą Ć Ę Ł Ń Ó Ś Ź Ż)
 const fontsDir = path.join(process.cwd(), "public", "fonts");
@@ -323,45 +324,19 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
               </View>
 
               {/* Unmapped Raw Attributes Fallback */}
-              {model.technicalSpec.rawAttributes && (() => {
-                const KNOWN_ATTRS = new Set([
-                  "manufacturerName", "modelName", "typeName", "marketCode",
-                  "engineCapacity", "Engine", "engineCC",
-                  "enginePowerKw", "Kw", "KW",
-                  "enginePowerHp", "Hp", "HP", "KM",
-                  "fuelType", "FuelType",
-                  "driveType", "DriveType",
-                  "gearboxType", "GearboxType",
-                  "gearCount", "GearCount",
-                  "bodyType", "BodyType",
-                  "doorsCount", "DoorsCount",
-                  "seatsCount", "SeatsCount",
-                  "curbWeightKg", "CurbWeight",
-                  "grossWeightKg", "GrossWeight",
-                  "lengthMm", "Length",
-                  "widthMm", "Width",
-                  "heightMm", "Height",
-                  "wheelbaseMm", "Wheelbase",
-                  "wheelSize", "WheelSize",
-                  "emissionStandard", "EmissionStandard",
-                  "maxSpeedKmh", "MaxSpeed"
-                ]);
-                const unmapped = Object.entries(model.technicalSpec.rawAttributes).filter(([k]) => !KNOWN_ATTRS.has(k));
-                if (unmapped.length === 0) return null;
-                return (
-                  <View style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: "#e2e8f0", paddingTop: 4 }}>
-                    <Text style={[styles.label, { marginBottom: 3 }]}>Pozostałe parametry od Audatex</Text>
-                    <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-                      {unmapped.map(([k, v]) => (
-                        <View key={k} style={{ width: "33.3%", marginBottom: 3, paddingRight: 4 }}>
-                          <Text style={{ fontSize: 6, color: "#64748b" }}>{k}</Text>
-                          <Text style={{ fontSize: 7, fontWeight: "bold", color: "#334155" }}>{String(v)}</Text>
-                        </View>
-                      ))}
-                    </View>
+              {model.technicalSpec.rawAttributes && Object.keys(model.technicalSpec.rawAttributes).length > 0 && (
+                <View style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: "#e2e8f0", paddingTop: 4 }}>
+                  <Text style={[styles.label, { marginBottom: 3 }]}>Pozostałe parametry od Audatex</Text>
+                  <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+                    {Object.entries(model.technicalSpec.rawAttributes).map(([k, v]) => (
+                      <View key={k} style={{ width: "33.3%", marginBottom: 3, paddingRight: 4 }}>
+                        <Text style={{ fontSize: 6, color: "#64748b" }}>{k}</Text>
+                        <Text style={{ fontSize: 7, fontWeight: "bold", color: "#334155" }}>{String(v)}</Text>
+                      </View>
+                    ))}
                   </View>
-                );
-              })()}
+                </View>
+              )}
             </View>
           </>
         )}
@@ -529,7 +504,7 @@ function PdfFooter() {
   const printTimestamp = new Date().toLocaleString("pl-PL");
   return (
     <View style={styles.footer} fixed>
-      <Text>IzzyCheck © 2026 | Wydruk: {printTimestamp} | Wersja generatora: v1.0.0</Text>
+      <Text>IzzyCheck © 2026 | Wydruk: {printTimestamp} | Wersja generatora: v{pkg.version || "0.1.0"}</Text>
       <Text render={({ pageNumber, totalPages }) => `Strona ${pageNumber} z ${totalPages}`} />
     </View>
   );

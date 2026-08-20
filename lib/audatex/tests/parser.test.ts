@@ -44,6 +44,9 @@ describe("Audatex Integration Adapters", () => {
     assert.strictEqual(val.technicalSpec.driveType, "4x4 (xDrive)");
     assert.strictEqual(val.technicalSpec.gearboxType, "Automatyczna");
     assert.strictEqual(val.technicalSpec.bodyType, "Coupé");
+    assert.ok(val.technicalSpec.rawAttributes);
+    assert.strictEqual(val.technicalSpec.rawAttributes["marketCode"], "PL");
+    assert.strictEqual(val.technicalSpec.rawAttributes["enginePowerKw"], undefined);
   });
 
   test("Parses claim history positive check", async () => {
