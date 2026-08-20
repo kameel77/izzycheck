@@ -61,8 +61,8 @@ export async function GET(
         pdfBuffer = await renderToBuffer(pdfElement);
       }
 
-      // 3. Persist generated PDF bytes to PostgreSQL only if the report is in a terminal status
-      if (report.status === "COMPLETED" || report.status === "PARTIALLY_FAILED") {
+      // 3. Persist generated PDF bytes to PostgreSQL ONLY if the report is COMPLETED (never for PARTIALLY_FAILED/PROCESSING)
+      if (report.status === "COMPLETED") {
         await prisma.report.update({
           where: { id: report.id },
           data: {

@@ -1,4 +1,3 @@
-import React from "react";
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { AudatexValuationAdapter } from "@/lib/audatex/valuation";
@@ -8,8 +7,7 @@ import { isRateLimited } from "@/lib/rate-limit";
 import { computeRequestHash } from "@/lib/audatex/hash";
 import { Prisma } from "@prisma/client";
 import { generateMonotonicReference } from "@/lib/reports/reference";
-import { buildReportPdfViewModel } from "@/lib/pdf/report-pdf-view-model";
-import pkg from "@/package.json" with { type: "json" };
+import { finalizeReport } from "@/lib/reports/finalize";
 
 const valuationAdapter = new AudatexValuationAdapter();
 const historyAdapter = new AudatexHistoryAdapter();
@@ -324,56 +322,14 @@ export async function POST(req: Request) {
     }
 
     // Determine honest final status
-    let finalStatus = "COMPLETED";
+    let finalStatus: "COMPLETED" | "PARTIALLY_FAILED" | "FAILED" = "COMPLETED";
     if (moduleFailureCount > 0 && moduleSuccessCount > 0) {
       finalStatus = "PARTIALLY_FAILED";
     } else if (moduleFailureCount > 0 && moduleSuccessCount === 0) {
       finalStatus = "FAILED";
     }
 
-    let pdfBytes: Buffer | null = null;
-    let pdfGeneratedAt: Date | null = null;
-    let pdfGeneratorVersion: string | null = null;
-
-    // Render & freeze immutable PDF at finalisation if not completely failed
-    if (finalStatus !== "FAILED") {
-      try {
-        const fullReport = await prisma.report.findUnique({
-          where: { id: report.id },
-          include: {
-            createdBy: { select: { id: true, name: true, email: true } },
-            moduleResults: { select: { moduleId: true, status: true, responseMetadata: true, errorMessage: true } },
-            vehicleSnapshot: true,
-            damageClaims: true,
-          },
-        });
-        if (fullReport) {
-          const viewModel = buildReportPdfViewModel(fullReport);
-          let pdfBuffer: Buffer;
-          if (globalThis.__mockRenderToBuffer) {
-            pdfBuffer = await globalThis.__mockRenderToBuffer(viewModel);
-          } else {
-            const { ReportPdfDocument } = await import("@/lib/pdf/report-pdf-document");
-            const { renderToBuffer } = await import("@react-pdf/renderer");
-            const pdfElement = React.createElement(ReportPdfDocument, { model: viewModel }) as any;
-            pdfBuffer = await renderToBuffer(pdfElement);
-          }
-          pdfBytes = Buffer.from(pdfBuffer);
-          pdfGeneratedAt = new Date();
-          pdfGeneratorVersion = pkg.version || "0.1.0";
-        }
-      } catch (pdfErr) {
-        console.error("[REPORT_PDF_FINALIZATION_ERROR]", pdfErr);
-      }
-    }
-
-    await prisma.report.update({
-      where: { id: report.id },
-      data: {
-        status: finalStatus,
-        ...(pdfBytes ? { pdfBytes: pdfBytes as any, pdfGeneratedAt, pdfGeneratorVersion } : {}),
-      },
-    });
+    await finalizeReport(report.id, finalStatus);
 
     // Record Audit Event
     await prisma.auditEvent.create({
