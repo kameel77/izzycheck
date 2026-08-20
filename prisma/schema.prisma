@@ -94,6 +94,7 @@ model VehicleSnapshot {
   manufactureDate      String?
   standardEquipment    String   @db.Text
   optionalEquipment    String   @db.Text
+  technicalSpecJson    String?  @db.Text
   createdAt            DateTime @default(now())
 
   @@map("vehicle_snapshots")

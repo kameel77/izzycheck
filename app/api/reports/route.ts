@@ -187,9 +187,9 @@ export async function POST(req: Request) {
             technicalValueTh: valRes.technicalValueTh,
             mileageUsed: valRes.mileageUsed,
             isAverageMileageUsed: valRes.isAverageMileageUsed,
-            manufactureDate: valRes.manufactureDate || null,
             standardEquipment: JSON.stringify(valRes.standardEquipment),
             optionalEquipment: JSON.stringify(valRes.optionalEquipment),
+            technicalSpecJson: valRes.technicalSpec ? JSON.stringify(valRes.technicalSpec) : null,
           },
         });
 

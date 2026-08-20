@@ -21,6 +21,15 @@ describe("PDF Generation & View Model Module", () => {
       newPriceCv: 208909.0,
       marketPriceCob: 124500.0,
       technicalValueTh: 118000.0,
+      technicalSpecJson: JSON.stringify({
+        engineCapacityCm3: 1997,
+        enginePowerKw: 180,
+        enginePowerHp: 245,
+        fuelType: "Benzyna",
+        driveType: "4x4 (xDrive)",
+        gearboxType: "Automatyczna",
+        bodyType: "Coupé",
+      }),
       standardEquipment: JSON.stringify([{ name: "Klimatyzacja automatyczna", code: "0534" }]),
       optionalEquipment: JSON.stringify([{ name: "Pakiet M Sport", code: "0337" }]),
     },
@@ -79,6 +88,9 @@ describe("PDF Generation & View Model Module", () => {
 
     assert.strictEqual(viewModel.vin, "WBA3N51030KS15173");
     assert.strictEqual(viewModel.operatorName, "Jan Kowalski");
+    assert.ok(viewModel.technicalSpec);
+    assert.strictEqual(viewModel.technicalSpec.engineCapacityCm3, 1997);
+    assert.strictEqual(viewModel.technicalSpec.fuelType, "Benzyna");
     assert.strictEqual(viewModel.claims.length, 1);
     assert.strictEqual(viewModel.claims[0].claimId, "claim-88219");
     assert.strictEqual(viewModel.claims[0].presentation.totalMarkersCount, 2);

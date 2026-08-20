@@ -31,3 +31,6 @@ next-env.d.ts
 # SQLite / Prisma temp DB
 *.db
 *.db-journal
+
+# graphify
+graphify-out/

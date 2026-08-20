@@ -258,6 +258,114 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
           </>
         )}
 
+        {model.technicalSpec && (
+          <>
+            <Text style={styles.sectionTitle}>4. Specyfikacja Techniczna Pojazdu</Text>
+            <View style={styles.card}>
+              <View style={styles.row}>
+                <View style={styles.col}>
+                  <Text style={styles.label}>Pojemność Silnika</Text>
+                  <Text style={styles.value}>
+                    {model.technicalSpec.engineCapacityCm3 ? `${model.technicalSpec.engineCapacityCm3.toLocaleString("pl-PL")} cm³` : "—"}
+                  </Text>
+                </View>
+                <View style={styles.col}>
+                  <Text style={styles.label}>Moc Silnika</Text>
+                  <Text style={styles.value}>
+                    {model.technicalSpec.enginePowerKw && model.technicalSpec.enginePowerHp
+                      ? `${model.technicalSpec.enginePowerKw} kW (${model.technicalSpec.enginePowerHp} KM${model.technicalSpec.isEnginePowerHpCalculated ? " — przeliczone" : ""})`
+                      : model.technicalSpec.enginePowerKw
+                      ? `${model.technicalSpec.enginePowerKw} kW`
+                      : model.technicalSpec.enginePowerHp
+                      ? `${model.technicalSpec.enginePowerHp} KM`
+                      : "—"}
+                  </Text>
+                </View>
+                <View style={styles.col}>
+                  <Text style={styles.label}>Paliwo / Napęd</Text>
+                  <Text style={styles.value}>
+                    {[model.technicalSpec.fuelType, model.technicalSpec.driveType].filter(Boolean).join(" / ") || "—"}
+                  </Text>
+                </View>
+                <View style={styles.col}>
+                  <Text style={styles.label}>Skrzynia Biegów</Text>
+                  <Text style={styles.value}>
+                    {model.technicalSpec.gearboxType ? `${model.technicalSpec.gearboxType}${model.technicalSpec.gearCount ? ` (${model.technicalSpec.gearCount}b)` : ""}` : "—"}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={[styles.row, { marginTop: 4 }]}>
+                <View style={styles.col}>
+                  <Text style={styles.label}>Nadwozie / Miejsca</Text>
+                  <Text style={styles.value}>
+                    {[model.technicalSpec.bodyType, model.technicalSpec.seatsCount ? `${model.technicalSpec.seatsCount} miejsc` : undefined].filter(Boolean).join(" / ") || "—"}
+                  </Text>
+                </View>
+                <View style={styles.col}>
+                  <Text style={styles.label}>Masa Własna / DMC</Text>
+                  <Text style={styles.value}>
+                    {model.technicalSpec.curbWeightKg ? `${model.technicalSpec.curbWeightKg} kg / ${model.technicalSpec.grossWeightKg || "—"} kg` : "—"}
+                  </Text>
+                </View>
+                <View style={styles.col}>
+                  <Text style={styles.label}>Wymiary (Dł/Szer/Wys)</Text>
+                  <Text style={styles.value}>
+                    {model.technicalSpec.lengthMm ? `${model.technicalSpec.lengthMm} x ${model.technicalSpec.widthMm} x ${model.technicalSpec.heightMm} mm` : "—"}
+                  </Text>
+                </View>
+                <View style={styles.col}>
+                  <Text style={styles.label}>Koła / Emisja</Text>
+                  <Text style={styles.value}>
+                    {[model.technicalSpec.wheelSize, model.technicalSpec.emissionStandard].filter(Boolean).join(" / ") || "—"}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Unmapped Raw Attributes Fallback */}
+              {model.technicalSpec.rawAttributes && (() => {
+                const KNOWN_ATTRS = new Set([
+                  "manufacturerName", "modelName", "typeName", "marketCode",
+                  "engineCapacity", "Engine", "engineCC",
+                  "enginePowerKw", "Kw", "KW",
+                  "enginePowerHp", "Hp", "HP", "KM",
+                  "fuelType", "FuelType",
+                  "driveType", "DriveType",
+                  "gearboxType", "GearboxType",
+                  "gearCount", "GearCount",
+                  "bodyType", "BodyType",
+                  "doorsCount", "DoorsCount",
+                  "seatsCount", "SeatsCount",
+                  "curbWeightKg", "CurbWeight",
+                  "grossWeightKg", "GrossWeight",
+                  "lengthMm", "Length",
+                  "widthMm", "Width",
+                  "heightMm", "Height",
+                  "wheelbaseMm", "Wheelbase",
+                  "wheelSize", "WheelSize",
+                  "emissionStandard", "EmissionStandard",
+                  "maxSpeedKmh", "MaxSpeed"
+                ]);
+                const unmapped = Object.entries(model.technicalSpec.rawAttributes).filter(([k]) => !KNOWN_ATTRS.has(k));
+                if (unmapped.length === 0) return null;
+                return (
+                  <View style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: "#e2e8f0", paddingTop: 4 }}>
+                    <Text style={[styles.label, { marginBottom: 3 }]}>Pozostałe parametry od Audatex</Text>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+                      {unmapped.map(([k, v]) => (
+                        <View key={k} style={{ width: "33.3%", marginBottom: 3, paddingRight: 4 }}>
+                          <Text style={{ fontSize: 6, color: "#64748b" }}>{k}</Text>
+                          <Text style={{ fontSize: 7, fontWeight: "bold", color: "#334155" }}>{String(v)}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                );
+              })()}
+            </View>
+          </>
+        )}
+
         <View style={styles.disclaimerBox}>
           <Text style={{ fontWeight: "bold", marginBottom: 2 }}>
             Zastrzeżenie Źródłowe i Prawne Audatex:
@@ -418,9 +526,10 @@ function PdfHeader({ model }: { model: ReportPdfViewModel }) {
 }
 
 function PdfFooter() {
+  const printTimestamp = new Date().toLocaleString("pl-PL");
   return (
     <View style={styles.footer} fixed>
-      <Text>IzzyCheck © 2026 - Dokument generowany automatycznie dla podmiotu uprawnionego</Text>
+      <Text>IzzyCheck © 2026 | Wydruk: {printTimestamp} | Wersja generatora: v1.0.0</Text>
       <Text render={({ pageNumber, totalPages }) => `Strona ${pageNumber} z ${totalPages}`} />
     </View>
   );

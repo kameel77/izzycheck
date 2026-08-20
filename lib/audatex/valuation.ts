@@ -55,6 +55,7 @@ export class AudatexValuationAdapter {
       manufactureDate: input.manufactureDate || undefined,
       standardEquipment: classificationResult.standardEquipment,
       optionalEquipment: classificationResult.optionalEquipment,
+      technicalSpec: classificationResult.technicalSpec,
     };
   }
 
@@ -149,8 +150,9 @@ export class AudatexValuationAdapter {
 
     let monthXml = "";
     let yearXml = "";
-    if (input.manufactureDate && /^\d{4}-\d{2}/.test(input.manufactureDate)) {
-      const [y, m] = input.manufactureDate.split("-");
+    const dateSource = input.manufactureDate || input.dateOfFirstReg;
+    if (dateSource && /^\d{4}-\d{2}/.test(dateSource)) {
+      const [y, m] = dateSource.split("-");
       monthXml = `<ManufacturedMonth>${m}</ManufacturedMonth>`;
       yearXml = `<ManufacturedYear>${y}</ManufacturedYear>`;
     }
@@ -184,35 +186,147 @@ export class AudatexValuationAdapter {
     let model = "";
     let variant = "";
 
+    const rawAttributes: Record<string, string> = {};
+    let engineCapacityCm3: number | undefined;
+    let enginePowerKw: number | undefined;
+    let enginePowerHp: number | undefined;
+    let isEnginePowerHpCalculated: boolean | undefined;
+    let fuelType: string | undefined;
+    let driveType: string | undefined;
+    let gearboxType: string | undefined;
+    let gearCount: number | undefined;
+    let bodyType: string | undefined;
+    let doorsCount: number | undefined;
+    let seatsCount: number | undefined;
+    let curbWeightKg: number | undefined;
+    let grossWeightKg: number | undefined;
+    let lengthMm: number | undefined;
+    let widthMm: number | undefined;
+    let heightMm: number | undefined;
+    let wheelbaseMm: number | undefined;
+    let wheelSize: string | undefined;
+    let emissionStandard: string | undefined;
+    let maxSpeedKmh: number | undefined;
+
     const params = resultNode?.["CarInfo"]?.["Parameteres"]?.["Parameter"];
     if (Array.isArray(params)) {
       for (const p of params) {
-        const desc = p["Description"];
-        const val = p["Value"];
+        const desc = String(p["Description"] || "").trim();
+        const val = String(p["Value"] || "").trim();
+        if (!desc) continue;
+
+        rawAttributes[desc] = val;
+
         if (desc === "manufacturerName") make = val;
-        if (desc === "modelName") model = val;
-        if (desc === "typeName") variant = val;
+        else if (desc === "modelName") model = val;
+        else if (desc === "typeName") variant = val;
+        else if (desc === "engineCapacity" || desc === "Engine" || desc === "engineCC") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) engineCapacityCm3 = num;
+        } else if (desc === "enginePowerKw" || desc === "Kw" || desc === "KW") {
+          const num = parseFloat(val);
+          if (!isNaN(num)) {
+            enginePowerKw = Math.round(num);
+          }
+        } else if (desc === "enginePowerHp" || desc === "Hp" || desc === "HP" || desc === "KM") {
+          const num = parseFloat(val);
+          if (!isNaN(num)) {
+            enginePowerHp = Math.round(num);
+            isEnginePowerHpCalculated = false;
+          }
+        } else if (desc === "fuelType" || desc === "FuelType") {
+          fuelType = val;
+        } else if (desc === "driveType" || desc === "DriveType") {
+          driveType = val;
+        } else if (desc === "gearboxType" || desc === "GearboxType") {
+          gearboxType = val;
+        } else if (desc === "gearCount" || desc === "GearCount") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) gearCount = num;
+        } else if (desc === "bodyType" || desc === "BodyType") {
+          bodyType = val;
+        } else if (desc === "doorsCount" || desc === "DoorsCount") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) doorsCount = num;
+        } else if (desc === "seatsCount" || desc === "SeatsCount") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) seatsCount = num;
+        } else if (desc === "curbWeightKg" || desc === "CurbWeight") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) curbWeightKg = num;
+        } else if (desc === "grossWeightKg" || desc === "GrossWeight") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) grossWeightKg = num;
+        } else if (desc === "lengthMm" || desc === "Length") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) lengthMm = num;
+        } else if (desc === "widthMm" || desc === "Width") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) widthMm = num;
+        } else if (desc === "heightMm" || desc === "Height") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) heightMm = num;
+        } else if (desc === "wheelbaseMm" || desc === "Wheelbase") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) wheelbaseMm = num;
+        } else if (desc === "wheelSize" || desc === "WheelSize") {
+          wheelSize = val;
+        } else if (desc === "emissionStandard" || desc === "EmissionStandard") {
+          emissionStandard = val;
+        } else if (desc === "maxSpeedKmh" || desc === "MaxSpeed") {
+          const num = parseInt(val, 10);
+          if (!isNaN(num)) maxSpeedKmh = num;
+        }
       }
     }
 
-    const equipmentsRaw = resultNode?.["Equipment"];
+    // If vendor did not provide HP directly, derive it from kW and mark as calculated
+    if (enginePowerHp === undefined && enginePowerKw !== undefined) {
+      enginePowerHp = Math.round(enginePowerKw * 1.35962);
+      isEnginePowerHpCalculated = true;
+    }
+
+    const technicalSpec = {
+      engineCapacityCm3,
+      enginePowerKw,
+      enginePowerHp,
+      isEnginePowerHpCalculated,
+      fuelType,
+      driveType,
+      gearboxType,
+      gearCount,
+      bodyType,
+      doorsCount,
+      seatsCount,
+      curbWeightKg,
+      grossWeightKg,
+      lengthMm,
+      widthMm,
+      heightMm,
+      wheelbaseMm,
+      wheelSize,
+      emissionStandard,
+      maxSpeedKmh,
+      rawAttributes: Object.keys(rawAttributes).length > 0 ? rawAttributes : undefined,
+    };
+
+    const rawEquipments = resultNode?.["CarInfo"]?.["Equipments"]?.["Equipment"] || resultNode?.["Equipment"] || resultNode?.["CarInfo"]?.["Equipment"];
+    const equipmentsRaw = Array.isArray(rawEquipments) ? rawEquipments : rawEquipments ? [rawEquipments] : [];
     const standardEquipment: EquipmentItem[] = [];
     const optionalEquipment: EquipmentItem[] = [];
 
-    if (Array.isArray(equipmentsRaw)) {
-      for (const eq of equipmentsRaw) {
-        const item: EquipmentItem = {
-          code: String(eq["Code"] || ""),
-          name: String(eq["Name"] || ""),
-          type: eq["EquipmentType"] === "Standard" ? "Standard" : "Optional",
-        };
+    for (const eq of equipmentsRaw) {
+      const item: EquipmentItem = {
+        code: String(eq["Code"] || ""),
+        name: String(eq["Name"] || ""),
+        type: eq["EquipmentType"] === "Standard" ? "Standard" : "Optional",
+      };
 
-        if (item.type === "Standard") standardEquipment.push(item);
-        else optionalEquipment.push(item);
-      }
+      if (item.type === "Standard") standardEquipment.push(item);
+      else optionalEquipment.push(item);
     }
 
-    return { make, model, variant, standardEquipment, optionalEquipment };
+    return { make, model, variant, standardEquipment, optionalEquipment, technicalSpec };
   }
 
   public async postSoapWithRetry(url: string, body: string, soapAction: string): Promise<string> {
@@ -292,6 +406,7 @@ export class AudatexValuationAdapter {
       manufactureDate: input.manufactureDate || undefined,
       standardEquipment: classification.standardEquipment,
       optionalEquipment: classification.optionalEquipment,
+      technicalSpec: classification.technicalSpec,
     };
   }
 }

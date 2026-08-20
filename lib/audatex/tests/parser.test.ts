@@ -35,6 +35,15 @@ describe("Audatex Integration Adapters", () => {
     assert.strictEqual(val.model, "Seria 4 Coupé F32");
     assert.strictEqual(val.newPriceCv, 208909.0);
     assert.strictEqual(val.marketPriceCob, 124500.0);
+    assert.ok(val.technicalSpec);
+    assert.strictEqual(val.technicalSpec.engineCapacityCm3, 1997);
+    assert.strictEqual(val.technicalSpec.enginePowerKw, 180);
+    assert.strictEqual(val.technicalSpec.enginePowerHp, 245);
+    assert.strictEqual(val.technicalSpec.isEnginePowerHpCalculated, true);
+    assert.strictEqual(val.technicalSpec.fuelType, "Benzyna");
+    assert.strictEqual(val.technicalSpec.driveType, "4x4 (xDrive)");
+    assert.strictEqual(val.technicalSpec.gearboxType, "Automatyczna");
+    assert.strictEqual(val.technicalSpec.bodyType, "Coupé");
   });
 
   test("Parses claim history positive check", async () => {

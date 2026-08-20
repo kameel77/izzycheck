@@ -5,6 +5,7 @@ import {
 import {
   buildFallbackDamageAssessment,
 } from "../damage/normalize-damage-assessment.ts";
+import { VehicleTechnicalSpec } from "../audatex/types.ts";
 
 export interface ReportPdfClaimItem {
   index: number;
@@ -42,6 +43,7 @@ export interface ReportPdfViewModel {
   newPriceCv?: number;
   marketPriceCob?: number;
   technicalValueTh?: number;
+  technicalSpec?: VehicleTechnicalSpec;
   standardEquipment: { name: string; code: string }[];
   optionalEquipment: { name: string; code: string }[];
 
@@ -122,6 +124,7 @@ export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
     newPriceCv: snapshot?.newPriceCv,
     marketPriceCob: snapshot?.marketPriceCob,
     technicalValueTh: snapshot?.technicalValueTh,
+    technicalSpec: snapshot?.technicalSpecJson ? JSON.parse(snapshot.technicalSpecJson) : undefined,
     standardEquipment: stdEquipment,
     optionalEquipment: optEquipment,
 

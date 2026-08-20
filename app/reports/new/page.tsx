@@ -7,9 +7,9 @@ import { Car, Calendar, Gauge, CheckSquare, AlertCircle, ArrowRight, Loader2, In
 export default function NewReportPage() {
   const router = useRouter();
 
-  const [vin, setVin] = useState("WBA3N51030KS15173");
-  const [firstRegDate, setFirstRegDate] = useState("2021-04-15");
-  const [mileage, setMileage] = useState("45200");
+  const [vin, setVin] = useState("");
+  const [firstRegDate, setFirstRegDate] = useState("");
+  const [mileage, setMileage] = useState("");
   const [valuationDate, setValuationDate] = useState(new Date().toISOString().split("T")[0]);
 
   const [includeValuation, setIncludeValuation] = useState(true);

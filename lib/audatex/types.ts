@@ -23,6 +23,30 @@ export interface EquipmentItem {
   price?: number;
 }
 
+export interface VehicleTechnicalSpec {
+  engineCapacityCm3?: number;
+  enginePowerKw?: number;
+  enginePowerHp?: number;
+  isEnginePowerHpCalculated?: boolean;
+  fuelType?: string;
+  driveType?: string;
+  gearboxType?: string;
+  gearCount?: number;
+  bodyType?: string;
+  doorsCount?: number;
+  seatsCount?: number;
+  curbWeightKg?: number;
+  grossWeightKg?: number;
+  lengthMm?: number;
+  widthMm?: number;
+  heightMm?: number;
+  wheelbaseMm?: number;
+  wheelSize?: string;
+  emissionStandard?: string;
+  maxSpeedKmh?: number;
+  rawAttributes?: Record<string, string>;
+}
+
 export interface ValuationResult {
   ibsCode: string;
   make: string;
@@ -36,6 +60,7 @@ export interface ValuationResult {
   manufactureDate?: string;
   standardEquipment: EquipmentItem[];
   optionalEquipment: EquipmentItem[];
+  technicalSpec?: VehicleTechnicalSpec;
   rawXml?: string;
 }
 

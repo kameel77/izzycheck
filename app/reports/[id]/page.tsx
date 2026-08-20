@@ -79,6 +79,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
 
   const stdEquipment = snapshot?.standardEquipment ? JSON.parse(snapshot.standardEquipment) : [];
   const optEquipment = snapshot?.optionalEquipment ? JSON.parse(snapshot.optionalEquipment) : [];
+  const technicalSpec = snapshot?.technicalSpecJson ? JSON.parse(snapshot.technicalSpecJson) : null;
 
   const valModule = report.moduleResults?.find((m: any) => m.moduleId === "VALUATION");
   const checkModule = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_CHECK");
@@ -273,6 +274,127 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               </div>
             </div>
           </div>
+
+          {/* Technical Specifications Card */}
+          {technicalSpec && (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Car className="h-4 w-4 text-blue-400" /> Specyfikacja Techniczna Pojazdu
+                </h3>
+                <span className="text-[11px] font-medium text-slate-400 bg-slate-950 px-2.5 py-1 rounded-full border border-slate-800">
+                  Audatex Classification
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 text-xs">
+                <div className="space-y-1 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                  <span className="text-slate-400 font-semibold uppercase text-[10px]">Pojemność silnika</span>
+                  <p className="text-sm font-bold text-white">
+                    {technicalSpec.engineCapacityCm3 ? `${technicalSpec.engineCapacityCm3.toLocaleString("pl-PL")} cm³` : "Brak danych"}
+                  </p>
+                </div>
+
+                <div className="space-y-1 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                  <span className="text-slate-400 font-semibold uppercase text-[10px]">Moc silnika</span>
+                  <p className="text-sm font-bold text-white">
+                    {technicalSpec.enginePowerKw && technicalSpec.enginePowerHp
+                      ? `${technicalSpec.enginePowerKw} kW (${technicalSpec.enginePowerHp} KM${technicalSpec.isEnginePowerHpCalculated ? " — przeliczone" : ""})`
+                      : technicalSpec.enginePowerKw
+                      ? `${technicalSpec.enginePowerKw} kW`
+                      : technicalSpec.enginePowerHp
+                      ? `${technicalSpec.enginePowerHp} KM`
+                      : "Brak danych"}
+                  </p>
+                </div>
+
+                <div className="space-y-1 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                  <span className="text-slate-400 font-semibold uppercase text-[10px]">Paliwo / Napęd</span>
+                  <p className="text-sm font-bold text-white">
+                    {[technicalSpec.fuelType, technicalSpec.driveType].filter(Boolean).join(" / ") || "Brak danych"}
+                  </p>
+                </div>
+
+                <div className="space-y-1 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                  <span className="text-slate-400 font-semibold uppercase text-[10px]">Skrzynia biegów</span>
+                  <p className="text-sm font-bold text-white">
+                    {technicalSpec.gearboxType ? `${technicalSpec.gearboxType}${technicalSpec.gearCount ? ` (${technicalSpec.gearCount} biegów)` : ""}` : "Brak danych"}
+                  </p>
+                </div>
+
+                <div className="space-y-1 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                  <span className="text-slate-400 font-semibold uppercase text-[10px]">Nadwozie / Miejsca</span>
+                  <p className="text-sm font-bold text-white">
+                    {[technicalSpec.bodyType, technicalSpec.seatsCount ? `${technicalSpec.seatsCount} miejsc` : undefined].filter(Boolean).join(" / ") || "Brak danych"}
+                  </p>
+                </div>
+
+                <div className="space-y-1 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                  <span className="text-slate-400 font-semibold uppercase text-[10px]">Masa własna / DMC</span>
+                  <p className="text-sm font-bold text-white">
+                    {technicalSpec.curbWeightKg ? `${technicalSpec.curbWeightKg} kg / ${technicalSpec.grossWeightKg || "—"} kg` : "Brak danych"}
+                  </p>
+                </div>
+
+                <div className="space-y-1 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                  <span className="text-slate-400 font-semibold uppercase text-[10px]">Wymiary (Dł/Szer/Wys)</span>
+                  <p className="text-sm font-bold text-white">
+                    {technicalSpec.lengthMm ? `${technicalSpec.lengthMm} x ${technicalSpec.widthMm} x ${technicalSpec.heightMm} mm` : "Brak danych"}
+                  </p>
+                </div>
+
+                <div className="space-y-1 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                  <span className="text-slate-400 font-semibold uppercase text-[10px]">Koła / Emisja</span>
+                  <p className="text-sm font-bold text-white">
+                    {[technicalSpec.wheelSize, technicalSpec.emissionStandard].filter(Boolean).join(" / ") || "Brak danych"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Unmapped Raw Attributes Fallback */}
+              {technicalSpec.rawAttributes && (() => {
+                const KNOWN_ATTRS = new Set([
+                  "manufacturerName", "modelName", "typeName", "marketCode",
+                  "engineCapacity", "Engine", "engineCC",
+                  "enginePowerKw", "Kw", "KW",
+                  "enginePowerHp", "Hp", "HP", "KM",
+                  "fuelType", "FuelType",
+                  "driveType", "DriveType",
+                  "gearboxType", "GearboxType",
+                  "gearCount", "GearCount",
+                  "bodyType", "BodyType",
+                  "doorsCount", "DoorsCount",
+                  "seatsCount", "SeatsCount",
+                  "curbWeightKg", "CurbWeight",
+                  "grossWeightKg", "GrossWeight",
+                  "lengthMm", "Length",
+                  "widthMm", "Width",
+                  "heightMm", "Height",
+                  "wheelbaseMm", "Wheelbase",
+                  "wheelSize", "WheelSize",
+                  "emissionStandard", "EmissionStandard",
+                  "maxSpeedKmh", "MaxSpeed"
+                ]);
+                const unmapped = Object.entries(technicalSpec.rawAttributes).filter(([k]) => !KNOWN_ATTRS.has(k));
+                if (unmapped.length === 0) return null;
+                return (
+                  <div className="pt-3 border-t border-slate-800/80 space-y-2">
+                    <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+                      Pozostałe parametry od Audatex
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 text-xs">
+                      {unmapped.map(([k, v]) => (
+                        <div key={k} className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
+                          <span className="text-[10px] text-slate-500 font-mono block">{k}</span>
+                          <span className="text-xs font-medium text-slate-300">{String(v)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
             <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 space-y-4">
