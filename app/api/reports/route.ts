@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { isRateLimited } from "@/lib/rate-limit";
 import { computeRequestHash } from "@/lib/audatex/hash";
 import { Prisma } from "@prisma/client";
+import { generatePublicReference } from "@/lib/reports/reference";
 
 const valuationAdapter = new AudatexValuationAdapter();
 const historyAdapter = new AudatexHistoryAdapter();
@@ -122,6 +123,7 @@ export async function POST(req: Request) {
     try {
       report = await prisma.report.create({
         data: {
+          publicReference: generatePublicReference(),
           vin,
           firstRegistrationDate,
           mileage: mileageNum,

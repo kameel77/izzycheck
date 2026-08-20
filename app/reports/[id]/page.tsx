@@ -17,6 +17,7 @@ import {
   Info,
   Clock,
   Printer,
+  FileDown,
 } from "lucide-react";
 import { getClaimsHistoryPresentation } from "@/lib/report-claims-summary";
 import { DamageClaimVisualization } from "@/components/report/DamageClaimVisualization";
@@ -122,7 +123,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
           <div className="space-y-2">
             <div className="flex items-center gap-3 flex-wrap">
               <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-bold text-blue-400 border border-blue-500/20">
-                Raport IzzyCheck #{report.id.substring(0, 8)}
+                {report.publicReference ? `Nr ref: ${report.publicReference}` : `Raport IzzyCheck #${report.id.substring(0, 8)}`}
               </span>
               <span className="text-xs text-slate-400">
                 Data weryfikacji: {new Date(report.createdAt).toLocaleString("pl-PL")}
@@ -158,10 +159,16 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 bg-slate-950/70 p-4 rounded-2xl border border-slate-800">
             <div className="text-left sm:text-right">
-              <p className="text-[11px] font-semibold text-slate-400 uppercase">Operator Utworzenia</p>
-              <p className="text-sm font-bold text-white">{report.createdBy?.name || "Operator"}</p>
-              <p className="text-[10px] text-slate-500">{report.createdBy?.email}</p>
+              <span className="text-[11px] text-slate-400 block font-medium">Pobierz Certyfikowany Raport</span>
+              <span className="text-xs text-slate-300 font-semibold">Niezmienny dokument PDF</span>
             </div>
+            <a
+              href={`/api/reports/${report.id}/pdf`}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg shadow-blue-500/20 transition"
+              download
+            >
+              <FileDown className="h-4 w-4" /> Pobierz PDF
+            </a>
           </div>
         </div>
 
@@ -252,25 +259,25 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 space-y-2">
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Cena Nowego (CVv)</span>
                 <p className="text-3xl font-extrabold text-white">
-                  {snapshot?.newPriceCv ? `${snapshot.newPriceCv.toLocaleString("pl-PL")} PLN` : "Brak danych"}
+                  {snapshot?.newPriceCv ? `${snapshot.newPriceCv.toLocaleString("pl-PL")} PLN netto` : "Brak danych"}
                 </p>
-                <p className="text-[11px] text-slate-400">Nowy pojazd z wyposażeniem opcjonalnym i pakietami</p>
+                <p className="text-[11px] text-slate-400">Nowy pojazd z wyposażeniem opcjonalnym (bez VAT)</p>
               </div>
 
               <div className="rounded-2xl border border-blue-500/30 bg-blue-950/30 p-6 space-y-2 relative overflow-hidden">
                 <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Cena Rynkowa (COBv)</span>
                 <p className="text-3xl font-extrabold text-blue-400">
-                  {snapshot?.marketPriceCob ? `${snapshot.marketPriceCob.toLocaleString("pl-PL")} PLN` : "Brak danych"}
+                  {snapshot?.marketPriceCob ? `${snapshot.marketPriceCob.toLocaleString("pl-PL")} PLN netto` : "Brak danych"}
                 </p>
-                <p className="text-[11px] text-slate-300">Bieżąca powszechna wartość rynkowa</p>
+                <p className="text-[11px] text-slate-300">Bieżąca wartość rynkowa netto (bez VAT)</p>
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 space-y-2">
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Wartość Techniczna (THv)</span>
                 <p className="text-3xl font-extrabold text-emerald-400">
-                  {snapshot?.technicalValueTh ? `${snapshot.technicalValueTh.toLocaleString("pl-PL")} PLN` : "Brak danych"}
+                  {snapshot?.technicalValueTh ? `${snapshot.technicalValueTh.toLocaleString("pl-PL")} PLN netto` : "Brak danych"}
                 </p>
-                <p className="text-[11px] text-slate-400">Wartość techniczna wyliczona przez Audatex</p>
+                <p className="text-[11px] text-slate-400">Wartość techniczna netto (bez VAT) wyliczona przez Audatex</p>
               </div>
             </div>
           </div>

@@ -244,15 +244,15 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
               <View style={styles.row}>
                 <View style={styles.col}>
                   <Text style={styles.label}>Cena Nowego (CVv)</Text>
-                  <Text style={styles.value}>{model.newPriceCv?.toLocaleString("pl-PL")} PLN</Text>
+                  <Text style={styles.value}>{model.newPriceCv?.toLocaleString("pl-PL")} PLN netto (bez VAT)</Text>
                 </View>
                 <View style={styles.col}>
                   <Text style={styles.label}>Cena Rynkowa (COBv)</Text>
-                  <Text style={styles.valueAccent}>{model.marketPriceCob?.toLocaleString("pl-PL")} PLN</Text>
+                  <Text style={styles.valueAccent}>{model.marketPriceCob?.toLocaleString("pl-PL")} PLN netto (bez VAT)</Text>
                 </View>
                 <View style={styles.col}>
                   <Text style={styles.label}>Wartość Techniczna (THv)</Text>
-                  <Text style={styles.value}>{model.technicalValueTh?.toLocaleString("pl-PL")} PLN</Text>
+                  <Text style={styles.value}>{model.technicalValueTh?.toLocaleString("pl-PL")} PLN netto (bez VAT)</Text>
                 </View>
               </View>
             </View>
@@ -342,11 +342,17 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
         )}
 
         <View style={styles.disclaimerBox}>
-          <Text style={{ fontWeight: "bold", marginBottom: 2 }}>
-            Zastrzeżenie Źródłowe i Prawne Audatex:
+          <Text style={{ fontWeight: "bold", marginBottom: 3, color: "#78350f" }}>
+            KLAUZULA PRAWNA I OGRANICZENIE ODPOWIEDZIALNOŚCI:
+          </Text>
+          <Text style={{ marginBottom: 2 }}>
+            1. Niniejszy raport ma charakter analityczno-informacyjny i został sporządzony na podstawie danych dostarczonych przez system Audatex (AudaValuation oraz Claims History Engine). Dokument nie stanowi urzędowej opinii biegłego rzeczoznawcy majątkowego ani gwarancji bezwypadkowości pojazdu.
+          </Text>
+          <Text style={{ marginBottom: 2 }}>
+            2. Wszelkie zaprezentowane wartości kwotowe są wartościami bazowymi netto (bez VAT), zgodnie z danymi źródłowymi Audatex. System IzzyCheck nie dokonuje wyliczeń ani korekt stawek podatku od towarów i usług.
           </Text>
           <Text>
-            Prezentowane dane pochodzą z systemu Audatex Claims History Engine. IzzyCheck wizualizuje zarejestrowane strefy i grupy części. Dokument nie stanowi opinii rzeczoznawcy majątkowego ani dowodu stanu faktycznego pojazdu.
+            3. Izzy Lease Sp. z o.o. nie ponosi odpowiedzialności za decyzje finansowe, ubezpieczeniowe lub kredytowe podejmowane na podstawie niniejszego raportu przez nabywcę bądź podmioty trzecie.
           </Text>
         </View>
 
@@ -376,7 +382,7 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
                 <View style={styles.col}>
                   <Text style={styles.label}>Wartość Szkody</Text>
                   <Text style={styles.valueAccent}>
-                    {claim.damageValue ? `${claim.damageValue.toLocaleString("pl-PL")} ${claim.currency}` : "Brak kwoty"}
+                    {claim.damageValue ? `${claim.damageValue.toLocaleString("pl-PL")} ${claim.currency} netto (bez VAT)` : "Brak kwoty"}
                   </Text>
                 </View>
                 <View style={styles.col}>
@@ -485,16 +491,20 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
 }
 
 function PdfHeader({ model }: { model: ReportPdfViewModel }) {
+  const refText = model.publicReference || `ID: #${model.reportId.substring(0, 8)}`;
   return (
     <View style={styles.header}>
       <View>
         <Text style={styles.logoText}>IzzyCheck</Text>
         <Text style={styles.logoSub}>RAPORT HISTORII I WYCENY POJAZDU</Text>
+        <Text style={{ fontSize: 6.5, color: "#64748b", marginTop: 2 }}>
+          Wystawca: Izzy Lease Sp. z o.o. | NIP: 5213904562 | www.izzylease.pl
+        </Text>
       </View>
       <View style={styles.reportMeta}>
-        <Text style={styles.reportTitle}>Raport ID: #{model.reportId.substring(0, 8)}</Text>
+        <Text style={styles.reportTitle}>Nr ref: {refText}</Text>
         <Text style={styles.reportIdText}>VIN: {model.vin}</Text>
-        <Text style={{ fontSize: 7, color: "#64748b" }}>Wygenerowano: {model.createdAtFormatted}</Text>
+        <Text style={{ fontSize: 7, color: "#64748b" }}>Data zapytania: {model.createdAtFormatted}</Text>
       </View>
     </View>
   );

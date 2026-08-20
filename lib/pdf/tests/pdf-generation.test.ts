@@ -6,6 +6,7 @@ import { buildReportPdfViewModel } from "../report-pdf-view-model.ts";
 describe("PDF Generation & View Model Module", () => {
   const mockReport = {
     id: "report-12345678-abcd",
+    publicReference: "IC-2026-08-0417",
     vin: "WBA3N51030KS15173",
     firstRegistrationDate: "2021-04-15",
     mileage: 45200,
@@ -87,6 +88,7 @@ describe("PDF Generation & View Model Module", () => {
     const viewModel = buildReportPdfViewModel(mockReport);
 
     assert.strictEqual(viewModel.vin, "WBA3N51030KS15173");
+    assert.strictEqual(viewModel.publicReference, "IC-2026-08-0417");
     assert.strictEqual(viewModel.operatorName, "Jan Kowalski");
     assert.ok(viewModel.technicalSpec);
     assert.strictEqual(viewModel.technicalSpec.engineCapacityCm3, 1997);

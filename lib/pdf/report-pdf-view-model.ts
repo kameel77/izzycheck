@@ -25,6 +25,7 @@ export interface ReportPdfClaimItem {
 
 export interface ReportPdfViewModel {
   reportId: string;
+  publicReference?: string;
   vin: string;
   firstRegistrationDate: string;
   mileage?: number;
@@ -107,6 +108,7 @@ export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
 
   return {
     reportId: report.id,
+    publicReference: report.publicReference || undefined,
     vin: report.vin,
     firstRegistrationDate: report.firstRegistrationDate,
     mileage: report.mileage,

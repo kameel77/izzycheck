@@ -42,6 +42,7 @@ model User {
 
 model Report {
   id                    String               @id @default(uuid())
+  publicReference       String?              @unique
   vin                   String
   firstRegistrationDate String
   mileage               Int?
@@ -49,6 +50,9 @@ model Report {
   status                String               @default("COMPLETED") // COMPLETED | PARTIALLY_FAILED | FAILED
   idempotencyKey        String?
   requestHash           String?
+  pdfBytes              Bytes?
+  pdfGeneratedAt        DateTime?
+  pdfGeneratorVersion   String?
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   createdById           String
