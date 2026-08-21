@@ -156,6 +156,7 @@ describe("PDF Generation & View Model Module", () => {
   test("Renders PDF stress test with 250 standard equipment items across row-major grid without dropping items", async () => {
     const { renderToBuffer } = await import("@react-pdf/renderer");
     const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
+    const { chunkEquipmentForRows } = await import("../../reports/equipment.ts");
 
     const manyItems = Array.from({ length: 250 }, (_, i) => ({
       code: `CODE-${String(i + 1).padStart(3, "0")}`,
@@ -174,6 +175,12 @@ describe("PDF Generation & View Model Module", () => {
     const viewModel = buildReportPdfViewModel(heavyReport);
     assert.strictEqual(viewModel.standardEquipment.length, 250);
 
+    // Verify grid row-major arithmetic: 250 items ÷ 3 columns = 84 rows
+    const rows = chunkEquipmentForRows(viewModel.standardEquipment, 3);
+    assert.strictEqual(rows.length, 84);
+    assert.strictEqual(rows[0].length, 3);
+    assert.strictEqual(rows[83].length, 1); // Remainder 250 % 3 = 1
+
     const pdfDoc = React.createElement(ReportPdfDocument, { model: viewModel }) as any;
     const buffer = await renderToBuffer(pdfDoc);
 
@@ -184,13 +191,31 @@ describe("PDF Generation & View Model Module", () => {
     // Verify valid PDF header
     assert.strictEqual(pdfString.substring(0, 5), "%PDF-");
 
-    // Verify multi-page pagination: 250 items flow into multiple pages
+    // Verify exact multi-page count from row-major layout (Page 1 + 2 overflow equipment pages + 1 claim page = 4 pages)
     const pageCount = (pdfString.match(/\/Type\s*\/Page\b/g) || []).length;
-    assert.ok(pageCount >= 2, `Document with 250 items must span at least 2 pages (got ${pageCount})`);
+    assert.strictEqual(pageCount, 4, `84 rows of equipment with 1 claim must span exactly 4 pages (got ${pageCount})`);
   });
 
   test("Renders distinct empty state notices for missing valuation module vs zero items from Audatex", async () => {
     const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
+
+    function extractAllTexts(root: any): string[] {
+      const texts: string[] = [];
+      function traverse(node: any) {
+        if (!node) return;
+        if (typeof node === "string") {
+          texts.push(node);
+        } else if (typeof node === "number") {
+          texts.push(String(node));
+        } else if (Array.isArray(node)) {
+          node.forEach(traverse);
+        } else if (node.props?.children) {
+          traverse(node.props.children);
+        }
+      }
+      traverse(root);
+      return texts;
+    }
 
     // Case 1: Valuation module failed
     const failedValReport = {
@@ -199,13 +224,20 @@ describe("PDF Generation & View Model Module", () => {
       vehicleSnapshot: null,
     };
     const vmFailed = buildReportPdfViewModel(failedValReport);
-    const elemFailed = React.createElement(ReportPdfDocument, { model: vmFailed }) as any;
+    const elemFailed = ReportPdfDocument({ model: vmFailed }) as any;
     assert.ok(elemFailed);
     assert.strictEqual(vmFailed.valuationStatus, "FAILED");
+
+    const failedTexts = extractAllTexts(elemFailed);
+    assert.ok(
+      failedTexts.some((t) => t.includes("Moduł wyceny nie został wykonany")),
+      "Document must render failed valuation notice when valuation module fails"
+    );
 
     // Case 2: Valuation succeeded but zero items returned
     const emptyEqReport = {
       ...mockReport,
+      moduleResults: [{ moduleId: "VALUATION", status: "SUCCEEDED" }],
       vehicleSnapshot: {
         ...mockReport.vehicleSnapshot,
         standardEquipment: JSON.stringify([]),
@@ -213,14 +245,25 @@ describe("PDF Generation & View Model Module", () => {
       },
     };
     const vmEmpty = buildReportPdfViewModel(emptyEqReport);
-    const elemEmpty = React.createElement(ReportPdfDocument, { model: vmEmpty }) as any;
+    const elemEmpty = ReportPdfDocument({ model: vmEmpty }) as any;
     assert.ok(elemEmpty);
     assert.strictEqual(vmEmpty.standardEquipment.length, 0);
     assert.strictEqual(vmEmpty.optionalEquipment.length, 0);
 
+    const emptyTexts = extractAllTexts(elemEmpty);
+    assert.ok(
+      emptyTexts.some((t) => t.includes("Audatex nie zwrócił pozycji wyposażenia")),
+      "Document must render zero standard equipment notice"
+    );
+    assert.ok(
+      emptyTexts.some((t) => t.includes("Brak zarejestrowanego wyposażenia opcjonalnego w Audatex")),
+      "Document must render zero optional equipment notice"
+    );
+
     // Case 3: Common mixed case: standard present, optional empty
     const mixedEqReport = {
       ...mockReport,
+      moduleResults: [{ moduleId: "VALUATION", status: "SUCCEEDED" }],
       vehicleSnapshot: {
         ...mockReport.vehicleSnapshot,
         standardEquipment: JSON.stringify([{ code: "S1", name: "Klimatyzacja" }]),
@@ -228,7 +271,16 @@ describe("PDF Generation & View Model Module", () => {
       },
     };
     const vmMixed = buildReportPdfViewModel(mixedEqReport);
-    assert.strictEqual(vmMixed.standardEquipment.length, 1);
-    assert.strictEqual(vmMixed.optionalEquipment.length, 0);
+    const elemMixed = ReportPdfDocument({ model: vmMixed }) as any;
+    const mixedTexts = extractAllTexts(elemMixed);
+
+    assert.ok(
+      mixedTexts.some((t) => t.includes("Klimatyzacja")),
+      "Mixed document must render standard equipment item"
+    );
+    assert.ok(
+      mixedTexts.some((t) => t.includes("Brak zarejestrowanego wyposażenia opcjonalnego w Audatex")),
+      "Mixed document must render zero optional equipment notice"
+    );
   });
 });
