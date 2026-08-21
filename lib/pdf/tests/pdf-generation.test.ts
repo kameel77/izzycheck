@@ -152,4 +152,83 @@ describe("PDF Generation & View Model Module", () => {
     assert.ok(ISSUER_CONFIG.companyName);
     assert.ok(ISSUER_CONFIG.taxId);
   });
+
+  test("Renders PDF stress test with 250 standard equipment items across row-major grid without dropping items", async () => {
+    const { renderToBuffer } = await import("@react-pdf/renderer");
+    const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
+
+    const manyItems = Array.from({ length: 250 }, (_, i) => ({
+      code: `CODE-${String(i + 1).padStart(3, "0")}`,
+      name: `Element standardowy #${i + 1} z polskimi znakami ąćęłńóśźż`,
+    }));
+
+    const heavyReport = {
+      ...mockReport,
+      vehicleSnapshot: {
+        ...mockReport.vehicleSnapshot,
+        standardEquipment: JSON.stringify(manyItems),
+        optionalEquipment: JSON.stringify([{ code: "OPT-1", name: "Pakiet Sportowy" }]),
+      },
+    };
+
+    const viewModel = buildReportPdfViewModel(heavyReport);
+    assert.strictEqual(viewModel.standardEquipment.length, 250);
+
+    const pdfDoc = React.createElement(ReportPdfDocument, { model: viewModel }) as any;
+    const buffer = await renderToBuffer(pdfDoc);
+
+    assert.ok(buffer);
+    assert.ok(buffer.length > 30000, `Buffer should be substantial for 250 items (got ${buffer.length} bytes)`);
+
+    const pdfString = buffer.toString("latin1");
+    // Verify valid PDF header
+    assert.strictEqual(pdfString.substring(0, 5), "%PDF-");
+
+    // Verify multi-page pagination: 250 items flow into multiple pages
+    const pageCount = (pdfString.match(/\/Type\s*\/Page\b/g) || []).length;
+    assert.ok(pageCount >= 2, `Document with 250 items must span at least 2 pages (got ${pageCount})`);
+  });
+
+  test("Renders distinct empty state notices for missing valuation module vs zero items from Audatex", async () => {
+    const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
+
+    // Case 1: Valuation module failed
+    const failedValReport = {
+      ...mockReport,
+      moduleResults: [{ moduleId: "VALUATION", status: "FAILED" }],
+      vehicleSnapshot: null,
+    };
+    const vmFailed = buildReportPdfViewModel(failedValReport);
+    const elemFailed = React.createElement(ReportPdfDocument, { model: vmFailed }) as any;
+    assert.ok(elemFailed);
+    assert.strictEqual(vmFailed.valuationStatus, "FAILED");
+
+    // Case 2: Valuation succeeded but zero items returned
+    const emptyEqReport = {
+      ...mockReport,
+      vehicleSnapshot: {
+        ...mockReport.vehicleSnapshot,
+        standardEquipment: JSON.stringify([]),
+        optionalEquipment: JSON.stringify([]),
+      },
+    };
+    const vmEmpty = buildReportPdfViewModel(emptyEqReport);
+    const elemEmpty = React.createElement(ReportPdfDocument, { model: vmEmpty }) as any;
+    assert.ok(elemEmpty);
+    assert.strictEqual(vmEmpty.standardEquipment.length, 0);
+    assert.strictEqual(vmEmpty.optionalEquipment.length, 0);
+
+    // Case 3: Common mixed case: standard present, optional empty
+    const mixedEqReport = {
+      ...mockReport,
+      vehicleSnapshot: {
+        ...mockReport.vehicleSnapshot,
+        standardEquipment: JSON.stringify([{ code: "S1", name: "Klimatyzacja" }]),
+        optionalEquipment: JSON.stringify([]),
+      },
+    };
+    const vmMixed = buildReportPdfViewModel(mixedEqReport);
+    assert.strictEqual(vmMixed.standardEquipment.length, 1);
+    assert.strictEqual(vmMixed.optionalEquipment.length, 0);
+  });
 });

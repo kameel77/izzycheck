@@ -106,6 +106,17 @@ async function callClassification(ibsCode, language, marketCode, month, year) {
   const params = resultNode?.["CarInfo"]?.["Parameteres"]?.["Parameter"];
   const paramsList = Array.isArray(params) ? params : params ? [params] : [];
 
+  console.log(`\nResultedTypes keys:`, Object.keys(resultNode || {}));
+  if (resultNode?.["CarInfo"]) {
+    console.log(`CarInfo keys:`, Object.keys(resultNode["CarInfo"]));
+  }
+  const equipments = resultNode?.["CarInfo"]?.["Equipments"]?.["Equipment"] || resultNode?.["Equipments"]?.["Equipment"] || resultNode?.["CarInfo"]?.["Equipment"];
+  const eqList = Array.isArray(equipments) ? equipments : equipments ? [equipments] : [];
+  console.log(`Found ${eqList.length} equipment items:`);
+  if (eqList.length > 0) {
+    console.table(eqList.slice(0, 15));
+  }
+
   console.log(`\nFound ${paramsList.length} parameters:`);
   console.table(
     paramsList.map((p) => ({
@@ -115,7 +126,7 @@ async function callClassification(ibsCode, language, marketCode, month, year) {
     }))
   );
 
-  return { xml, paramsList };
+  return { xml, paramsList, eqList };
 }
 
 async function run() {

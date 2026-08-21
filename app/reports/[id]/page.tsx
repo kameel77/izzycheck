@@ -22,6 +22,7 @@ import {
 import { getClaimsHistoryPresentation } from "@/lib/report-claims-summary";
 import { DamageClaimVisualization } from "@/components/report/DamageClaimVisualization";
 import { DownloadReportPdfButton } from "@/components/report/DownloadReportPdfButton";
+import { sortEquipmentAlphabetically } from "@/lib/reports/equipment";
 
 export default function ReportDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -85,6 +86,8 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
   const valModule = report.moduleResults?.find((m: any) => m.moduleId === "VALUATION");
   const checkModule = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_CHECK");
   const detailsModule = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_DETAILS");
+
+  const isValuationFailed = !valModule || valModule.status === "FAILED" || valModule.status === "NIEWYKONANO";
 
   const claimsHistoryPresentation = getClaimsHistoryPresentation({
     claimCount: claims.length,
@@ -377,52 +380,83 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+          {/* Equipment Sections */}
+          <div className="space-y-6">
+            {/* Optional Equipment & Packages Card */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Wyposażenie Standardowe</h3>
-                <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-semibold text-slate-300">
-                  {stdEquipment.length} pozycji
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-blue-400" /> Wyposażenie Dodatkowe & Pakiety
+                </h3>
+                <span className="rounded-full bg-blue-500/10 px-2.5 py-0.5 text-xs font-semibold text-blue-400 border border-blue-500/20">
+                  {sortEquipmentAlphabetically(optEquipment).length} pozycji
                 </span>
               </div>
 
-              {stdEquipment.length === 0 ? (
-                <p className="text-xs text-slate-500">Brak szczegółów wyposażenia standardowego.</p>
+              {isValuationFailed ? (
+                <div className="p-3 rounded-xl bg-red-950/30 border border-red-800/40 text-xs text-red-400 flex items-center gap-2">
+                  <XCircle className="h-4 w-4 shrink-0" />
+                  <span>Moduł wyceny nie został wykonany</span>
+                </div>
+              ) : sortEquipmentAlphabetically(optEquipment).length === 0 ? (
+                <p className="text-xs text-slate-500 italic py-2">
+                  Brak zarejestrowanego wyposażenia opcjonalnego w Audatex.
+                </p>
               ) : (
-                <ul className="divide-y divide-slate-800/60 text-xs text-slate-300">
-                  {stdEquipment.map((eq: any, idx: number) => (
-                    <li key={idx} className="py-2.5 flex items-center justify-between">
-                      <span className="font-medium text-slate-200">{eq.name}</span>
-                      <span className="font-mono text-[11px] text-slate-500 bg-slate-950 px-2 py-0.5 rounded">
-                        Kod: {eq.code}
-                      </span>
-                    </li>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {sortEquipmentAlphabetically(optEquipment).map((eq: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className="p-3 rounded-xl bg-blue-950/20 border border-blue-800/40 flex items-center justify-between gap-2"
+                    >
+                      <span className="font-medium text-xs text-blue-200">{eq.name}</span>
+                      {eq.code && (
+                        <span className="font-mono text-[10px] text-blue-400 bg-blue-900/40 px-2 py-0.5 rounded shrink-0 border border-blue-700/40">
+                          {eq.code}
+                        </span>
+                      )}
+                    </div>
                   ))}
-                </ul>
+                </div>
               )}
             </div>
 
+            {/* Standard Equipment 3-Column Alphabetical Grid */}
             <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">Wyposażenie Dodatkowe & Pakiety</h3>
-                <span className="rounded-full bg-blue-500/10 px-2.5 py-0.5 text-xs font-semibold text-blue-400 border border-blue-500/20">
-                  {optEquipment.length} pozycji
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <Car className="h-4 w-4 text-slate-400" /> Wyposażenie Standardowe
+                </h3>
+                <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-semibold text-slate-300">
+                  {sortEquipmentAlphabetically(stdEquipment).length} pozycji
                 </span>
               </div>
 
-              {optEquipment.length === 0 ? (
-                <p className="text-xs text-slate-500">Brak wyposażenia opcjonalnego w identyfikacji VIN.</p>
+              {isValuationFailed ? (
+                <div className="p-3 rounded-xl bg-red-950/30 border border-red-800/40 text-xs text-red-400 flex items-center gap-2">
+                  <XCircle className="h-4 w-4 shrink-0" />
+                  <span>Moduł wyceny nie został wykonany</span>
+                </div>
+              ) : sortEquipmentAlphabetically(stdEquipment).length === 0 ? (
+                <p className="text-xs text-slate-500 italic py-2">
+                  Audatex nie zwrócił pozycji wyposażenia.
+                </p>
               ) : (
-                <ul className="divide-y divide-slate-800/60 text-xs text-slate-300">
-                  {optEquipment.map((eq: any, idx: number) => (
-                    <li key={idx} className="py-2.5 flex items-center justify-between">
-                      <span className="font-medium text-slate-200">{eq.name}</span>
-                      <span className="font-mono text-[11px] text-blue-400 bg-blue-950/50 border border-blue-800/40 px-2 py-0.5 rounded">
-                        Kod: {eq.code}
-                      </span>
-                    </li>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs text-slate-300">
+                  {sortEquipmentAlphabetically(stdEquipment).map((eq: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className="p-2.5 rounded-lg bg-slate-950/50 border border-slate-800/60 flex items-center justify-between gap-2"
+                    >
+                      <span className="text-slate-200">{eq.name}</span>
+                      {eq.code && (
+                        <span className="font-mono text-[10px] text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded shrink-0">
+                          {eq.code}
+                        </span>
+                      )}
+                    </div>
                   ))}
-                </ul>
+                </div>
               )}
             </div>
           </div>

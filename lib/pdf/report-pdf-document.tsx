@@ -16,6 +16,7 @@ import {
 } from "@react-pdf/renderer";
 import { ReportPdfViewModel, ReportPdfClaimItem } from "./report-pdf-view-model.ts";
 import { ISSUER_CONFIG } from "../config/issuer.ts";
+import { sortEquipmentAlphabetically, chunkEquipmentForRows } from "../reports/equipment.ts";
 import pkg from "../../package.json" with { type: "json" };
 
 // Register local Unicode TTF font for Polish characters (ą ć ę ł ń ó ś ź ż Ą Ć Ę Ł Ń Ó Ś Ź Ż)
@@ -178,9 +179,92 @@ const styles = StyleSheet.create({
     fontSize: 7,
     color: "#8c6b00",
   },
+  eqGridRow: {
+    flexDirection: "row",
+    marginBottom: 3,
+  },
+  eqGridCell: {
+    width: "33.33%",
+    paddingRight: 4,
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  eqBullet: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: "#3b82f6",
+    marginTop: 3,
+    marginRight: 3,
+  },
+  eqText: {
+    fontSize: 6.5,
+    color: "#334155",
+    flex: 1,
+    lineHeight: 1.2,
+  },
+  optCard: {
+    width: "49%",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    backgroundColor: "#eff6ff",
+    borderRadius: 4,
+    padding: 4,
+    marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  optBadge: {
+    fontSize: 6,
+    fontWeight: "bold",
+    color: "#1d4ed8",
+    backgroundColor: "#dbeafe",
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderRadius: 2,
+  },
+  optText: {
+    fontSize: 7,
+    fontWeight: "bold",
+    color: "#1e3a8a",
+    flex: 1,
+    marginRight: 4,
+  },
+  emptyNoticeBox: {
+    padding: 6,
+    backgroundColor: "#f8fafc",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  emptyNoticeText: {
+    fontSize: 7,
+    color: "#64748b",
+  },
+  failedNoticeBox: {
+    padding: 6,
+    backgroundColor: "#fef2f2",
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  failedNoticeText: {
+    fontSize: 7,
+    color: "#b91c1c",
+    fontWeight: "bold",
+  },
 });
 
 export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): React.ReactElement<any> {
+  const isValuationFailed = model.valuationStatus === "FAILED" || model.valuationStatus === "NIEWYKONANO";
+  const sortedStd = sortEquipmentAlphabetically(model.standardEquipment || []);
+  const sortedOpt = sortEquipmentAlphabetically(model.optionalEquipment || []);
+  const stdRows = chunkEquipmentForRows(sortedStd, 3);
+  const optRows = chunkEquipmentForRows(sortedOpt, 2);
+
   return (
     <Document title={`Raport-IzzyCheck-${model.vin}`} author="IzzyCheck System">
       {/* PAGE 1: Vehicle & Report Summary */}
@@ -340,6 +424,66 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
               )}
             </View>
           </>
+        )}
+
+        {/* 5. Wyposażenie Dodatkowe & Pakiety (Opcje) */}
+        <Text style={styles.sectionTitle}>
+          5. Wyposażenie Dodatkowe & Pakiety {sortedOpt.length > 0 ? `(${sortedOpt.length} pozycji)` : ""}
+        </Text>
+        {isValuationFailed ? (
+          <View style={styles.failedNoticeBox}>
+            <Text style={styles.failedNoticeText}>Moduł wyceny nie został wykonany</Text>
+          </View>
+        ) : sortedOpt.length === 0 ? (
+          <View style={styles.emptyNoticeBox}>
+            <Text style={styles.emptyNoticeText}>Brak zarejestrowanego wyposażenia opcjonalnego w Audatex</Text>
+          </View>
+        ) : (
+          <View style={{ marginBottom: 6 }}>
+            {optRows.map((row, rIdx) => (
+              <View key={`opt-row-${rIdx}`} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 3 }}>
+                {row.map((item, cIdx) => (
+                  <View key={`opt-item-${rIdx}-${cIdx}`} style={styles.optCard}>
+                    <Text style={styles.optText}>{item.name}</Text>
+                    {item.code && <Text style={styles.optBadge}>Kod: {item.code}</Text>}
+                  </View>
+                ))}
+                {row.length === 1 && <View style={{ width: "49%" }} />}
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* 6. Wyposażenie Standardowe (Siatka 3-kolumnowa w układzie wierszowym) */}
+        <Text style={styles.sectionTitle}>
+          6. Wyposażenie Standardowe {sortedStd.length > 0 ? `(${sortedStd.length} pozycji)` : ""}
+        </Text>
+        {isValuationFailed ? (
+          <View style={styles.failedNoticeBox}>
+            <Text style={styles.failedNoticeText}>Moduł wyceny nie został wykonany</Text>
+          </View>
+        ) : sortedStd.length === 0 ? (
+          <View style={styles.emptyNoticeBox}>
+            <Text style={styles.emptyNoticeText}>Audatex nie zwrócił pozycji wyposażenia</Text>
+          </View>
+        ) : (
+          <View style={{ marginBottom: 8 }}>
+            {stdRows.map((row, rIdx) => (
+              <View key={`std-row-${rIdx}`} style={styles.eqGridRow}>
+                {row.map((item, cIdx) => (
+                  <View key={`std-item-${rIdx}-${cIdx}`} style={styles.eqGridCell}>
+                    <View style={styles.eqBullet} />
+                    <Text style={styles.eqText}>
+                      {item.name} {item.code ? `(${item.code})` : ""}
+                    </Text>
+                  </View>
+                ))}
+                {Array.from({ length: 3 - row.length }).map((_, padIdx) => (
+                  <View key={`pad-${padIdx}`} style={{ width: "33.33%" }} />
+                ))}
+              </View>
+            ))}
+          </View>
         )}
 
         <View style={styles.disclaimerBox}>
