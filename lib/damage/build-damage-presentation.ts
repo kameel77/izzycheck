@@ -37,9 +37,10 @@ export function buildDamagePresentation(
   claimId: string,
   assessment?: DamageAssessment,
   makeModelStr?: string,
-  filterCategory: DamageCategory | "ALL" = "ALL"
+  filterCategory: DamageCategory | "ALL" = "ALL",
+  technicalSpecBodyType?: string
 ): DamagePresentationModel {
-  const template = resolveVehicleTemplate(makeModelStr);
+  const template = resolveVehicleTemplate(makeModelStr, technicalSpecBodyType);
   const rawMarkers = assessment?.markers || [];
 
   const categoryCounts: Record<DamageCategory, number> = {

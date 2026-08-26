@@ -1,0 +1,194 @@
+{
+  "suv-rf3q": {
+    "src": "suv_front.png",
+    "raw_size": [
+      1448,
+      1086
+    ],
+    "cropped_size": [
+      1281,
+      647
+    ],
+    "ratio": 1.9799072642967543,
+    "canvas_size": [
+      1280,
+      640
+    ],
+    "body_box_on_canvas": [
+      65,
+      20,
+      1215,
+      600
+    ],
+    "webp_kb": 47.8,
+    "jpeg_kb": 45.0
+  },
+  "suv-lr3q": {
+    "src": "suv_back.png",
+    "raw_size": [
+      1448,
+      1086
+    ],
+    "cropped_size": [
+      1342,
+      633
+    ],
+    "ratio": 2.1200631911532386,
+    "canvas_size": [
+      1280,
+      640
+    ],
+    "body_box_on_canvas": [
+      65,
+      58,
+      1215,
+      600
+    ],
+    "webp_kb": 44.3,
+    "jpeg_kb": 42.6
+  },
+  "sedan-rf3q": {
+    "src": "sedan_front.png",
+    "raw_size": [
+      1760,
+      1328
+    ],
+    "cropped_size": [
+      1631,
+      712
+    ],
+    "ratio": 2.2907303370786516,
+    "canvas_size": [
+      1280,
+      640
+    ],
+    "body_box_on_canvas": [
+      65,
+      98,
+      1215,
+      600
+    ],
+    "webp_kb": 50.9,
+    "jpeg_kb": 41.5
+  },
+  "sedan-lr3q": {
+    "src": "sedan_back.png",
+    "raw_size": [
+      1760,
+      1328
+    ],
+    "cropped_size": [
+      1587,
+      681
+    ],
+    "ratio": 2.3303964757709252,
+    "canvas_size": [
+      1280,
+      640
+    ],
+    "body_box_on_canvas": [
+      65,
+      107,
+      1215,
+      600
+    ],
+    "webp_kb": 44.7,
+    "jpeg_kb": 38.6
+  },
+  "kombi-rf3q": {
+    "src": "kombi_front.png",
+    "raw_size": [
+      1760,
+      1328
+    ],
+    "cropped_size": [
+      1521,
+      661
+    ],
+    "ratio": 2.301059001512859,
+    "canvas_size": [
+      1280,
+      640
+    ],
+    "body_box_on_canvas": [
+      65,
+      101,
+      1215,
+      600
+    ],
+    "webp_kb": 55.6,
+    "jpeg_kb": 44.2
+  },
+  "kombi-lr3q": {
+    "src": "kombi_back.png",
+    "raw_size": [
+      1760,
+      1328
+    ],
+    "cropped_size": [
+      1503,
+      656
+    ],
+    "ratio": 2.2911585365853657,
+    "canvas_size": [
+      1280,
+      640
+    ],
+    "body_box_on_canvas": [
+      65,
+      99,
+      1215,
+      600
+    ],
+    "webp_kb": 50.6,
+    "jpeg_kb": 41.5
+  },
+  "hatchback-rf3q": {
+    "src": "hatchback_front.png",
+    "raw_size": [
+      1760,
+      1328
+    ],
+    "cropped_size": [
+      1493,
+      709
+    ],
+    "ratio": 2.1057827926657264,
+    "canvas_size": [
+      1280,
+      640
+    ],
+    "body_box_on_canvas": [
+      65,
+      54,
+      1215,
+      600
+    ],
+    "webp_kb": 51.9,
+    "jpeg_kb": 42.5
+  },
+  "hatchback-lr3q": {
+    "src": "hatchback_back.png",
+    "raw_size": [
+      1760,
+      1328
+    ],
+    "cropped_size": [
+      1506,
+      702
+    ],
+    "ratio": 2.1452991452991452,
+    "canvas_size": [
+      1280,
+      640
+    ],
+    "body_box_on_canvas": [
+      65,
+      64,
+      1215,
+      600
+    ],
+    "webp_kb": 46.7,
+    "jpeg_kb": 40.1
+  }
+}

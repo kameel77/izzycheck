@@ -726,6 +726,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                       <DamageClaimVisualization
                         claim={c}
                         vehicleMakeModel={snapshot?.make ? `${snapshot.make} ${snapshot.model || ""}` : undefined}
+                        bodyType={technicalSpec?.bodyType}
                       />
                     </div>
                   );

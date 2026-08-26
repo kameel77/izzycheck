@@ -6,7 +6,7 @@ import {
 } from "../normalize-damage-assessment.ts";
 
 describe("Normalize Damage Assessment & Legacy Fallback", () => {
-  test("Normalizes zone codes 01 (Front Left) to left-rear-3q and 05 (Front Right) to right-front-3q", () => {
+  test("Normalizes zone codes 01 (Front Left) to right-front-3q and 05 (Front Right) to right-front-3q", () => {
     const res = normalizeDamageAssessment({
       damagePositionCodes: ["01", "05", "18"],
     });
@@ -16,7 +16,7 @@ describe("Normalize Damage Assessment & Legacy Fallback", () => {
     const m01 = res.markers.find((m) => m.sourceCode === "01");
     assert.ok(m01);
     assert.strictEqual(m01.labelPl, "Strefa 01: Przód lewy góra");
-    assert.deepStrictEqual(m01.viewAnchors, ["left-rear-3q"]);
+    assert.deepStrictEqual(m01.viewAnchors, ["right-front-3q"]);
 
     const m05 = res.markers.find((m) => m.sourceCode === "05");
     assert.ok(m05);

@@ -18,11 +18,13 @@ interface DamageClaimVisualizationProps {
     damageAssessmentJson?: string | null;
   };
   vehicleMakeModel?: string;
+  bodyType?: string;
 }
 
 export function DamageClaimVisualization({
   claim,
   vehicleMakeModel,
+  bodyType,
 }: DamageClaimVisualizationProps) {
   const [selectedCategory, setSelectedCategory] = useState<DamageCategory | "ALL">("ALL");
 
@@ -44,7 +46,8 @@ export function DamageClaimVisualization({
     claim.claimId,
     assessment,
     makeModel,
-    selectedCategory
+    selectedCategory,
+    bodyType
   );
 
   const hasUnpositionedGroups = presentation.markers.some((m) => m.viewVisibilityText === "Brak lokalizacji na makiecie");
@@ -78,11 +81,9 @@ export function DamageClaimVisualization({
         </div>
       )}
 
-      {/* SVG Perspectives */}
+      {/* Realistic / Schematic Stage Views */}
       <VehicleDamageViews
-        bodyType={presentation.template.bodyType}
-        labelPl={presentation.template.labelPl}
-        isGeneric={presentation.template.isGeneric}
+        template={presentation.template}
         markers={presentation.markers}
         hasUnderbodyView={presentation.hasUnderbodyView}
       />

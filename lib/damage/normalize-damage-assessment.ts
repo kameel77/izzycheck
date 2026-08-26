@@ -29,11 +29,10 @@ export interface DamageAssessment {
 }
 
 export const ZONE_VIEW_ANCHORS: Record<string, ("right-front-3q" | "left-rear-3q" | "underbody-bottom")[]> = {
-  // Left Front side zones -> visible on left-rear-3q
-  "01": ["left-rear-3q"],
-  "02": ["left-rear-3q"],
-  "03": ["left-rear-3q"],
-  // Right Front side & center zones -> visible on right-front-3q
+  // Front zones (Left, Right, Center) -> visible on right-front-3q
+  "01": ["right-front-3q"],
+  "02": ["right-front-3q"],
+  "03": ["right-front-3q"],
   "04": ["right-front-3q"],
   "05": ["right-front-3q"],
   "06": ["right-front-3q"],
@@ -67,13 +66,13 @@ export const ZONE_VIEW_ANCHORS: Record<string, ("right-front-3q" | "left-rear-3q
 
 export const GENERAL_FLAG_LABELS: Record<string, { labelPl: string; anchors: ("right-front-3q" | "left-rear-3q" | "underbody-bottom")[] }> = {
   front: { labelPl: "Strefa przednia (ogólna)", anchors: ["right-front-3q"] },
-  "front-left": { labelPl: "Strefa przednia lewa (ogólna)", anchors: ["left-rear-3q"] },
-  "front-right": { labelPl: "Strefa przednia prawi (ogólna)", anchors: ["right-front-3q"] },
+  "front-left": { labelPl: "Strefa przednia lewa (ogólna)", anchors: ["right-front-3q"] },
+  "front-right": { labelPl: "Strefa przednia prawa (ogólna)", anchors: ["right-front-3q"] },
   rear: { labelPl: "Strefa tylna (ogólna)", anchors: ["left-rear-3q"] },
   "rear-left": { labelPl: "Strefa tylna lewa (ogólna)", anchors: ["left-rear-3q"] },
-  "rear-right": { labelPl: "Strefa tylna prawy (ogólna)", anchors: ["left-rear-3q"] },
+  "rear-right": { labelPl: "Strefa tylna prawa (ogólna)", anchors: ["left-rear-3q"] },
   "side-left": { labelPl: "Strefa boczna lewa (ogólna)", anchors: ["left-rear-3q"] },
-  "side-right": { labelPl: "Strefa boczna prawy (ogólna)", anchors: ["right-front-3q"] },
+  "side-right": { labelPl: "Strefa boczna prawa (ogólna)", anchors: ["right-front-3q"] },
   roof: { labelPl: "Strefa dachu (ogólna)", anchors: ["right-front-3q", "left-rear-3q"] },
   interior: { labelPl: "Kabinowe wnętrze (ogólne)", anchors: ["right-front-3q", "left-rear-3q"] },
   underbody: { labelPl: "Strefa podwozia (ogólna)", anchors: ["underbody-bottom"] },

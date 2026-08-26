@@ -69,6 +69,8 @@ export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
   const checkModule = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_CHECK");
   const detailsModule = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_DETAILS");
 
+  const techSpec = snapshot?.technicalSpecJson ? JSON.parse(snapshot.technicalSpecJson) : undefined;
+
   const claims: ReportPdfClaimItem[] = rawClaims.map((c: any, idx: number) => {
     let assessment = c.damageAssessmentJson
       ? JSON.parse(c.damageAssessmentJson)
@@ -86,7 +88,8 @@ export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
       c.claimId,
       assessment,
       c.makeModel || vehicleMakeModel,
-      "ALL"
+      "ALL",
+      techSpec?.bodyType
     );
 
     return {
@@ -126,7 +129,7 @@ export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
     newPriceCv: snapshot?.newPriceCv,
     marketPriceCob: snapshot?.marketPriceCob,
     technicalValueTh: snapshot?.technicalValueTh,
-    technicalSpec: snapshot?.technicalSpecJson ? JSON.parse(snapshot.technicalSpecJson) : undefined,
+    technicalSpec: techSpec,
     standardEquipment: stdEquipment,
     optionalEquipment: optEquipment,
 

@@ -1,10 +1,12 @@
 import React from "react";
 import path from "node:path";
+import fs from "node:fs";
 import {
   Document,
   Page,
   Text,
   View,
+  Image,
   StyleSheet,
   Svg,
   Path,
@@ -701,71 +703,139 @@ function PdfFooter() {
 
 function PdfRightFrontSvg({ claimItem }: { claimItem: ReportPdfClaimItem }) {
   const rfMarkers = claimItem.presentation.markers.filter((m) => m.rf3qAnchor);
+  const template = claimItem.presentation.template;
+  const jpgFileName = template.assetFrontPdfJpg || "sedan-rf3q.jpg";
+  const imagePath = path.join(process.cwd(), "public", "vehicles", "pdf", jpgFileName);
+  const hasImage = fs.existsSync(imagePath);
+
+  if (!hasImage) {
+    console.warn(`[PDF Engine] Warning: Vehicle image background not found at ${imagePath}. Falling back to vector schema.`);
+  }
 
   return (
-    <Svg viewBox="0 0 400 200" style={{ width: "100%", height: 80 }}>
-      <Path
-        d="M 60 120 L 90 90 L 140 55 L 210 50 L 260 70 L 300 95 L 340 115 L 370 135 L 360 155 L 320 165 L 140 165 L 80 155 Z"
-        fill="#cbd5e1"
-        stroke="#475569"
-        strokeWidth="2"
-      />
-      <Path d="M 145 60 L 205 55 L 255 75 L 215 95 L 155 95 Z" fill="#93c5fd" opacity="0.6" />
-      <Circle cx="330" cy="155" r="14" fill="#334155" />
-      <Circle cx="140" cy="155" r="13" fill="#334155" />
+    <View style={{ width: "100%", height: 80, position: "relative", backgroundColor: "#ffffff" }}>
+      {hasImage ? (
+        <Image
+          src={imagePath}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+          }}
+        />
+      ) : (
+        <Svg viewBox="0 0 400 200" style={{ width: "100%", height: "100%" }}>
+          <Path
+            d="M 60 120 L 90 90 L 140 55 L 210 50 L 260 70 L 300 95 L 340 115 L 370 135 L 360 155 L 320 165 L 140 165 L 80 155 Z"
+            fill="#cbd5e1"
+            stroke="#475569"
+            strokeWidth="2"
+          />
+          <Path d="M 145 60 L 205 55 L 255 75 L 215 95 L 155 95 Z" fill="#93c5fd" opacity="0.6" />
+          <Circle cx="330" cy="155" r="14" fill="#334155" />
+          <Circle cx="140" cy="155" r="13" fill="#334155" />
+        </Svg>
+      )}
 
-      {rfMarkers.map((m) => {
-        if (!m.rf3qAnchor) return null;
-        return (
-          <G key={`pdfrf-${m.id}`}>
-            <Circle cx={m.rf3qAnchor.x} cy={m.rf3qAnchor.y} r={9} fill={m.colorHex} />
-            <Text
-              x={m.rf3qAnchor.x}
-              y={m.rf3qAnchor.y + 3}
-              style={{ fontSize: 8, fontWeight: "bold" }}
-              fill="#ffffff"
-            >
-              {String(m.markerIndex)}
-            </Text>
-          </G>
-        );
-      })}
-    </Svg>
+      {/* Svg layer with marker circles and numbers overlay */}
+      <Svg viewBox="0 0 400 200" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
+        {rfMarkers.map((m) => {
+          if (!m.rf3qAnchor) return null;
+          return (
+            <G key={`pdfrf-${m.id}`}>
+              <Circle
+                cx={m.rf3qAnchor.x}
+                cy={m.rf3qAnchor.y}
+                r={10}
+                fill={m.colorHex}
+                stroke="#ffffff"
+                strokeWidth={1.5}
+              />
+              <Text
+                x={m.rf3qAnchor.x}
+                y={m.rf3qAnchor.y + 3}
+                style={{ fontSize: 8, fontWeight: "bold", textAnchor: "middle" }}
+                fill="#ffffff"
+              >
+                {String(m.markerIndex)}
+              </Text>
+            </G>
+          );
+        })}
+      </Svg>
+    </View>
   );
 }
 
 function PdfLeftRearSvg({ claimItem }: { claimItem: ReportPdfClaimItem }) {
   const lrMarkers = claimItem.presentation.markers.filter((m) => m.lr3qAnchor);
+  const template = claimItem.presentation.template;
+  const jpgFileName = template.assetBackPdfJpg || "sedan-lr3q.jpg";
+  const imagePath = path.join(process.cwd(), "public", "vehicles", "pdf", jpgFileName);
+  const hasImage = fs.existsSync(imagePath);
+
+  if (!hasImage) {
+    console.warn(`[PDF Engine] Warning: Vehicle image background not found at ${imagePath}. Falling back to vector schema.`);
+  }
 
   return (
-    <Svg viewBox="0 0 400 200" style={{ width: "100%", height: 80 }}>
-      <Path
-        d="M 50 135 L 70 115 L 115 85 L 160 55 L 220 50 L 270 70 L 330 95 L 350 120 L 330 155 L 260 165 L 90 165 Z"
-        fill="#cbd5e1"
-        stroke="#475569"
-        strokeWidth="2"
-      />
-      <Path d="M 125 85 L 165 60 L 215 55 L 250 80 L 175 95 Z" fill="#93c5fd" opacity="0.6" />
-      <Circle cx="110" cy="155" r="14" fill="#334155" />
-      <Circle cx="290" cy="155" r="13" fill="#334155" />
+    <View style={{ width: "100%", height: 80, position: "relative", backgroundColor: "#ffffff" }}>
+      {hasImage ? (
+        <Image
+          src={imagePath}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+          }}
+        />
+      ) : (
+        <Svg viewBox="0 0 400 200" style={{ width: "100%", height: "100%" }}>
+          <Path
+            d="M 50 135 L 70 115 L 115 85 L 160 55 L 220 50 L 270 70 L 330 95 L 350 120 L 330 155 L 260 165 L 90 165 Z"
+            fill="#cbd5e1"
+            stroke="#475569"
+            strokeWidth="2"
+          />
+          <Path d="M 125 85 L 165 60 L 215 55 L 250 80 L 175 95 Z" fill="#93c5fd" opacity="0.6" />
+          <Circle cx="110" cy="155" r="14" fill="#334155" />
+          <Circle cx="290" cy="155" r="13" fill="#334155" />
+        </Svg>
+      )}
 
-      {lrMarkers.map((m) => {
-        if (!m.lr3qAnchor) return null;
-        return (
-          <G key={`pdflr-${m.id}`}>
-            <Circle cx={m.lr3qAnchor.x} cy={m.lr3qAnchor.y} r={9} fill={m.colorHex} />
-            <Text
-              x={m.lr3qAnchor.x}
-              y={m.lr3qAnchor.y + 3}
-              style={{ fontSize: 8, fontWeight: "bold" }}
-              fill="#ffffff"
-            >
-              {String(m.markerIndex)}
-            </Text>
-          </G>
-        );
-      })}
-    </Svg>
+      {/* Svg layer with marker circles and numbers overlay */}
+      <Svg viewBox="0 0 400 200" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
+        {lrMarkers.map((m) => {
+          if (!m.lr3qAnchor) return null;
+          return (
+            <G key={`pdflr-${m.id}`}>
+              <Circle
+                cx={m.lr3qAnchor.x}
+                cy={m.lr3qAnchor.y}
+                r={10}
+                fill={m.colorHex}
+                stroke="#ffffff"
+                strokeWidth={1.5}
+              />
+              <Text
+                x={m.lr3qAnchor.x}
+                y={m.lr3qAnchor.y + 3}
+                style={{ fontSize: 8, fontWeight: "bold", textAnchor: "middle" }}
+                fill="#ffffff"
+              >
+                {String(m.markerIndex)}
+              </Text>
+            </G>
+          );
+        })}
+      </Svg>
+    </View>
   );
 }
 

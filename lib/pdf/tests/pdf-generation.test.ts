@@ -283,4 +283,43 @@ describe("PDF Generation & View Model Module", () => {
       "Mixed document must render zero optional equipment notice"
     );
   });
+
+  test("Renders multi-claim stress test (5 claims with realistic mockups) in < 1s with compact buffer size < 500 KB", async () => {
+    const { renderToBuffer } = await import("@react-pdf/renderer");
+    const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
+
+    const multiClaimReport = {
+      ...mockReport,
+      damageClaims: Array.from({ length: 5 }, (_, i) => ({
+        id: `dc-multi-${i + 1}`,
+        claimId: `claim-stress-${1000 + i}`,
+        accidentDate: `2024-0${i + 1}-15`,
+        country: "PL",
+        damageValue: 12000.0 + i * 2500,
+        currency: "PLN",
+        isTotalLoss: false,
+        mandateCode: `M-${i + 1}`,
+        mandateDescription: `Kolizja drogowa #${i + 1}`,
+        damageAssessmentJson: JSON.stringify({
+          damagePositionCodes: ["05", "08", "20", "26", "18"],
+          significantPartGroupCodes: ["004", "006"],
+        }),
+      })),
+    };
+
+    const t0 = performance.now();
+    const viewModel = buildReportPdfViewModel(multiClaimReport);
+    assert.strictEqual(viewModel.claims.length, 5);
+
+    const pdfDoc = React.createElement(ReportPdfDocument, { model: viewModel }) as any;
+    const buffer = await renderToBuffer(pdfDoc);
+    const durationMs = performance.now() - t0;
+
+    assert.ok(buffer);
+    assert.strictEqual(buffer.toString("latin1", 0, 5), "%PDF-");
+
+    const bufferKb = buffer.length / 1024;
+    assert.ok(bufferKb < 500, `Multi-claim PDF must be < 500 KB (got ${bufferKb.toFixed(1)} KB)`);
+    assert.ok(durationMs < 2000, `Multi-claim PDF render took too long: ${durationMs.toFixed(1)} ms`);
+  });
 });

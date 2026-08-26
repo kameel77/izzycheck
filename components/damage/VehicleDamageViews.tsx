@@ -1,40 +1,117 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { ProcessedMarkerItem } from "@/lib/damage/build-damage-presentation";
-import { VehicleBodyType } from "@/lib/damage/vehicle-templates";
+import { VehicleBodyType, VehicleTemplateDefinition, VEHICLE_TEMPLATES } from "@/lib/damage/vehicle-templates";
+
+export type StageMode = "standard" | "contrast" | "schematic";
 
 interface VehicleDamageViewsProps {
-  bodyType: VehicleBodyType;
-  labelPl: string;
-  isGeneric: boolean;
+  template?: VehicleTemplateDefinition;
+  bodyType?: VehicleBodyType;
+  labelPl?: string;
+  isGeneric?: boolean;
   markers: ProcessedMarkerItem[];
   hasUnderbodyView: boolean;
 }
 
 export function VehicleDamageViews({
-  bodyType,
-  labelPl,
-  isGeneric,
+  template,
+  bodyType = template?.bodyType || "generic-passenger",
+  labelPl = template?.labelPl || "Pojazd osobowy",
+  isGeneric = template?.isGeneric ?? true,
   markers,
   hasUnderbodyView,
 }: VehicleDamageViewsProps) {
+  const [stageMode, setStageMode] = useState<StageMode>("standard");
+
+  useEffect(() => {
+    try {
+      const savedMode = localStorage.getItem("izzycheck.stageMode") as StageMode | null;
+      if (savedMode === "standard" || savedMode === "contrast" || savedMode === "schematic") {
+        setStageMode(savedMode);
+      }
+    } catch {
+      // Ignore localStorage errors in SSR / restricted environments
+    }
+  }, []);
+
+  const handleSetMode = (mode: StageMode) => {
+    setStageMode(mode);
+    try {
+      localStorage.setItem("izzycheck.stageMode", mode);
+    } catch {
+      // Ignore
+    }
+  };
+
+  const resolvedTemplate = template || VEHICLE_TEMPLATES[bodyType] || VEHICLE_TEMPLATES["generic-passenger"];
+  const frontWebp = resolvedTemplate.assetFrontWebp;
+  const backWebp = resolvedTemplate.assetBackWebp;
+
   const rf3qMarkers = markers.filter((m) => m.rf3qAnchor);
   const lr3qMarkers = markers.filter((m) => m.lr3qAnchor);
   const underbodyMarkers = markers.filter((m) => m.underbodyAnchor || m.primaryCategory === "UNDERBODY");
 
   return (
     <div className="space-y-6">
-      {isGeneric && (
-        <div className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-400 border border-amber-500/20">
-          Makieta poglądowa ({labelPl})
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          {isGeneric && (
+            <div className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-400 border border-amber-500/20">
+              Makieta poglądowa ({labelPl})
+            </div>
+          )}
         </div>
-      )}
+
+        {/* 3-Mode Stage Presentation Switcher */}
+        <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl shadow-inner">
+          <span className="text-[11px] font-medium text-slate-400 px-2 select-none">
+            Widok makiety:
+          </span>
+          <button
+            type="button"
+            onClick={() => handleSetMode("standard")}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+              stageMode === "standard"
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+            }`}
+            title="Standardowy fotorealistyczny render"
+          >
+            Standard
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSetMode("contrast")}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+              stageMode === "contrast"
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+            }`}
+            title="Zwiększony kontrast: przyciemniony pojazd dla maksymalnej widoczności markerów"
+          >
+            Kontrast
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSetMode("schematic")}
+            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+              stageMode === "schematic"
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+            }`}
+            title="Wektorowy schemat SVG (tryb wycofania)"
+          >
+            Schemat SVG
+          </button>
+        </div>
+      </div>
 
       {/* Main 2 perspectives side by side */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* VIEW 1: Right Front 3/4 */}
-        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3 relative">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3 relative shadow-md">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-blue-500"></span>
@@ -45,8 +122,20 @@ export function VehicleDamageViews({
             </span>
           </div>
 
-          <div className="relative w-full aspect-[2/1] bg-slate-900/40 rounded-xl overflow-hidden flex items-center justify-center p-2 border border-slate-800/60">
-            <RightFront3QSvg bodyType={bodyType} />
+          <div className="relative w-full aspect-[2/1] bg-white rounded-xl overflow-hidden flex items-center justify-center p-0 border border-slate-800 shadow-inner">
+            {stageMode === "schematic" ? (
+              <div className="w-full h-full bg-slate-900/40 p-2">
+                <RightFront3QSvg bodyType={bodyType} />
+              </div>
+            ) : (
+              <img
+                src={frontWebp}
+                alt="Prawy skos od przodu (3/4)"
+                className={`w-full h-full object-contain select-none pointer-events-none transition-all duration-200 ${
+                  stageMode === "contrast" ? "grayscale contrast-[0.85] brightness-[0.92]" : ""
+                }`}
+              />
+            )}
 
             {/* Render markers for RF 3/4 */}
             {rf3qMarkers.map((m) => {
@@ -69,7 +158,7 @@ export function VehicleDamageViews({
         </div>
 
         {/* VIEW 2: Left Rear 3/4 */}
-        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3 relative">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3 relative shadow-md">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-purple-500"></span>
@@ -80,8 +169,20 @@ export function VehicleDamageViews({
             </span>
           </div>
 
-          <div className="relative w-full aspect-[2/1] bg-slate-900/40 rounded-xl overflow-hidden flex items-center justify-center p-2 border border-slate-800/60">
-            <LeftRear3QSvg bodyType={bodyType} />
+          <div className="relative w-full aspect-[2/1] bg-white rounded-xl overflow-hidden flex items-center justify-center p-0 border border-slate-800 shadow-inner">
+            {stageMode === "schematic" ? (
+              <div className="w-full h-full bg-slate-900/40 p-2">
+                <LeftRear3QSvg bodyType={bodyType} />
+              </div>
+            ) : (
+              <img
+                src={backWebp}
+                alt="Lewy skos od tyłu (3/4)"
+                className={`w-full h-full object-contain select-none pointer-events-none transition-all duration-200 ${
+                  stageMode === "contrast" ? "grayscale contrast-[0.85] brightness-[0.92]" : ""
+                }`}
+              />
+            )}
 
             {/* Render markers for LR 3/4 */}
             {lr3qMarkers.map((m) => {
@@ -147,7 +248,7 @@ function MarkerBadge({ marker }: { marker: ProcessedMarkerItem }) {
   return (
     <div
       style={{ backgroundColor: marker.colorHex }}
-      className="h-6 w-6 rounded-full flex items-center justify-center text-white text-xs font-black shadow-lg ring-2 ring-slate-950 transition-transform group-hover:scale-125"
+      className="h-6 w-6 rounded-full flex items-center justify-center text-white text-xs font-black shadow-lg ring-2 ring-white drop-shadow-md transition-transform group-hover:scale-125"
     >
       {marker.markerIndex}
     </div>
