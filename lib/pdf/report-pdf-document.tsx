@@ -256,6 +256,24 @@ const styles = StyleSheet.create({
     color: "#b91c1c",
     fontWeight: "bold",
   },
+  incompleteBanner: {
+    backgroundColor: "#fef2f2",
+    borderWidth: 1.5,
+    borderColor: "#ef4444",
+    borderRadius: 4,
+    padding: 6,
+    marginBottom: 8,
+  },
+  incompleteBannerTitle: {
+    fontSize: 7.5,
+    fontWeight: "bold",
+    color: "#991b1b",
+    marginBottom: 2,
+  },
+  incompleteBannerText: {
+    fontSize: 6.5,
+    color: "#b91c1c",
+  },
 });
 
 export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): React.ReactElement<any> {
@@ -270,6 +288,20 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
       {/* PAGE 1: Vehicle & Report Summary */}
       <Page size="A4" style={styles.page}>
         <PdfHeader model={model} />
+
+        {model.status === "PARTIALLY_FAILED" && (
+          <View style={styles.incompleteBanner}>
+            <Text style={styles.incompleteBannerTitle}>
+              UWAGA: DOKUMENT ZATWIERDZONY JAKO NIEPEŁNY (STAN AS-IS)
+            </Text>
+            <Text style={styles.incompleteBannerText}>
+              Raport zawiera niekompletne dane z powodu błędów w modułach źródłowych Audatex:
+              {model.valuationStatus === "FAILED" && " • Brak wyceny i specyfikacji technicznej"}
+              {model.claimCheckStatus === "FAILED" && " • Brak kontroli historii szkód"}
+              {model.claimDetailsStatus === "FAILED" && " • Brak szczegółów historii szkód"}
+            </Text>
+          </View>
+        )}
 
         <Text style={styles.sectionTitle}>1. Identyfikacja Pojazdu i Raportu</Text>
         <View style={styles.card}>

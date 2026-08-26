@@ -21,6 +21,7 @@ enum ReportModuleId {
 enum ModuleStatus {
   NOT_REQUESTED
   PENDING
+  RUNNING
   SUCCEEDED
   NO_DATA
   FAILED
@@ -74,9 +75,12 @@ model ReportModuleResult {
   report           Report         @relation(fields: [reportId], references: [id], onDelete: Cascade)
   moduleId         ReportModuleId
   status           ModuleStatus
+  retryCount       Int            @default(0)
+  isNonRetryable   Boolean        @default(false)
   responseMetadata String?        @db.Text
   errorMessage     String?        @db.Text
   createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
   @@unique([reportId, moduleId])
   @@map("report_module_results")

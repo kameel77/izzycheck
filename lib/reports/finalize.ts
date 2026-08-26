@@ -5,13 +5,14 @@ import pkg from "../../package.json" with { type: "json" };
 
 export interface FinalizeReportOptions {
   customPrisma?: any;
+  forceFreeze?: boolean;
 }
 
 /**
  * Finalizes a report state.
  * Invariant (D-4 & D-6):
- * - pdfBytes is FROZEN ONLY if the final status is COMPLETED.
- * - For PARTIALLY_FAILED, FAILED, or PROCESSING, pdfBytes is NEVER frozen,
+ * - pdfBytes is FROZEN on COMPLETED, or on PARTIALLY_FAILED when forceFreeze is explicitly set by an authorized operator action.
+ * - For PARTIALLY_FAILED (without forceFreeze), FAILED, or PROCESSING, pdfBytes is NEVER frozen,
  *   allowing subsequent module retries to repair the report without serving stale documents.
  */
 export async function finalizeReport(
@@ -25,8 +26,10 @@ export async function finalizeReport(
   let pdfGeneratedAt: Date | null = null;
   let pdfGeneratorVersion: string | null = null;
 
-  // Render & freeze immutable PDF ONLY on COMPLETED
-  if (finalStatus === "COMPLETED") {
+  // Render & freeze immutable PDF on COMPLETED or on PARTIALLY_FAILED with explicit forceFreeze
+  const shouldFreeze = finalStatus === "COMPLETED" || (finalStatus === "PARTIALLY_FAILED" && options.forceFreeze);
+
+  if (shouldFreeze) {
     try {
       const fullReport = await db.report.findUnique({
         where: { id: reportId },

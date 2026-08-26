@@ -159,207 +159,69 @@ export async function POST(req: Request) {
       throw err;
     }
 
-    let valuationResultData: any = null;
-    let claimCheckResultData: any = null;
-    let claimDetailsResultData: any = null;
+    // 6. Create initial Module records in Database (PENDING for requested, NOT_REQUESTED for others)
+    const initialModules = [
+      {
+        reportId: report.id,
+        moduleId: "VALUATION" as const,
+        status: includeValuation ? ("PENDING" as const) : ("NOT_REQUESTED" as const),
+      },
+      {
+        reportId: report.id,
+        moduleId: "CLAIM_CHECK" as const,
+        status: (includeClaimCheck || includeClaimDetails) ? ("PENDING" as const) : ("NOT_REQUESTED" as const),
+      },
+      {
+        reportId: report.id,
+        moduleId: "CLAIM_DETAILS" as const,
+        status: includeClaimDetails ? ("PENDING" as const) : ("NOT_REQUESTED" as const),
+      },
+    ];
 
-    let moduleSuccessCount = 0;
-    let moduleFailureCount = 0;
-
-    // --- MODULE 1: VALUATION & EQUIPMENT ---
-    if (includeValuation) {
-      try {
-        const valRes = await valuationAdapter.evaluateVehicle({
-          vin,
-          dateOfFirstReg: firstRegistrationDate,
-          mileage: mileageNum,
-          valuationDate: valDate,
-          manufactureDate,
-        });
-        valuationResultData = valRes;
-        moduleSuccessCount++;
-
-        await prisma.vehicleSnapshot.create({
-          data: {
-            reportId: report.id,
-            ibsCode: valRes.ibsCode,
-            make: valRes.make,
-            model: valRes.model,
-            variant: valRes.variant,
-            newPriceCv: valRes.newPriceCv,
-            marketPriceCob: valRes.marketPriceCob,
-            technicalValueTh: valRes.technicalValueTh,
-            mileageUsed: valRes.mileageUsed,
-            isAverageMileageUsed: valRes.isAverageMileageUsed,
-            standardEquipment: JSON.stringify(valRes.standardEquipment),
-            optionalEquipment: JSON.stringify(valRes.optionalEquipment),
-            technicalSpecJson: valRes.technicalSpec ? JSON.stringify(valRes.technicalSpec) : null,
-          },
-        });
-
-        await prisma.reportModuleResult.create({
-          data: {
-            reportId: report.id,
-            moduleId: "VALUATION",
-            status: "SUCCEEDED",
-            responseMetadata: JSON.stringify({ ibsCode: valRes.ibsCode, make: valRes.make, model: valRes.model }),
-          },
-        });
-      } catch (err: any) {
-        moduleFailureCount++;
-        await prisma.reportModuleResult.create({
-          data: {
-            reportId: report.id,
-            moduleId: "VALUATION",
-            status: "FAILED",
-            errorMessage: err.message || "AUDATEX_VALUATION_ERROR: Błąd modułu wyceny.",
-          },
-        });
-      }
+    for (const mod of initialModules) {
+      await prisma.reportModuleResult.create({
+        data: mod,
+      });
     }
 
-    // --- MODULE 2: CLAIMS HISTORY CHECK (hasHistory) ---
-    if (includeClaimCheck || includeClaimDetails) {
-      try {
-        const checkRes = await historyAdapter.checkClaimHistory({
-          vin,
-          firstRegistration: firstRegistrationDate,
-        });
-        claimCheckResultData = checkRes;
-        moduleSuccessCount++;
-
-        const moduleStatus = checkRes.hasHistory ? "SUCCEEDED" : "NO_DATA";
-
-        await prisma.reportModuleResult.create({
-          data: {
-            reportId: report.id,
-            moduleId: "CLAIM_CHECK",
-            status: moduleStatus,
-            responseMetadata: JSON.stringify({
-              hasHistory: checkRes.hasHistory,
-              photosStatus: checkRes.photosStatus,
-              advice: checkRes.advice,
-            }),
-          },
-        });
-
-        // --- MODULE 3: CLAIMS DETAILS (getDetails) ---
-        // Audatex PRD requirement: run getDetails ONLY IF hasHistory is true!
-        if (includeClaimDetails) {
-          if (checkRes.hasHistory) {
-            try {
-              const detailsRes = await historyAdapter.getClaimDetails({
-                vin,
-                firstRegistration: firstRegistrationDate,
-              });
-              claimDetailsResultData = detailsRes;
-              moduleSuccessCount++;
-
-              for (const claim of detailsRes.claims) {
-                await prisma.damageClaim.create({
-                  data: {
-                    reportId: report.id,
-                    claimId: claim.claimId,
-                    accidentDate: claim.accidentDate,
-                    claimDate: claim.creationDate,
-                    country: claim.country,
-                    makeModel: claim.makeModel,
-                    mileage: claim.mileage,
-                    damageValue: claim.damageValue,
-                    currency: claim.currency,
-                    isTotalLoss: claim.isTotalLoss,
-                    mandateCode: claim.mandateCode,
-                    mandateDescription: claim.mandateDescription,
-                    damageZones: JSON.stringify(claim.affectedZones),
-                    significantParts: JSON.stringify(claim.significantParts),
-                    damageAssessmentJson: claim.damageAssessment ? JSON.stringify(claim.damageAssessment) : null,
-                  },
-                });
-              }
-
-              await prisma.reportModuleResult.create({
-                data: {
-                  reportId: report.id,
-                  moduleId: "CLAIM_DETAILS",
-                  status: "SUCCEEDED",
-                  responseMetadata: JSON.stringify({ claimsCount: detailsRes.claims.length }),
-                },
-              });
-            } catch (err: any) {
-              moduleFailureCount++;
-              await prisma.reportModuleResult.create({
-                data: {
-                  reportId: report.id,
-                  moduleId: "CLAIM_DETAILS",
-                  status: "FAILED",
-                  errorMessage: err.message || "AUDATEX_CHE_ERROR: Błąd pobierania szczegółów szkód getDetails.",
-                },
-              });
-            }
-          } else {
-            // hasHistory returned false -> getDetails unavailable
-            await prisma.reportModuleResult.create({
-              data: {
-                reportId: report.id,
-                moduleId: "CLAIM_DETAILS",
-                status: "NO_DATA",
-                errorMessage: "Szczegóły szkód niedostępne: brak wpisów w weryfikacji wstępnej hasHistory.",
-              },
-            });
-          }
-        }
-      } catch (err: any) {
-        moduleFailureCount++;
-        await prisma.reportModuleResult.create({
-          data: {
-            reportId: report.id,
-            moduleId: "CLAIM_CHECK",
-            status: "FAILED",
-            errorMessage: err.message || "AUDATEX_CHE_ERROR: Błąd kontroli historii szkód Audatex CHE.",
-          },
-        });
-      }
-    }
-
-    // Determine honest final status
-    let finalStatus: "COMPLETED" | "PARTIALLY_FAILED" | "FAILED" = "COMPLETED";
-    if (moduleFailureCount > 0 && moduleSuccessCount > 0) {
-      finalStatus = "PARTIALLY_FAILED";
-    } else if (moduleFailureCount > 0 && moduleSuccessCount === 0) {
-      finalStatus = "FAILED";
-    }
-
-    await finalizeReport(report.id, finalStatus);
-
-    // Record Audit Event
+    // 7. Record Audit Event: INITIALIZE_REPORT
     await prisma.auditEvent.create({
       data: {
         userId: user.userId,
         userEmail: user.email,
-        action: "CREATE_REPORT",
-        resource: `REPORT:${report.id}`,
+        action: "INITIALIZE_REPORT",
+        resource: `Report:${report.id}`,
         metadataJson: JSON.stringify({
-          vin,
-          firstRegistrationDate,
-          status: finalStatus,
-          idempotencyKey: idempotencyHeader || null,
-          requestHash: currentRequestHash,
-          modulesRequested: { includeValuation, includeClaimCheck, includeClaimDetails },
+          vin: report.vin,
+          publicReference: report.publicReference,
+          requestedModules: {
+            includeValuation: Boolean(includeValuation),
+            includeClaimCheck: Boolean(includeClaimCheck),
+            includeClaimDetails: Boolean(includeClaimDetails),
+          },
         }),
       },
     });
 
-    return NextResponse.json({
-      success: true,
-      reportId: report.id,
-      vin,
-      status: finalStatus,
-      firstRegistrationDate,
-      valuation: valuationResultData,
-      claimCheck: claimCheckResultData,
-      claimDetails: claimDetailsResultData,
-    });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Błąd serwera podczas generowania raportu." }, { status: 500 });
+    return NextResponse.json(
+      {
+        success: true,
+        reportId: report.id,
+        publicReference: report.publicReference,
+        vin: report.vin,
+        status: "PROCESSING",
+        modules: initialModules.map((m) => ({
+          moduleId: m.moduleId,
+          status: m.status,
+        })),
+      },
+      { status: 201 }
+    );
+  } catch (error: any) {
+    console.error("[REPORTS_POST_ERROR]", error);
+    return NextResponse.json(
+      { error: error.message || "Wystąpił wewnętrzny błąd serwera podczas tworzenia raportu." },
+      { status: 500 }
+    );
   }
 }

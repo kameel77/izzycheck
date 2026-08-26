@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, use, useCallback } from "react";
 import Link from "next/link";
 import {
   Car,
@@ -18,6 +18,9 @@ import {
   Clock,
   Printer,
   FileDown,
+  RefreshCw,
+  Lock,
+  Loader2,
 } from "lucide-react";
 import { getClaimsHistoryPresentation } from "@/lib/report-claims-summary";
 import { DamageClaimVisualization } from "@/components/report/DamageClaimVisualization";
@@ -32,20 +35,101 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"valuation" | "claims" | "audit">("valuation");
+  const [executingModules, setExecutingModules] = useState<Record<string, boolean>>({});
+  const [freezeModalOpen, setFreezeModalOpen] = useState(false);
+  const [freezeReason, setFreezeReason] = useState("");
+  const [freezing, setFreezing] = useState(false);
+
+  const fetchReport = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/reports/${reportId}`);
+      const data = await res.json();
+      if (data.report) {
+        setReport(data.report);
+      } else {
+        setError(data.error || "Nie odnaleziono raportu w bazie.");
+      }
+    } catch {
+      setError("Wystąpił błąd podczas ładowania raportu z bazy danych.");
+    } finally {
+      setLoading(false);
+    }
+  }, [reportId]);
 
   useEffect(() => {
-    fetch(`/api/reports/${reportId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.report) {
-          setReport(data.report);
-        } else {
-          setError(data.error || "Nie odnaleziono raportu w bazie.");
-        }
-      })
-      .catch(() => setError("Wystąpił błąd podczas ładowania raportu z bazy danych."))
-      .finally(() => setLoading(false));
-  }, [reportId]);
+    fetchReport();
+  }, [fetchReport]);
+
+  // Execute a single module by calling POST /api/reports/:id/modules/:moduleId
+  const executeModule = useCallback(
+    async (moduleId: string) => {
+      setExecutingModules((prev) => ({ ...prev, [moduleId]: true }));
+      try {
+        await fetch(`/api/reports/${reportId}/modules/${moduleId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (e) {
+        console.error(`Error executing module ${moduleId}`, e);
+      } finally {
+        setExecutingModules((prev) => ({ ...prev, [moduleId]: false }));
+        await fetchReport();
+      }
+    },
+    [reportId, fetchReport]
+  );
+
+  // Progressive Orchestration Effect: dispatches PENDING modules
+  useEffect(() => {
+    if (!report || report.status === "COMPLETED" || report.status === "PARTIALLY_FAILED" || report.status === "FAILED") {
+      return;
+    }
+
+    const valMod = report.moduleResults?.find((m: any) => m.moduleId === "VALUATION");
+    const checkMod = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_CHECK");
+    const detailsMod = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_DETAILS");
+
+    // Parallel execution of initial independent modules
+    if (valMod?.status === "PENDING" && !executingModules["VALUATION"]) {
+      executeModule("VALUATION");
+    }
+
+    if (checkMod?.status === "PENDING" && !executingModules["CLAIM_CHECK"]) {
+      executeModule("CLAIM_CHECK");
+    }
+
+    // Dependent sequential execution of CLAIM_DETAILS only after CLAIM_CHECK succeeds
+    if (
+      checkMod &&
+      (checkMod.status === "SUCCEEDED" || checkMod.status === "NO_DATA") &&
+      detailsMod?.status === "PENDING" &&
+      !executingModules["CLAIM_DETAILS"]
+    ) {
+      executeModule("CLAIM_DETAILS");
+    }
+  }, [report, executingModules, executeModule]);
+
+  const handleFreezeReport = async () => {
+    setFreezing(true);
+    try {
+      const res = await fetch(`/api/reports/${reportId}/freeze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: freezeReason || "Zatwierdzenie przez operatora" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Nie udało się zamrozić raportu.");
+      } else {
+        setFreezeModalOpen(false);
+        await fetchReport();
+      }
+    } catch {
+      alert("Wystąpił błąd sieciowy podczas zatwierdzania raportu.");
+    } finally {
+      setFreezing(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -119,6 +203,76 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
           <DownloadReportPdfButton reportId={report.id} vin={report.vin} />
         </div>
       </div>
+
+      {/* Partially Failed Banner & Freeze Modal Trigger */}
+      {report.status === "PARTIALLY_FAILED" && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-amber-300">Raport częściowo ukończony (Stan As-Is)</h3>
+              <p className="text-xs text-amber-200/80">
+                Wybrane moduły zakończyły się błędem. Możesz ponowić ich wykonanie poniżej lub zatwierdzić raport w obecnym stanie niepełnym.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setFreezeModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-500 px-4 py-2 text-xs font-bold text-slate-950 shrink-0 shadow-lg shadow-amber-600/20 transition"
+          >
+            <Lock className="h-4 w-4" /> Zatwierdź i zamroź raport
+          </button>
+        </div>
+      )}
+
+      {/* Freeze Confirmation Modal */}
+      {freezeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400">
+                <Lock className="h-5 w-5" />
+              </div>
+              <h3 className="text-base font-bold text-white">Zatwierdzenie Raportu Niepełnego</h3>
+            </div>
+
+            <p className="text-xs text-slate-300">
+              Zatwierdzenie raportu jako niepełnego (sprzedaż As-Is) spowoduje wygenerowanie i zamrożenie snapshotu PDF z widoczną adnotacją ostrzegawczą o brakujących modułach.
+            </p>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-slate-400">Uzasadnienie zatwierdzenia (wymagane min. 5 znaków):</label>
+              <textarea
+                value={freezeReason}
+                onChange={(e) => setFreezeReason(e.target.value)}
+                placeholder="np. Akceptacja klienta dla wyceny bez historii szkód..."
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-xs text-white focus:border-amber-500 focus:outline-none h-24"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                onClick={() => setFreezeModalOpen(false)}
+                disabled={freezing}
+                className="rounded-xl border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800"
+              >
+                Anuluj
+              </button>
+              <button
+                onClick={handleFreezeReport}
+                disabled={freezing || freezeReason.trim().length < 5}
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 px-4 py-2 text-xs font-bold text-slate-950"
+              >
+                {freezing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
+                Potwierdź i Zamroź PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Header Banner */}
       <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6 sm:p-8 space-y-6">
@@ -590,29 +744,92 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
 
             <div className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-1">
-                  <span className="text-slate-400 font-semibold block">AudaValuation WS 2023</span>
-                  <span className="font-bold text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="h-4 w-4" /> {valModule?.status || "NIEWYKONANO"}
-                  </span>
-                  {valModule?.errorMessage && <p className="text-[11px] text-red-400">{valModule.errorMessage}</p>}
-                </div>
+                {[
+                  { name: "AudaValuation WS 2023", mod: valModule, id: "VALUATION" },
+                  { name: "Claims History `hasHistory`", mod: checkModule, id: "CLAIM_CHECK" },
+                  { name: "Claims History `getDetails`", mod: detailsModule, id: "CLAIM_DETAILS" },
+                ].map(({ name, mod, id }) => {
+                  const status = mod?.status || "NOT_REQUESTED";
+                  const isExecuting = executingModules[id];
+                  const canRetry = status === "FAILED" && !mod?.isNonRetryable && (mod?.retryCount || 0) < 3;
 
-                <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-1">
-                  <span className="text-slate-400 font-semibold block">Claims History `hasHistory`</span>
-                  <span className="font-bold text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="h-4 w-4" /> {checkModule?.status || "NIEWYKONANO"}
-                  </span>
-                  {checkModule?.errorMessage && <p className="text-[11px] text-red-400">{checkModule.errorMessage}</p>}
-                </div>
+                  return (
+                    <div key={id} className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-3 flex flex-col justify-between">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400 font-semibold block">{name}</span>
+                          {mod && (
+                            <span className="font-mono text-[10px] text-slate-500 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                              próby: {mod.retryCount || 0}/3
+                            </span>
+                          )}
+                        </div>
 
-                <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-1">
-                  <span className="text-slate-400 font-semibold block">Claims History `getDetails`</span>
-                  <span className="font-bold text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="h-4 w-4" /> {detailsModule?.status || "NIEWYKONANO"}
-                  </span>
-                  {detailsModule?.errorMessage && <p className="text-[11px] text-red-400">{detailsModule.errorMessage}</p>}
-                </div>
+                        <div className="flex items-center gap-1.5 text-xs font-bold">
+                          {status === "SUCCEEDED" && (
+                            <span className="text-emerald-400 flex items-center gap-1">
+                              <CheckCircle2 className="h-4 w-4" /> SUCCEEDED
+                            </span>
+                          )}
+                          {status === "NO_DATA" && (
+                            <span className="text-cyan-400 flex items-center gap-1">
+                              <Info className="h-4 w-4" /> NO_DATA (Brak wpisów)
+                            </span>
+                          )}
+                          {(status === "RUNNING" || isExecuting) && (
+                            <span className="text-blue-400 flex items-center gap-1">
+                              <Loader2 className="h-4 w-4 animate-spin" /> RUNNING (Przetwarzanie...)
+                            </span>
+                          )}
+                          {status === "PENDING" && !isExecuting && (
+                            <span className="text-amber-400 flex items-center gap-1">
+                              <Clock className="h-4 w-4" /> PENDING (Oczekuje)
+                            </span>
+                          )}
+                          {status === "FAILED" && (
+                            <span className="text-red-400 flex items-center gap-1">
+                              <XCircle className="h-4 w-4" /> FAILED
+                            </span>
+                          )}
+                          {status === "NOT_REQUESTED" && (
+                            <span className="text-slate-500 flex items-center gap-1">
+                              NOT_REQUESTED
+                            </span>
+                          )}
+                        </div>
+
+                        {mod?.errorMessage && (
+                          <p className="text-[11px] text-red-400 break-words bg-red-950/30 p-2 rounded-lg border border-red-900/40">
+                            {mod.errorMessage}
+                          </p>
+                        )}
+
+                        {mod?.isNonRetryable && (
+                          <span className="inline-block text-[10px] font-semibold text-red-400 bg-red-950/50 px-2 py-0.5 rounded border border-red-800/50">
+                            Błąd nienaprawialny (brak możliwości ponowienia)
+                          </span>
+                        )}
+
+                        {status === "FAILED" && (mod?.retryCount || 0) >= 3 && (
+                          <span className="inline-block text-[10px] font-semibold text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded border border-amber-800/50">
+                            Wyczerpano limit 3 ponowień
+                          </span>
+                        )}
+                      </div>
+
+                      {canRetry && (
+                        <button
+                          onClick={() => executeModule(id)}
+                          disabled={isExecuting}
+                          className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 py-1.5 px-3 text-xs font-bold text-white transition shadow"
+                        >
+                          {isExecuting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                          Ponów moduł
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 space-y-1">
