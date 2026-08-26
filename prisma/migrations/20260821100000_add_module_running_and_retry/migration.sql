@@ -1,0 +1,7 @@
+-- AlterEnum
+ALTER TYPE "ModuleStatus" ADD VALUE 'RUNNING';
+
+-- AlterTable
+ALTER TABLE "report_module_results" ADD COLUMN "retryCount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "isNonRetryable" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

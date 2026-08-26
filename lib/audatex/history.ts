@@ -8,6 +8,11 @@ import {
   CHE_GET_DETAILS_RESPONSE,
 } from "./fixtures.ts";
 
+function cleanEnv(val: string | undefined, defaultVal = ""): string {
+  if (!val) return defaultVal;
+  return val.trim().replace(/^["']|["']$/g, "");
+}
+
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   trimValues: true,
@@ -19,9 +24,9 @@ export class AudatexHistoryAdapter {
   private maxRetries: number;
 
   constructor() {
-    this.isMockMode = process.env.AUDATEX_MOCK_MODE === "true";
-    this.timeoutMs = parseInt(process.env.AUDATEX_TIMEOUT_MS || "15000", 10);
-    this.maxRetries = parseInt(process.env.AUDATEX_MAX_RETRIES || "2", 10);
+    this.isMockMode = cleanEnv(process.env.AUDATEX_MOCK_MODE) === "true";
+    this.timeoutMs = parseInt(cleanEnv(process.env.AUDATEX_TIMEOUT_MS, "15000"), 10);
+    this.maxRetries = parseInt(cleanEnv(process.env.AUDATEX_MAX_RETRIES, "2"), 10);
   }
 
   public getIsMockMode(): boolean {
@@ -39,9 +44,11 @@ export class AudatexHistoryAdapter {
       return this.parseHasHistoryXml(mockXml);
     }
 
-    const endpoint = process.env.AUDATEX_CHE_ENDPOINT || "https://vin-history-v2.eu.solera.com/service/ExternalVin";
-    const country = input.country || process.env.AUDATEX_CHE_COUNTRY || "pl";
-    const currency = input.currency || process.env.AUDATEX_CHE_CURRENCY || "PLN";
+    const endpoint = cleanEnv(process.env.AUDATEX_CHE_ENDPOINT, "https://vin-history.eu.solera.com/service/ExternalVin");
+    const country = cleanEnv(input.country || process.env.AUDATEX_CHE_COUNTRY, "pl");
+    const currency = cleanEnv(input.currency || process.env.AUDATEX_CHE_CURRENCY, "PLN");
+    const username = cleanEnv(process.env.AUDATEX_CHE_USERNAME);
+    const password = cleanEnv(process.env.AUDATEX_CHE_PASSWORD);
 
     const body = `
       <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:HistoryWSDL">
@@ -49,12 +56,12 @@ export class AudatexHistoryAdapter {
         <soapenv:Body>
           <urn:hasHistoryRequest>
             <urn:requestParam>
-              <urn:username>${process.env.AUDATEX_CHE_USERNAME || ""}</urn:username>
-              <urn:password>${process.env.AUDATEX_CHE_PASSWORD || ""}</urn:password>
+              <urn:username>${username}</urn:username>
+              <urn:password>${password}</urn:password>
               <urn:country>${country}</urn:country>
               <urn:currency>${currency}</urn:currency>
-              <urn:vin>${input.vin}</urn:vin>
-              ${input.firstRegistration ? `<urn:firstRegistration>${input.firstRegistration}</urn:firstRegistration>` : ""}
+              <urn:vin>${input.vin.trim()}</urn:vin>
+              ${input.firstRegistration ? `<urn:firstRegistration>${input.firstRegistration.trim()}</urn:firstRegistration>` : ""}
               <urn:showIsMileage>true</urn:showIsMileage>
               <urn:showVinType>true</urn:showVinType>
               <urn:withPhotos>false</urn:withPhotos>
@@ -76,9 +83,11 @@ export class AudatexHistoryAdapter {
       return this.parseGetDetailsXml(CHE_GET_DETAILS_RESPONSE);
     }
 
-    const endpoint = process.env.AUDATEX_CHE_ENDPOINT || "https://vin-history-v2.eu.solera.com/service/ExternalVin";
-    const country = input.country || process.env.AUDATEX_CHE_COUNTRY || "pl";
-    const currency = input.currency || process.env.AUDATEX_CHE_CURRENCY || "PLN";
+    const endpoint = cleanEnv(process.env.AUDATEX_CHE_ENDPOINT, "https://vin-history.eu.solera.com/service/ExternalVin");
+    const country = cleanEnv(input.country || process.env.AUDATEX_CHE_COUNTRY, "pl");
+    const currency = cleanEnv(input.currency || process.env.AUDATEX_CHE_CURRENCY, "PLN");
+    const username = cleanEnv(process.env.AUDATEX_CHE_USERNAME);
+    const password = cleanEnv(process.env.AUDATEX_CHE_PASSWORD);
 
     const body = `
       <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:HistoryWSDL">
@@ -86,12 +95,12 @@ export class AudatexHistoryAdapter {
         <soapenv:Body>
           <urn:getDetailsRequest>
             <urn:requestParam>
-              <urn:username>${process.env.AUDATEX_CHE_USERNAME || ""}</urn:username>
-              <urn:password>${process.env.AUDATEX_CHE_PASSWORD || ""}</urn:password>
+              <urn:username>${username}</urn:username>
+              <urn:password>${password}</urn:password>
               <urn:country>${country}</urn:country>
               <urn:currency>${currency}</urn:currency>
-              <urn:vin>${input.vin}</urn:vin>
-              ${input.firstRegistration ? `<urn:firstRegistration>${input.firstRegistration}</urn:firstRegistration>` : ""}
+              <urn:vin>${input.vin.trim()}</urn:vin>
+              ${input.firstRegistration ? `<urn:firstRegistration>${input.firstRegistration.trim()}</urn:firstRegistration>` : ""}
               <urn:showIsMileage>true</urn:showIsMileage>
               <urn:showVinType>true</urn:showVinType>
             </urn:requestParam>

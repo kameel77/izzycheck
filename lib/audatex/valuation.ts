@@ -7,6 +7,11 @@ import {
   VEHICLE_DATA_CLASSIFICATION_RESPONSE,
 } from "./fixtures.ts";
 
+function cleanEnv(val: string | undefined, defaultVal = ""): string {
+  if (!val) return defaultVal;
+  return val.trim().replace(/^["']|["']$/g, "");
+}
+
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   trimValues: true,
@@ -18,9 +23,9 @@ export class AudatexValuationAdapter {
   private maxRetries: number;
 
   constructor() {
-    this.isMockMode = process.env.AUDATEX_MOCK_MODE === "true";
-    this.timeoutMs = parseInt(process.env.AUDATEX_TIMEOUT_MS || "15000", 10);
-    this.maxRetries = parseInt(process.env.AUDATEX_MAX_RETRIES || "2", 10);
+    this.isMockMode = cleanEnv(process.env.AUDATEX_MOCK_MODE) === "true";
+    this.timeoutMs = parseInt(cleanEnv(process.env.AUDATEX_TIMEOUT_MS, "15000"), 10);
+    this.maxRetries = parseInt(cleanEnv(process.env.AUDATEX_MAX_RETRIES, "2"), 10);
   }
 
   public getIsMockMode(): boolean {
@@ -35,8 +40,8 @@ export class AudatexValuationAdapter {
       return this.parseMockValuation(input);
     }
 
-    const marketCode = input.marketCode || process.env.AUDATEX_MARKET_CODE || "PL";
-    const language = input.language || process.env.AUDATEX_LANGUAGE || "PL";
+    const marketCode = cleanEnv(input.marketCode || process.env.AUDATEX_MARKET_CODE, "PL");
+    const language = cleanEnv(input.language || process.env.AUDATEX_LANGUAGE, "PL");
 
     const carVinResult = await this.getCarByVinWs(input, marketCode, language);
     const evaluationResult = await this.evaluateCarFull(input, carVinResult.ibsCode, carVinResult.equipments, carVinResult.packets, language);
@@ -60,18 +65,21 @@ export class AudatexValuationAdapter {
   }
 
   private async getCarByVinWs(input: VinValuationInput, marketCode: string, language: string) {
-    const endpoint = process.env.AUDATEX_VALUATION_ENDPOINT || "https://te5adxwseu.taxexpert.cz/TE5_AUDAVIN_Service.asmx";
+    const endpoint = cleanEnv(process.env.AUDATEX_VALUATION_ENDPOINT, "https://te5adxwseu.taxexpert.cz/TE5_AUDAVIN_Service.asmx");
+    const certHash = cleanEnv(process.env.AUDATEX_CERTIFICATE_HASH);
+    const licenceNumber = cleanEnv(process.env.AUDATEX_LICENCE_NUMBER);
+
     const body = `
       <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:te5="http://TE5.ibs-expert.cz/">
         <soapenv:Header/>
         <soapenv:Body>
           <te5:GetCarByVinWs>
-            <te5:vin>${input.vin}</te5:vin>
+            <te5:vin>${input.vin.trim()}</te5:vin>
             <te5:language>${language}</te5:language>
             <te5:marketCode>${marketCode}</te5:marketCode>
-            <te5:dateOfFirstReg>${input.dateOfFirstReg}</te5:dateOfFirstReg>
-            <te5:certificateHash>${process.env.AUDATEX_CERTIFICATE_HASH || ""}</te5:certificateHash>
-            <te5:licenceNumber>${process.env.AUDATEX_LICENCE_NUMBER || ""}</te5:licenceNumber>
+            <te5:dateOfFirstReg>${input.dateOfFirstReg.trim()}</te5:dateOfFirstReg>
+            <te5:certificateHash>${certHash}</te5:certificateHash>
+            <te5:licenceNumber>${licenceNumber}</te5:licenceNumber>
           </te5:GetCarByVinWs>
         </soapenv:Body>
       </soapenv:Envelope>
@@ -96,8 +104,10 @@ export class AudatexValuationAdapter {
   }
 
   private async evaluateCarFull(input: VinValuationInput, ibsCode: string, equipments: string[], packets: string[], language: string) {
-    const endpoint = process.env.AUDATEX_VALUATION_SERVICE_ENDPOINT || "https://te5wseu.taxexpert.cz/TE5_EvaluationServices.asmx";
-    const valuationDate = input.valuationDate || new Date().toISOString().split("T")[0];
+    const endpoint = cleanEnv(process.env.AUDATEX_VALUATION_SERVICE_ENDPOINT, "https://te5wseu.taxexpert.cz/TE5_EvaluationServices.asmx");
+    const certHash = cleanEnv(process.env.AUDATEX_CERTIFICATE_HASH);
+    const licenceNumber = cleanEnv(process.env.AUDATEX_LICENCE_NUMBER);
+    const valuationDate = input.valuationDate ? input.valuationDate.trim() : new Date().toISOString().split("T")[0];
 
     const eqXml = equipments.map(c => `
       <InputEvaluationEquipment>
@@ -120,15 +130,15 @@ export class AudatexValuationAdapter {
           <EvaluateCarFull xmlns="http://TE5.ibs-expert.cz/">
             <language>${language}</language>
             <car>
-              <IBSCode>${ibsCode}</IBSCode>
-              <DV>${input.dateOfFirstReg}</DV>
+              <IBSCode>${ibsCode.trim()}</IBSCode>
+              <DV>${input.dateOfFirstReg.trim()}</DV>
               <DO>${valuationDate}</DO>
               <KPS>${input.mileage || 0}</KPS>
               <Equipments>${eqXml}</Equipments>
               <EquipmentPackets>${pktXml}</EquipmentPackets>
             </car>
-            <certificateHash>${process.env.AUDATEX_CERTIFICATE_HASH || ""}</certificateHash>
-            <licenceNumber>${process.env.AUDATEX_LICENCE_NUMBER || ""}</licenceNumber>
+            <certificateHash>${certHash}</certificateHash>
+            <licenceNumber>${licenceNumber}</licenceNumber>
           </EvaluateCarFull>
         </SOAP-ENV:Body>
       </SOAP-ENV:Envelope>
@@ -146,13 +156,15 @@ export class AudatexValuationAdapter {
   }
 
   private async getClassificationByIBSCode(input: VinValuationInput, ibsCode: string, marketCode: string, language: string) {
-    const endpoint = process.env.AUDATEX_VEHICLE_DATA_ENDPOINT || "https://te5wseu.taxexpert.cz/TE5_VehicleData.asmx";
+    const endpoint = cleanEnv(process.env.AUDATEX_VEHICLE_DATA_ENDPOINT, "https://te5wseu.taxexpert.cz/TE5_VehicleData.asmx");
+    const certHash = cleanEnv(process.env.AUDATEX_CERTIFICATE_HASH);
+    const licenceNumber = cleanEnv(process.env.AUDATEX_LICENCE_NUMBER);
 
     let monthXml = "";
     let yearXml = "";
     const dateSource = input.manufactureDate || input.dateOfFirstReg;
-    if (dateSource && /^\d{4}-\d{2}/.test(dateSource)) {
-      const [y, m] = dateSource.split("-");
+    if (dateSource && /^\d{4}-\d{2}/.test(dateSource.trim())) {
+      const [y, m] = dateSource.trim().split("-");
       monthXml = `<ManufacturedMonth>${m}</ManufacturedMonth>`;
       yearXml = `<ManufacturedYear>${y}</ManufacturedYear>`;
     }
@@ -166,9 +178,9 @@ export class AudatexValuationAdapter {
             <language>${language}</language>
             ${monthXml}
             ${yearXml}
-            <IBSCode>${ibsCode}</IBSCode>
-            <certificateHash>${process.env.AUDATEX_CERTIFICATE_HASH || ""}</certificateHash>
-            <licenceNumber>${process.env.AUDATEX_LICENCE_NUMBER || ""}</licenceNumber>
+            <IBSCode>${ibsCode.trim()}</IBSCode>
+            <certificateHash>${certHash}</certificateHash>
+            <licenceNumber>${licenceNumber}</licenceNumber>
           </GetClassificationByIBSCode>
         </SOAP-ENV:Body>
       </SOAP-ENV:Envelope>
