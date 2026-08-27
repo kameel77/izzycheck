@@ -205,34 +205,6 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 1.2,
   },
-  optCard: {
-    width: "49%",
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-    backgroundColor: "#eff6ff",
-    borderRadius: 4,
-    padding: 4,
-    marginBottom: 4,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  optBadge: {
-    fontSize: 6,
-    fontWeight: "bold",
-    color: "#1d4ed8",
-    backgroundColor: "#dbeafe",
-    paddingHorizontal: 3,
-    paddingVertical: 1,
-    borderRadius: 2,
-  },
-  optText: {
-    fontSize: 7,
-    fontWeight: "bold",
-    color: "#1e3a8a",
-    flex: 1,
-    marginRight: 4,
-  },
   emptyNoticeBox: {
     padding: 6,
     backgroundColor: "#f8fafc",
@@ -283,7 +255,7 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
   const sortedStd = sortEquipmentAlphabetically(model.standardEquipment || []);
   const sortedOpt = sortEquipmentAlphabetically(model.optionalEquipment || []);
   const stdRows = chunkEquipmentForRows(sortedStd, 3);
-  const optRows = chunkEquipmentForRows(sortedOpt, 2);
+  const optRows = chunkEquipmentForRows(sortedOpt, 3);
 
   return (
     <Document title={`Raport-IzzyCheck-${model.vin}`} author="IzzyCheck System">
@@ -338,27 +310,9 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>2. Wyniki Modułów Integracyjnych</Text>
-        <View style={styles.card}>
-          <View style={styles.row}>
-            <View style={styles.col}>
-              <Text style={styles.label}>Moduł 1: AudaValuation</Text>
-              <Text style={styles.value}>{model.valuationStatus}</Text>
-            </View>
-            <View style={styles.col}>
-              <Text style={styles.label}>Moduł 2: Control claims (hasHistory)</Text>
-              <Text style={styles.value}>{model.claimCheckStatus}</Text>
-            </View>
-            <View style={styles.col}>
-              <Text style={styles.label}>Moduł 3: Claim details (getDetails)</Text>
-              <Text style={styles.value}>{model.claimDetailsStatus}</Text>
-            </View>
-          </View>
-        </View>
-
         {model.marketPriceCob !== undefined && (
           <>
-            <Text style={styles.sectionTitle}>3. Podsumowanie Wyceny Pojazdu</Text>
+            <Text style={styles.sectionTitle}>2. Podsumowanie Wyceny Pojazdu</Text>
             <View style={styles.card}>
               <View style={styles.row}>
                 <View style={styles.col}>
@@ -380,7 +334,7 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
 
         {model.technicalSpec && (
           <>
-            <Text style={styles.sectionTitle}>4. Specyfikacja Techniczna Pojazdu</Text>
+            <Text style={styles.sectionTitle}>3. Specyfikacja Techniczna Pojazdu</Text>
             <View style={styles.card}>
               <View style={styles.row}>
                 <View style={styles.col}>
@@ -442,13 +396,13 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
                 </View>
               </View>
 
-              {/* Unmapped Raw Attributes Fallback */}
+              {/* Unmapped Raw Attributes Fallback (4 Columns) */}
               {model.technicalSpec.rawAttributes && Object.keys(model.technicalSpec.rawAttributes).length > 0 && (
                 <View style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: "#e2e8f0", paddingTop: 4 }}>
-                  <Text style={[styles.label, { marginBottom: 3 }]}>Pozostałe parametry od Audatex</Text>
+                  <Text style={[styles.label, { marginBottom: 3 }]}>Pozostałe parametry</Text>
                   <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
                     {Object.entries(model.technicalSpec.rawAttributes).map(([k, v]) => (
-                      <View key={k} style={{ width: "33.3%", marginBottom: 3, paddingRight: 4 }}>
+                      <View key={k} style={{ width: "25%", marginBottom: 3, paddingRight: 4 }}>
                         <Text style={{ fontSize: 6, color: "#64748b" }}>{k}</Text>
                         <Text style={{ fontSize: 7, fontWeight: "bold", color: "#334155" }}>{String(v)}</Text>
                       </View>
@@ -460,9 +414,9 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
           </>
         )}
 
-        {/* 5. Wyposażenie Dodatkowe & Pakiety (Opcje) */}
+        {/* 4. Wyposażenie Dodatkowe & Pakiety (Opcje w tym samym stylu co standardowe) */}
         <Text style={styles.sectionTitle}>
-          5. Wyposażenie Dodatkowe & Pakiety {sortedOpt.length > 0 ? `(${sortedOpt.length} pozycji)` : ""}
+          4. Wyposażenie Dodatkowe & Pakiety {sortedOpt.length > 0 ? `(${sortedOpt.length} pozycji)` : ""}
         </Text>
         {isValuationFailed ? (
           <View style={styles.failedNoticeBox}>
@@ -475,22 +429,26 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
         ) : (
           <View style={{ marginBottom: 6 }}>
             {optRows.map((row, rIdx) => (
-              <View key={`opt-row-${rIdx}`} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 3 }}>
+              <View key={`opt-row-${rIdx}`} style={styles.eqGridRow}>
                 {row.map((item, cIdx) => (
-                  <View key={`opt-item-${rIdx}-${cIdx}`} style={styles.optCard}>
-                    <Text style={styles.optText}>{item.name}</Text>
-                    {item.code && <Text style={styles.optBadge}>Kod: {item.code}</Text>}
+                  <View key={`opt-item-${rIdx}-${cIdx}`} style={styles.eqGridCell}>
+                    <View style={styles.eqBullet} />
+                    <Text style={styles.eqText}>
+                      {item.name} {item.code ? `(${item.code})` : ""}
+                    </Text>
                   </View>
                 ))}
-                {row.length === 1 && <View style={{ width: "49%" }} />}
+                {Array.from({ length: 3 - row.length }).map((_, padIdx) => (
+                  <View key={`opt-pad-${padIdx}`} style={{ width: "33.33%" }} />
+                ))}
               </View>
             ))}
           </View>
         )}
 
-        {/* 6. Wyposażenie Standardowe (Siatka 3-kolumnowa w układzie wierszowym) */}
+        {/* 5. Wyposażenie Standardowe (Siatka 3-kolumnowa w układzie wierszowym) */}
         <Text style={styles.sectionTitle}>
-          6. Wyposażenie Standardowe {sortedStd.length > 0 ? `(${sortedStd.length} pozycji)` : ""}
+          5. Wyposażenie Standardowe {sortedStd.length > 0 ? `(${sortedStd.length} pozycji)` : ""}
         </Text>
         {isValuationFailed ? (
           <View style={styles.failedNoticeBox}>
@@ -521,9 +479,6 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
         )}
 
         <View style={styles.disclaimerBox}>
-          <Text style={{ fontWeight: "bold", marginBottom: 3, color: "#78350f" }}>
-            [TYMCZASOWY SZABLON INFORMACYJNY - DO WERYFIKACJI I ZASTĄPIENIA PRZEZ KANCELARIĘ PRAWNĄ]
-          </Text>
           <Text style={{ marginBottom: 2 }}>
             1. Niniejszy raport ma charakter analityczno-informacyjny i został sporządzony na podstawie danych dostarczonych przez system Audatex (AudaValuation oraz Claims History Engine). Dokument nie stanowi urzędowej opinii biegłego rzeczoznawcy majątkowego ani gwarancji bezwypadkowości pojazdu.
           </Text>
