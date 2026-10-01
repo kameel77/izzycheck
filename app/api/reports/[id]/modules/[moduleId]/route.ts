@@ -33,7 +33,7 @@ export async function POST(
     });
     const isRetry = existingMod?.status === "FAILED";
 
-    const result = await executeReportModule(reportId, moduleId, { userId: user.userId });
+    const result = await executeReportModule(reportId, moduleId, { userId: user.userId, role: user.role });
 
     // Record Audit Event
     await prisma.auditEvent.create({

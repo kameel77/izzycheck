@@ -25,6 +25,14 @@ export async function POST(
       return NextResponse.json({ error: "Raport nie został odnaleziony." }, { status: 404 });
     }
 
+    // Strict RBAC Access Policy (same as GET /api/reports/[id]): ADMIN or report owner only
+    if (user.role !== "ADMIN" && report.createdById !== user.userId) {
+      return NextResponse.json(
+        { error: "Dostęp zabroniony. Nie posiadasz uprawnień do zatwierdzenia tego raportu." },
+        { status: 403 }
+      );
+    }
+
     // Role and Reason Check (RBAC: ADMIN or mandatory reason)
     let body: any = {};
     try {
@@ -35,8 +43,9 @@ export async function POST(
 
     const { reason } = body;
     const isAdmin = user.role === "ADMIN";
+    const trimmedReason = typeof reason === "string" ? reason.trim() : "";
 
-    if (!isAdmin && (!reason || typeof reason !== "string" || reason.trim().length < 5)) {
+    if (!isAdmin && trimmedReason.length < 5) {
       return NextResponse.json(
         { error: "Zatwierdzenie niepełnego raportu wymaga uprawnień administratora lub podania uzasadnienia (min. 5 znaków)." },
         { status: 403 }
@@ -64,7 +73,7 @@ export async function POST(
           reportId,
           operatorId: user.userId,
           operatorEmail: user.email,
-          reason: reason || "Zatwierdzenie przez administratora",
+          reason: trimmedReason || "Zatwierdzenie przez administratora",
           isAdmin,
         }),
       },

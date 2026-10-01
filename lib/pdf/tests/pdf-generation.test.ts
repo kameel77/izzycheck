@@ -322,4 +322,150 @@ describe("PDF Generation & View Model Module", () => {
     assert.ok(bufferKb < 500, `Multi-claim PDF must be < 500 KB (got ${bufferKb.toFixed(1)} KB)`);
     assert.ok(durationMs < 2000, `Multi-claim PDF render took too long: ${durationMs.toFixed(1)} ms`);
   });
+  describe("Claims history (CLAIM_CHECK) section on page 1", () => {
+    function collectTexts(root: any): string[] {
+      const texts: string[] = [];
+      function traverse(node: any) {
+        if (!node) return;
+        if (typeof node === "string") {
+          texts.push(node);
+        } else if (typeof node === "number") {
+          texts.push(String(node));
+        } else if (Array.isArray(node)) {
+          node.forEach(traverse);
+        } else if (node.props?.children) {
+          traverse(node.props.children);
+        }
+      }
+      traverse(root);
+      return texts;
+    }
+
+    const SECTION_TITLE = "Historia Szkód (Audatex CHE)";
+
+    async function renderTexts(report: any) {
+      const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
+      const viewModel = buildReportPdfViewModel(report);
+      const texts = collectTexts(ReportPdfDocument({ model: viewModel }) as any);
+      return { viewModel, texts };
+    }
+
+    test("Details available: warning with claim count and details pointer", async () => {
+      const { viewModel, texts } = await renderTexts(mockReport);
+      assert.strictEqual(viewModel.claimsHistoryPresentation, "CLAIM_DETAILS_AVAILABLE");
+      assert.ok(texts.some((t) => t.includes(SECTION_TITLE)));
+      assert.ok(
+        texts.some((t) => t.includes("Zarejestrowano 1 szkodę w bazie Audatex. Szczegóły na kolejnych stronach.")),
+        "Must render singular claim count notice"
+      );
+    });
+
+    test("Details available: Polish plural forms and total loss marker", async () => {
+      const makeClaims = (n: number, totalLoss = false) =>
+        Array.from({ length: n }, (_, i) => ({
+          ...mockReport.damageClaims[0],
+          id: `dc-plural-${i}`,
+          claimId: `claim-plural-${i}`,
+          isTotalLoss: totalLoss && i === 0,
+        }));
+
+      const two = await renderTexts({ ...mockReport, damageClaims: makeClaims(2) });
+      assert.ok(two.texts.some((t) => t.includes("Zarejestrowano 2 szkody w bazie Audatex.")));
+
+      const five = await renderTexts({ ...mockReport, damageClaims: makeClaims(5, true) });
+      assert.ok(five.texts.some((t) => t.includes("Zarejestrowano 5 szkód w bazie Audatex, w tym szkoda całkowita.")));
+    });
+
+    test("Check SUCCEEDED + details NOT_REQUESTED: history detected, details not ordered", async () => {
+      const report = {
+        ...mockReport,
+        damageClaims: [],
+        moduleResults: [
+          { moduleId: "VALUATION", status: "SUCCEEDED" },
+          { moduleId: "CLAIM_CHECK", status: "SUCCEEDED" },
+          { moduleId: "CLAIM_DETAILS", status: "NOT_REQUESTED" },
+        ],
+      };
+      const { viewModel, texts } = await renderTexts(report);
+      assert.strictEqual(viewModel.claimsHistoryPresentation, "HISTORY_DETECTED_DETAILS_NOT_REQUESTED");
+      assert.ok(texts.some((t) => t.includes(SECTION_TITLE)));
+      assert.ok(
+        texts.some((t) =>
+          t.includes("Wykryto wpisy historii szkód w bazie Audatex. Szczegóły zdarzeń nie były objęte zamówieniem.")
+        )
+      );
+    });
+
+    test("Check SUCCEEDED + details FAILED: details unavailable notice", async () => {
+      const report = {
+        ...mockReport,
+        damageClaims: [],
+        moduleResults: [
+          { moduleId: "VALUATION", status: "SUCCEEDED" },
+          { moduleId: "CLAIM_CHECK", status: "SUCCEEDED" },
+          { moduleId: "CLAIM_DETAILS", status: "FAILED" },
+        ],
+      };
+      const { viewModel, texts } = await renderTexts(report);
+      assert.strictEqual(viewModel.claimsHistoryPresentation, "HISTORY_DETECTED_DETAILS_UNAVAILABLE");
+      assert.ok(texts.some((t) => t.includes(SECTION_TITLE)));
+      assert.ok(
+        texts.some((t) =>
+          t.includes("Wykryto wpisy historii szkód w bazie Audatex. Szczegóły zdarzeń nie są dostępne w tym raporcie.")
+        )
+      );
+    });
+
+    test("Check NO_DATA: no history notice", async () => {
+      const report = {
+        ...mockReport,
+        damageClaims: [],
+        moduleResults: [
+          { moduleId: "VALUATION", status: "SUCCEEDED" },
+          { moduleId: "CLAIM_CHECK", status: "NO_DATA" },
+          { moduleId: "CLAIM_DETAILS", status: "NO_DATA" },
+        ],
+      };
+      const { viewModel, texts } = await renderTexts(report);
+      assert.strictEqual(viewModel.claimsHistoryPresentation, "NO_HISTORY");
+      assert.ok(texts.some((t) => t.includes(SECTION_TITLE)));
+      assert.ok(texts.some((t) => t.includes("Brak zarejestrowanych szkód w bazie Audatex Claims History Engine.")));
+    });
+
+    test("Check FAILED: unavailable notice", async () => {
+      const report = {
+        ...mockReport,
+        damageClaims: [],
+        moduleResults: [
+          { moduleId: "VALUATION", status: "SUCCEEDED" },
+          { moduleId: "CLAIM_CHECK", status: "FAILED" },
+          { moduleId: "CLAIM_DETAILS", status: "PENDING" },
+        ],
+      };
+      const { viewModel, texts } = await renderTexts(report);
+      assert.strictEqual(viewModel.claimsHistoryPresentation, "UNAVAILABLE");
+      assert.ok(texts.some((t) => t.includes("Kontrola historii szkód nie została wykonana poprawnie.")));
+    });
+
+    test("Section is absent when CLAIM_CHECK is NOT_REQUESTED or missing", async () => {
+      const notRequested = await renderTexts({
+        ...mockReport,
+        damageClaims: [],
+        moduleResults: [
+          { moduleId: "VALUATION", status: "SUCCEEDED" },
+          { moduleId: "CLAIM_CHECK", status: "NOT_REQUESTED" },
+          { moduleId: "CLAIM_DETAILS", status: "NOT_REQUESTED" },
+        ],
+      });
+      assert.strictEqual(notRequested.texts.some((t) => t.includes(SECTION_TITLE)), false);
+
+      const missing = await renderTexts({
+        ...mockReport,
+        damageClaims: [],
+        moduleResults: [{ moduleId: "VALUATION", status: "SUCCEEDED" }],
+      });
+      assert.strictEqual(missing.viewModel.claimCheckStatus, "NIEWYKONANO");
+      assert.strictEqual(missing.texts.some((t) => t.includes(SECTION_TITLE)), false);
+    });
+  });
 });

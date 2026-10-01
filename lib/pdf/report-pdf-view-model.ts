@@ -6,6 +6,10 @@ import {
   buildFallbackDamageAssessment,
 } from "../damage/normalize-damage-assessment.ts";
 import { VehicleTechnicalSpec } from "../audatex/types.ts";
+import {
+  ClaimsHistoryPresentation,
+  getClaimsHistoryPresentation,
+} from "../report-claims-summary.ts";
 
 export interface ReportPdfClaimItem {
   index: number;
@@ -56,6 +60,7 @@ export interface ReportPdfViewModel {
   valuationStatus?: string;
   claimCheckStatus?: string;
   claimDetailsStatus?: string;
+  claimsHistoryPresentation: ClaimsHistoryPresentation;
 }
 
 export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
@@ -139,5 +144,10 @@ export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
     valuationStatus: valModule?.status || "NIEWYKONANO",
     claimCheckStatus: checkModule?.status || "NIEWYKONANO",
     claimDetailsStatus: detailsModule?.status || "NIEWYKONANO",
+    claimsHistoryPresentation: getClaimsHistoryPresentation({
+      claimCount: claims.length,
+      claimCheckStatus: checkModule?.status,
+      claimDetailsStatus: detailsModule?.status,
+    }),
   };
 }

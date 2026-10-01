@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import { createHash } from "crypto";
+import { escapeXml } from "./xml.ts";
 import { VinValuationInput, ValuationResult, EquipmentItem, NonRetryableError } from "./types.ts";
 import {
   AUDAVIN_GET_CAR_BY_VIN_RESPONSE,
@@ -74,12 +75,12 @@ export class AudatexValuationAdapter {
         <soapenv:Header/>
         <soapenv:Body>
           <te5:GetCarByVinWs>
-            <te5:vin>${input.vin.trim()}</te5:vin>
-            <te5:language>${language}</te5:language>
-            <te5:marketCode>${marketCode}</te5:marketCode>
-            <te5:dateOfFirstReg>${input.dateOfFirstReg.trim()}</te5:dateOfFirstReg>
-            <te5:certificateHash>${certHash}</te5:certificateHash>
-            <te5:licenceNumber>${licenceNumber}</te5:licenceNumber>
+            <te5:vin>${escapeXml(String(input.vin).trim())}</te5:vin>
+            <te5:language>${escapeXml(language)}</te5:language>
+            <te5:marketCode>${escapeXml(marketCode)}</te5:marketCode>
+            <te5:dateOfFirstReg>${escapeXml(String(input.dateOfFirstReg).trim())}</te5:dateOfFirstReg>
+            <te5:certificateHash>${escapeXml(certHash)}</te5:certificateHash>
+            <te5:licenceNumber>${escapeXml(licenceNumber)}</te5:licenceNumber>
           </te5:GetCarByVinWs>
         </soapenv:Body>
       </soapenv:Envelope>
@@ -107,19 +108,19 @@ export class AudatexValuationAdapter {
     const endpoint = cleanEnv(process.env.AUDATEX_VALUATION_SERVICE_ENDPOINT, "https://te5wseu.taxexpert.cz/TE5_EvaluationServices.asmx");
     const certHash = cleanEnv(process.env.AUDATEX_CERTIFICATE_HASH);
     const licenceNumber = cleanEnv(process.env.AUDATEX_LICENCE_NUMBER);
-    const valuationDate = input.valuationDate ? input.valuationDate.trim() : new Date().toISOString().split("T")[0];
+    const valuationDate = input.valuationDate ? String(input.valuationDate).trim() : new Date().toISOString().split("T")[0];
 
     const eqXml = equipments.map(c => `
       <InputEvaluationEquipment>
         <EquipmentType>OptionalSpecified</EquipmentType>
-        <Code>${c}</Code>
+        <Code>${escapeXml(c)}</Code>
       </InputEvaluationEquipment>
     `).join("");
 
     const pktXml = packets.map(p => `
       <InputEvaluationEquipmentPacket>
         <EquipmentPacketType>Optional</EquipmentPacketType>
-        <Code>${p}</Code>
+        <Code>${escapeXml(p)}</Code>
       </InputEvaluationEquipmentPacket>
     `).join("");
 
@@ -128,17 +129,17 @@ export class AudatexValuationAdapter {
         <SOAP-ENV:Header/>
         <SOAP-ENV:Body>
           <EvaluateCarFull xmlns="http://TE5.ibs-expert.cz/">
-            <language>${language}</language>
+            <language>${escapeXml(language)}</language>
             <car>
-              <IBSCode>${ibsCode.trim()}</IBSCode>
-              <DV>${input.dateOfFirstReg.trim()}</DV>
-              <DO>${valuationDate}</DO>
-              <KPS>${input.mileage || 0}</KPS>
+              <IBSCode>${escapeXml(String(ibsCode).trim())}</IBSCode>
+              <DV>${escapeXml(String(input.dateOfFirstReg).trim())}</DV>
+              <DO>${escapeXml(valuationDate)}</DO>
+              <KPS>${escapeXml(input.mileage || 0)}</KPS>
               <Equipments>${eqXml}</Equipments>
               <EquipmentPackets>${pktXml}</EquipmentPackets>
             </car>
-            <certificateHash>${certHash}</certificateHash>
-            <licenceNumber>${licenceNumber}</licenceNumber>
+            <certificateHash>${escapeXml(certHash)}</certificateHash>
+            <licenceNumber>${escapeXml(licenceNumber)}</licenceNumber>
           </EvaluateCarFull>
         </SOAP-ENV:Body>
       </SOAP-ENV:Envelope>
@@ -163,10 +164,10 @@ export class AudatexValuationAdapter {
     let monthXml = "";
     let yearXml = "";
     const dateSource = input.manufactureDate || input.dateOfFirstReg;
-    if (dateSource && /^\d{4}-\d{2}/.test(dateSource.trim())) {
-      const [y, m] = dateSource.trim().split("-");
-      monthXml = `<ManufacturedMonth>${m}</ManufacturedMonth>`;
-      yearXml = `<ManufacturedYear>${y}</ManufacturedYear>`;
+    if (dateSource && /^\d{4}-\d{2}/.test(String(dateSource).trim())) {
+      const [y, m] = String(dateSource).trim().split("-");
+      monthXml = `<ManufacturedMonth>${escapeXml(m)}</ManufacturedMonth>`;
+      yearXml = `<ManufacturedYear>${escapeXml(y)}</ManufacturedYear>`;
     }
 
     const body = `
@@ -174,13 +175,13 @@ export class AudatexValuationAdapter {
         <SOAP-ENV:Header/>
         <SOAP-ENV:Body>
           <GetClassificationByIBSCode xmlns="http://TE5.ibs-expert.cz/">
-            <marketCode>${marketCode}</marketCode>
-            <language>${language}</language>
+            <marketCode>${escapeXml(marketCode)}</marketCode>
+            <language>${escapeXml(language)}</language>
             ${monthXml}
             ${yearXml}
-            <IBSCode>${ibsCode.trim()}</IBSCode>
-            <certificateHash>${certHash}</certificateHash>
-            <licenceNumber>${licenceNumber}</licenceNumber>
+            <IBSCode>${escapeXml(String(ibsCode).trim())}</IBSCode>
+            <certificateHash>${escapeXml(certHash)}</certificateHash>
+            <licenceNumber>${escapeXml(licenceNumber)}</licenceNumber>
           </GetClassificationByIBSCode>
         </SOAP-ENV:Body>
       </SOAP-ENV:Envelope>

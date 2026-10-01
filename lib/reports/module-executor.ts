@@ -21,9 +21,44 @@ export class ModuleExecutionError extends Error {
   }
 }
 
+// Same env parsing/defaults as the Audatex adapters (cleanEnv + parseInt).
+function parseAdapterEnvInt(raw: string | undefined, defaultVal: number): number {
+  const cleaned = raw ? raw.trim().replace(/^["']|["']$/g, "") : "";
+  const parsed = parseInt(cleaned || String(defaultVal), 10);
+  return Number.isNaN(parsed) ? defaultVal : parsed;
+}
+
+const ADAPTER_TIMEOUT_MS = parseAdapterEnvInt(process.env.AUDATEX_TIMEOUT_MS, 15000);
+const ADAPTER_MAX_RETRIES = parseAdapterEnvInt(process.env.AUDATEX_MAX_RETRIES, 2);
+
+// A lock is stale only after the slowest legitimate execution could have finished.
+// 3 = sequential SOAP calls in VALUATION (GetCarByVinWs, EvaluateCarFull, GetClassificationByIBSCode),
+// each attempted up to (maxRetries + 1) times with timeoutMs per attempt, plus 30s margin.
+export const STALE_LOCK_MS = Math.max(
+  120_000,
+  3 * (ADAPTER_MAX_RETRIES + 1) * ADAPTER_TIMEOUT_MS + 30_000
+);
+
+/**
+ * Pure helper: a RUNNING module whose last update is older than STALE_LOCK_MS
+ * can be taken over by a new execution request.
+ */
+export function isModuleLockStale(
+  mod: { status: string; updatedAt: Date | string },
+  now: number = Date.now()
+): boolean {
+  if (mod.status !== "RUNNING") return false;
+  const updatedAtMs = new Date(mod.updatedAt).getTime();
+  if (Number.isNaN(updatedAtMs)) return false;
+  return now - updatedAtMs > STALE_LOCK_MS;
+}
+
 export interface ExecuteModuleOptions {
   customPrisma?: any;
   userId?: string;
+  role?: "OPERATOR" | "ADMIN";
+  /** Trusted server-side caller (no user context). Without userId and internal, execution is refused. */
+  internal?: boolean;
   customValuationAdapter?: any;
   customHistoryAdapter?: any;
 }
@@ -65,6 +100,15 @@ export async function executeReportModule(
 
   if (!report) {
     throw new ModuleExecutionError("Raport nie został odnaleziony w systemie.", 404);
+  }
+
+  // Ownership check (fail-closed): only the report owner or an ADMIN may execute its modules.
+  // Callers without a user context must explicitly opt in with `internal: true`.
+  if (!options.userId && !options.internal) {
+    throw new ModuleExecutionError("Dostęp zabroniony. Nie posiadasz uprawnień do tego raportu.", 403);
+  }
+  if (options.userId && options.role !== "ADMIN" && report.createdById !== options.userId) {
+    throw new ModuleExecutionError("Dostęp zabroniony. Nie posiadasz uprawnień do tego raportu.", 403);
   }
 
   const targetModule = report.moduleResults.find((m: any) => m.moduleId === moduleId);
@@ -125,7 +169,7 @@ export async function executeReportModule(
   }
 
   // 5. Atomic Lock Transition with Stale-Lock Recovery (>120s)
-  const staleThreshold = new Date(Date.now() - 120000);
+  const staleThreshold = new Date(Date.now() - STALE_LOCK_MS);
   const lockResult = await db.reportModuleResult.updateMany({
     where: {
       id: targetModule.id,

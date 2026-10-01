@@ -37,8 +37,7 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: always
-    ports:
-      - "5432:5432"
+    # No host port mapping: the app reaches Postgres over the internal compose network.
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-izzycheck}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

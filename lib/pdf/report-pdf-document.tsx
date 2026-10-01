@@ -230,6 +230,22 @@ const styles = StyleSheet.create({
     color: "#b91c1c",
     fontWeight: "bold",
   },
+  warningNoticeBox: {
+    padding: 6,
+    backgroundColor: "#fffbeb",
+    borderWidth: 1,
+    borderColor: "#fde68a",
+    borderRadius: 4,
+    marginBottom: 8,
+  },
+  successNoticeBox: {
+    padding: 6,
+    backgroundColor: "#f0fdf4",
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+    borderRadius: 4,
+    marginBottom: 8,
+  },
   incompleteBanner: {
     backgroundColor: "#fef2f2",
     borderWidth: 1.5,
@@ -256,6 +272,17 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
   const sortedOpt = sortEquipmentAlphabetically(model.optionalEquipment || []);
   const stdRows = chunkEquipmentForRows(sortedStd, 3);
   const optRows = chunkEquipmentForRows(sortedOpt, 3);
+
+  const showClaimsHistorySection =
+    model.claimCheckStatus !== "NOT_REQUESTED" && model.claimCheckStatus !== "NIEWYKONANO";
+  const claimCount = model.claims.length;
+  const claimNoun =
+    claimCount === 1
+      ? "szkodę"
+      : claimCount % 10 >= 2 && claimCount % 10 <= 4 && (claimCount % 100 < 10 || claimCount % 100 >= 20)
+        ? "szkody"
+        : "szkód";
+  const hasTotalLossClaim = model.claims.some((c) => c.isTotalLoss);
 
   return (
     <Document title={`Raport-IzzyCheck-${model.vin}`} author="IzzyCheck System">
@@ -309,6 +336,45 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
             </View>
           </View>
         </View>
+
+        {showClaimsHistorySection && (
+          <>
+            <Text style={styles.sectionTitle}>Historia Szkód (Audatex CHE)</Text>
+            {model.claimsHistoryPresentation === "CLAIM_DETAILS_AVAILABLE" && (
+              <View style={styles.warningNoticeBox}>
+                <Text style={[styles.failedNoticeText, { color: "#92400e" }]}>
+                  {`Zarejestrowano ${claimCount} ${claimNoun} w bazie Audatex${hasTotalLossClaim ? ", w tym szkoda całkowita" : ""}. Szczegóły na kolejnych stronach.`}
+                </Text>
+              </View>
+            )}
+            {model.claimsHistoryPresentation === "HISTORY_DETECTED_DETAILS_NOT_REQUESTED" && (
+              <View style={styles.warningNoticeBox}>
+                <Text style={[styles.failedNoticeText, { color: "#92400e" }]}>
+                  Wykryto wpisy historii szkód w bazie Audatex. Szczegóły zdarzeń nie były objęte zamówieniem.
+                </Text>
+              </View>
+            )}
+            {model.claimsHistoryPresentation === "HISTORY_DETECTED_DETAILS_UNAVAILABLE" && (
+              <View style={styles.warningNoticeBox}>
+                <Text style={[styles.failedNoticeText, { color: "#92400e" }]}>
+                  Wykryto wpisy historii szkód w bazie Audatex. Szczegóły zdarzeń nie są dostępne w tym raporcie.
+                </Text>
+              </View>
+            )}
+            {model.claimsHistoryPresentation === "NO_HISTORY" && (
+              <View style={styles.successNoticeBox}>
+                <Text style={[styles.failedNoticeText, { color: "#166534" }]}>
+                  Brak zarejestrowanych szkód w bazie Audatex Claims History Engine.
+                </Text>
+              </View>
+            )}
+            {model.claimsHistoryPresentation === "UNAVAILABLE" && (
+              <View style={styles.failedNoticeBox}>
+                <Text style={styles.failedNoticeText}>Kontrola historii szkód nie została wykonana poprawnie.</Text>
+              </View>
+            )}
+          </>
+        )}
 
         {model.marketPriceCob !== undefined && (
           <>

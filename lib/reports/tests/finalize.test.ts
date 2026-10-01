@@ -185,6 +185,7 @@ describe("Report Finalization & PDF Immutability Rules", () => {
     const res = await executeReportModule("rep-retry-1", "VALUATION", {
       customPrisma: mockPrisma,
       customValuationAdapter: mockValAdapter,
+      internal: true,
     });
     assert.strictEqual(res.success, true);
     assert.strictEqual(res.status, "SUCCEEDED");
