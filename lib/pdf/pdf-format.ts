@@ -14,6 +14,36 @@ export function formatAmount(value: number): string {
   return value.toLocaleString("pl-PL", { maximumFractionDigits: 0 });
 }
 
+// ---------------------------------------------------------------------------
+// Damage amounts: estimated GROSS range (product owner decision, overrides D-7 for damage / repair values only;
+// vehicle valuation prices stay net with the net label).
+// ---------------------------------------------------------------------------
+
+export const DAMAGE_VAT_RATE = 0.23;
+export const DAMAGE_GROSS_CAPTION = "brutto, szacunek (kwota netto Audatex + 23% VAT)";
+
+/** Bucket the gross amount falls into: width 500 below 5 000, 1 000 below 50 000, 5 000 below 200 000, else 10 000. */
+export function damageGrossBucket(gross: number): { lower: number; upper: number } {
+  const width = gross < 5_000 ? 500 : gross < 50_000 ? 1_000 : gross < 200_000 ? 5_000 : 10_000;
+  const lower = Math.floor(gross / width) * width;
+  return { lower, upper: lower + width };
+}
+
+/** Net damage value -> "24 000 – 25 000 zł" (net × 1.23, bucketed). Missing, zero or negative values: "Brak kwoty". */
+export function formatDamageGrossRange(net?: number | null): string {
+  if (typeof net !== "number" || !Number.isFinite(net) || net <= 0) return "Brak kwoty";
+  const gross = Math.round(net * (1 + DAMAGE_VAT_RATE) * 100) / 100;
+  const { lower, upper } = damageGrossBucket(gross);
+  return `${formatAmount(lower)} – ${formatAmount(upper)} zł`;
+}
+
+/** Damage total for running text: PLN as an estimated gross range, other currencies stay net (not converted). */
+export function formatDamageTotal(total: number, currency: string): string {
+  return currency === "PLN"
+    ? `ok. ${formatDamageGrossRange(total)} brutto`
+    : `${formatAmount(total)} ${currency} netto (bez VAT)`;
+}
+
 /** Date + time in the Warsaw timezone, e.g. "06.08.2026, 14:00". */
 export function formatDateTimeWarsaw(input: string | number | Date): string {
   const d = input instanceof Date ? input : new Date(input);
@@ -242,7 +272,7 @@ export function buildFactualSummary(input: {
     if (dedup && dedup.likelyEventsCount < dedup.entriesCount) {
       let text = `Zarejestrowano ${entryCountLabel(dedup.entriesCount)}, prawdopodobnie dotyczące ${claimCountGenitive(dedup.likelyEventsCount)}.`;
       if (dedup.likelyTotal) {
-        text += ` Łączna wartość szkód według najnowszych wycen: ${formatAmount(dedup.likelyTotal.total)} ${dedup.likelyTotal.currency} netto (bez VAT).`;
+        text += ` Łączna wartość szkód według najnowszych wycen: ${formatDamageTotal(dedup.likelyTotal.total, dedup.likelyTotal.currency)}.`;
       }
       return text;
     }
@@ -255,7 +285,7 @@ export function buildFactualSummary(input: {
     if (last) text += merged ? ` (najnowsza wycena: ${last})` : ` (ostatnia: ${last})`;
     if (totalLosses > 0) text += `, w tym ${totalLossPhrase(totalLosses)}`;
     text += ".";
-    if (sum) text += ` Łączna wartość szkód: ${formatAmount(sum.total)} ${sum.currency} netto (bez VAT).`;
+    if (sum) text += ` Łączna wartość szkód: ${formatDamageTotal(sum.total, sum.currency)}.`;
     return text;
   }
   if (p === "NO_HISTORY") return "W bazie Audatex nie odnotowano szkód dla tego pojazdu.";
@@ -301,7 +331,7 @@ export function buildClaimsKpi(input: {
       else if (totalLosses > 1) sub = `w tym ${totalLosses} ${claimNoun(totalLosses)} ${claimNoun(totalLosses) === "szkody" ? "całkowite" : "całkowitych"}`;
       else {
         const sum = sumClaimValues(claims);
-        if (sum) sub = `łącznie ${formatAmount(sum.total)} ${sum.currency} netto (bez VAT)`;
+        if (sum) sub = `łącznie ${formatDamageTotal(sum.total, sum.currency)}`;
       }
       return { tone: totalLosses > 0 ? "risk" : "caution", value: `${n} ${claimNoun(n)}`, sub };
     }

@@ -42,7 +42,8 @@ export async function finalizeReport(
       });
 
       if (fullReport) {
-        const viewModel = buildReportPdfViewModel(fullReport);
+        // fullReport is read BEFORE the status update below, so it still says PROCESSING: render with the final status
+        const viewModel = buildReportPdfViewModel({ ...fullReport, status: finalStatus });
         let pdfBuffer: Buffer;
 
         if (globalThis.__mockRenderToBuffer) {

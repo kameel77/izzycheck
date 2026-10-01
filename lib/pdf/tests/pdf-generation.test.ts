@@ -352,7 +352,7 @@ describe("PDF Generation & View Model Module", () => {
       return texts;
     }
 
-    const SECTION_TITLE = "Historia szkód (Audatex CHE)";
+    const SECTION_TITLE = "Historia szkód";
 
     async function renderTexts(report: any) {
       const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
@@ -368,7 +368,7 @@ describe("PDF Generation & View Model Module", () => {
       assert.ok(texts.some((t) => t.includes(SECTION_TITLE)));
       assert.ok(
         texts.some((t) =>
-          t.includes("Zarejestrowano 1 szkodę (ostatnia: 2023-05-10). Łączna wartość szkód: 18 450 PLN netto (bez VAT).")
+          t.includes("Zarejestrowano 1 szkodę (ostatnia: 2023-05-10). Łączna wartość szkód: ok. 22 000 – 23 000 zł brutto.")
         ),
         "Must render singular claim count summary"
       );
@@ -395,7 +395,7 @@ describe("PDF Generation & View Model Module", () => {
       const two = await renderTexts({ ...mockReport, damageClaims: makeClaims(2) });
       assert.ok(
         two.texts.some((t) =>
-          t.includes("Zarejestrowano 2 szkody (ostatnia: 2023-05-10). Łączna wartość szkód: 36 900 PLN netto (bez VAT).")
+          t.includes("Zarejestrowano 2 szkody (ostatnia: 2023-05-10). Łączna wartość szkód: ok. 45 000 – 46 000 zł brutto.")
         )
       );
 
@@ -403,7 +403,7 @@ describe("PDF Generation & View Model Module", () => {
       assert.ok(
         five.texts.some((t) =>
           t.includes(
-            "Zarejestrowano 5 szkód (ostatnia: 2023-05-10), w tym szkodę całkowitą. Łączna wartość szkód: 92 250 PLN netto (bez VAT)."
+            "Zarejestrowano 5 szkód (ostatnia: 2023-05-10), w tym szkodę całkowitą. Łączna wartość szkód: ok. 110 000 – 115 000 zł brutto."
           )
         )
       );
@@ -701,6 +701,77 @@ describe("PDF Generation & View Model Module", () => {
         assert.strictEqual(texts.some((t) => t.startsWith("Grupa części w kalkulacji")), false);
       });
 
+      test("Page 1 has no vehicle illustration: the 3/4 photos appear only on the claim pages", async () => {
+        const { tree } = await render(realReport);
+        const srcs: string[] = [];
+        (function traverse(node: any) {
+          if (!node) return;
+          if (Array.isArray(node)) return node.forEach(traverse);
+          if (typeof node !== "object") return;
+          if (typeof node.type === "function") return traverse(node.type(node.props));
+          if (typeof node.props?.src === "string") srcs.push(node.props.src);
+          if (node.props?.children) traverse(node.props.children);
+        })(tree);
+        const rf3q = srcs.filter((s) => s.endsWith("-rf3q.jpg"));
+        const lr3q = srcs.filter((s) => s.endsWith("-lr3q.jpg"));
+        assert.strictEqual(rf3q.length, 2, "one per claim page, none in the page-1 band");
+        assert.strictEqual(lr3q.length, 2);
+      });
+
+      test("Section title is 'Historia szkód'; claim type is never 'Częściowa'; table column is 'Uwagi'", async () => {
+        const { tree } = await render(realReport);
+        const texts = textsOf(tree);
+        assert.strictEqual(texts.some((t) => t.includes("Audatex CHE")), false);
+        assert.ok(texts.includes("Historia szkód"));
+        for (const t of texts) assert.ok(!/częściowa/i.test(t), t);
+        assert.ok(texts.includes("Uwagi"));
+        assert.strictEqual(texts.includes("Typ"), false);
+        // both claims are probable duplicates and not total losses: only the probable badge is shown
+        assert.strictEqual(texts.includes("Szkoda całkowita"), false);
+      });
+
+      test("Claim card: Stan drogomierza (km or Brak danych) and the gross damage range with its caption", async () => {
+        const { tree } = await render(realReport);
+        const texts = textsOf(tree);
+        assert.strictEqual(texts.filter((t) => t === "Stan drogomierza").length, 2);
+        assert.ok(texts.includes("214 357 km"));
+        assert.ok(texts.includes("Brak danych"), "claim 2 has no mileage");
+        // 19 768.92 -> 24 000 – 25 000 zł and 15 483.51 -> 19 000 – 20 000 zł (page-1 table + claim page)
+        assert.strictEqual(texts.filter((t) => t === "24 000 – 25 000 zł").length >= 2, true);
+        assert.strictEqual(texts.filter((t) => t === "19 000 – 20 000 zł").length >= 2, true);
+        assert.strictEqual(
+          texts.filter((t) => t === "brutto, szacunek (kwota netto Audatex + 23% VAT)").length,
+          2,
+          "full caption on the two claim pages"
+        );
+        assert.ok(texts.includes("brutto, szacunek"), "short caption in the table / timeline");
+        // the net label is left only on vehicle valuation prices (KPI tile + 3 valuation cells)
+        assert.strictEqual(texts.filter((t) => t === "PLN netto (bez VAT)").length, 4);
+        assert.strictEqual(texts.some((t) => /^\d[\d ]* PLN$/.test(t)), false, "no net damage amount in the timeline");
+        assert.ok(texts.includes("brutto, szacunek"));
+      });
+
+      test("Non-PLN damage amounts are not converted: net value with the currency", async () => {
+        const eur = {
+          ...realReport,
+          damageClaims: realReport.damageClaims.map((c: any, i: number) => (i === 0 ? { ...c, currency: "EUR" } : c)),
+        };
+        const texts = textsOf((await render(eur)).tree);
+        assert.ok(texts.includes("EUR netto (bez VAT)"));
+        assert.ok(texts.includes("19 769"), "net amount, rounded as before");
+        assert.strictEqual(texts.includes("24 000 – 25 000 zł"), false);
+      });
+
+      test("Disclaimer point 2 explains net valuation prices and the estimated gross damage range", async () => {
+        const texts = textsOf((await render(realReport)).tree);
+        assert.ok(
+          texts.includes(
+            "2. Wartości wyceny pojazdu są wartościami netto (bez VAT) według Audatex. Wartości szkód prezentujemy jako szacunkowy przedział brutto wyliczony z kwoty netto Audatex powiększonej o 23% VAT."
+          )
+        );
+        assert.strictEqual(texts.some((t) => t.includes("nie dokonuje wyliczeń")), false);
+      });
+
       test("Claim pages: plain zone list with category dots, group chips, no codes, no photo column", async () => {
         const { tree } = await render(realReport);
         const texts = textsOf(tree);
@@ -773,7 +844,7 @@ describe("PDF Generation & View Model Module", () => {
         assert.strictEqual(texts.includes("2 szkody"), false);
         assert.ok(
           texts.includes(
-            "Zarejestrowano 2 wpisy, prawdopodobnie dotyczące 1 szkody. Łączna wartość szkód według najnowszych wycen: 19 769 PLN netto (bez VAT)."
+            "Zarejestrowano 2 wpisy, prawdopodobnie dotyczące 1 szkody. Łączna wartość szkód według najnowszych wycen: ok. 24 000 – 25 000 zł brutto."
           )
         );
         // badge: 2 rows of the page-1 table + 2 claim pages
@@ -811,7 +882,7 @@ describe("PDF Generation & View Model Module", () => {
         assert.ok(texts.includes("1 szkoda"));
         assert.strictEqual(texts.some((t) => /^\d+ wpis/.test(t) || t.startsWith("prawdopodobnie")), false);
         assert.ok(
-          texts.includes("Zarejestrowano 1 szkodę (najnowsza wycena: 2025-10-11). Łączna wartość szkód: 19 769 PLN netto (bez VAT).")
+          texts.includes("Zarejestrowano 1 szkodę (najnowsza wycena: 2025-10-11). Łączna wartość szkód: ok. 24 000 – 25 000 zł brutto.")
         );
         assert.ok(texts.includes("Wcześniejsze wyceny tej szkody"));
         assert.ok(texts.includes("2025-10-07"));

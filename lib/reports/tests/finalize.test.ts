@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { test, describe, beforeEach, afterEach } from "node:test";
 import { finalizeReport } from "../finalize.ts";
+import { buildCompletenessKpi } from "../../pdf/pdf-format.ts";
 
 describe("Report Finalization & PDF Immutability Rules", () => {
   beforeEach(() => {
@@ -43,6 +44,38 @@ describe("Report Finalization & PDF Immutability Rules", () => {
     assert.strictEqual(updatePayload.pdfBytes.toString(), "%PDF-1.4 MOCK FINALIZE BYTES");
     assert.ok(updatePayload.pdfGeneratedAt);
     assert.ok(updatePayload.pdfGeneratorVersion);
+  });
+
+  test("Frozen PDF is rendered with the FINAL status, not the stale PROCESSING one read before the update", async () => {
+    let renderedModel: any = null;
+    globalThis.__mockRenderToBuffer = async (model: any) => {
+      renderedModel = model;
+      return Buffer.from("%PDF-1.4 MOCK");
+    };
+
+    const mockPrisma = {
+      report: {
+        findUnique: async () => ({
+          id: "rep-status-1",
+          vin: "WBATEST0000000001",
+          firstRegistrationDate: "2021-04-15",
+          valuationDate: "2026-08-06",
+          status: "PROCESSING", // still PROCESSING in the DB: the status update happens after the render
+          createdAt: new Date().toISOString(),
+          createdBy: { id: "u1", name: "Jan", email: "jan@izzy.pl" },
+          vehicleSnapshot: null,
+          moduleResults: [{ moduleId: "VALUATION", status: "SUCCEEDED" }],
+          damageClaims: [],
+        }),
+        update: async ({ data }: any) => ({ id: "rep-status-1", ...data }),
+      },
+    };
+
+    await finalizeReport("rep-status-1", "COMPLETED", { customPrisma: mockPrisma });
+
+    assert.ok(renderedModel);
+    assert.strictEqual(renderedModel.status, "COMPLETED");
+    assert.strictEqual(buildCompletenessKpi(renderedModel.status).value, "Kompletny");
   });
 
   test("Does NOT freeze pdfBytes when finalStatus is PARTIALLY_FAILED (renders on the fly)", async () => {
