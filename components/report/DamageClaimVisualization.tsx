@@ -6,7 +6,7 @@ import { buildFallbackDamageAssessment } from "@/lib/damage/normalize-damage-ass
 import { buildDamagePresentation } from "@/lib/damage/build-damage-presentation";
 import { VehicleDamageViews } from "@/components/damage/VehicleDamageViews";
 import { DamageLegend } from "@/components/damage/DamageLegend";
-import { DamageMarkerTable } from "@/components/damage/DamageMarkerTable";
+import { DamageZoneList, DamageGroupChips } from "@/components/damage/DamageZoneList";
 
 interface DamageClaimVisualizationProps {
   claim: {
@@ -50,8 +50,6 @@ export function DamageClaimVisualization({
     bodyType
   );
 
-  const hasUnpositionedGroups = presentation.markers.some((m) => m.viewVisibilityText === "Brak lokalizacji na makiecie");
-
   return (
     <div className="space-y-6 pt-4 border-t border-slate-800/80">
       <div className="flex items-center justify-between">
@@ -71,15 +69,11 @@ export function DamageClaimVisualization({
         onSelectCategory={setSelectedCategory}
       />
 
-      {/* Notice if Audatex returned no zone locator for some markers */}
-      {hasUnpositionedGroups && (
-        <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-950/20 text-xs text-amber-300">
-          <p className="font-semibold">Ograniczenie danych Audatex:</p>
-          <p className="text-[11px] text-amber-200/80 pt-0.5">
-            Dla niektórych grup części lub flag kalkulacji Audatex nie zwrócił dokładnej strefy liczbowej (01-27) do naniesienia na makiecie 3D. Pozycje te pozostają widoczne w poniższej tabeli szczegółowej.
-          </p>
-        </div>
+      {presentation.flagsText && (
+        <p className="text-[11px] text-slate-400">{presentation.flagsText}</p>
       )}
+
+      <DamageGroupChips groups={presentation.groupChips} />
 
       {/* Realistic / Schematic Stage Views */}
       <VehicleDamageViews
@@ -88,8 +82,8 @@ export function DamageClaimVisualization({
         hasUnderbodyView={presentation.hasUnderbodyView}
       />
 
-      {/* Markers & Part Groups Table */}
-      <DamageMarkerTable markers={presentation.markers} />
+      {/* Zone list (part groups are shown as chips above the maps) */}
+      <DamageZoneList zones={presentation.zoneList} hasUndefinedZone={presentation.hasUndefinedZone} />
     </div>
   );
 }

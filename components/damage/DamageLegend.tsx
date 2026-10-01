@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { DamageCategory, CATEGORY_DEFINITIONS } from "@/lib/damage/audatex-classification";
+import { DamageCategory, CATEGORY_DEFINITIONS, CATEGORY_PRIORITY_ORDER } from "@/lib/damage/audatex-classification";
 
 interface DamageLegendProps {
   categoryCounts: Record<DamageCategory, number>;
@@ -16,12 +16,15 @@ export function DamageLegend({
 }: DamageLegendProps) {
   const totalCount = Object.values(categoryCounts).reduce((a, b) => a + b, 0);
 
+  // Only categories that are actually present (zone 00 is not counted).
   const filters: { id: DamageCategory | "ALL"; label: string; count: number; colorHex?: string }[] = [
     { id: "ALL", label: "Wszystkie", count: totalCount },
-    { id: "BODY", label: CATEGORY_DEFINITIONS.BODY.labelPl, count: categoryCounts.BODY, colorHex: CATEGORY_DEFINITIONS.BODY.colorHex },
-    { id: "GLASS_LIGHTING", label: CATEGORY_DEFINITIONS.GLASS_LIGHTING.labelPl, count: categoryCounts.GLASS_LIGHTING, colorHex: CATEGORY_DEFINITIONS.GLASS_LIGHTING.colorHex },
-    { id: "MECHANICAL", label: CATEGORY_DEFINITIONS.MECHANICAL.labelPl, count: categoryCounts.MECHANICAL, colorHex: CATEGORY_DEFINITIONS.MECHANICAL.colorHex },
-    { id: "UNDERBODY", label: CATEGORY_DEFINITIONS.UNDERBODY.labelPl, count: categoryCounts.UNDERBODY, colorHex: CATEGORY_DEFINITIONS.UNDERBODY.colorHex },
+    ...CATEGORY_PRIORITY_ORDER.filter((cat) => categoryCounts[cat] > 0).map((cat) => ({
+      id: cat,
+      label: CATEGORY_DEFINITIONS[cat].labelPl,
+      count: categoryCounts[cat],
+      colorHex: CATEGORY_DEFINITIONS[cat].colorHex,
+    })),
   ];
 
   return (
@@ -31,7 +34,7 @@ export function DamageLegend({
           Legenda & Filtry Markera Według Audatex
         </h4>
         <span className="text-[11px] text-slate-400">
-          Wykrytych pozycji stref i grup: <strong className="text-white font-mono">{totalCount}</strong>
+          Wykryte strefy i grupy: <strong className="text-white font-mono">{totalCount}</strong>
         </span>
       </div>
 
@@ -62,29 +65,6 @@ export function DamageLegend({
             </button>
           );
         })}
-      </div>
-
-      {/* Distinction notice for Glass vs Lighting in legend */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 text-[11px] text-slate-400 border-t border-slate-800/60">
-        <div className="flex items-center gap-2">
-          <span className="h-3 w-3 rotate-45 bg-blue-500 rounded-sm shrink-0"></span>
-          <span><strong>Szyba</strong>: Oszklenie nadwozia (przednia, tylna, boczne)</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="h-3 w-3 rotate-45 bg-blue-500 rounded-sm shrink-0"></span>
-          <span><strong>Oświetlenie</strong>: Grupa 006 (reflektory, lampy)</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="h-3 w-3 bg-red-500 rounded-sm shrink-0"></span>
-          <span><strong>Nadwozie</strong>: Poszycie zewnętrzne / rama</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="h-3 w-3 rounded-full bg-purple-500 shrink-0"></span>
-          <span><strong>Podwozie</strong>: Strefa 18 / płyta podłogowa</span>
-        </div>
       </div>
     </div>
   );

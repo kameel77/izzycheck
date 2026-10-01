@@ -1,6 +1,8 @@
 import assert from "node:assert";
 import { test, describe } from "node:test";
 import React from "react";
+import fs from "node:fs";
+import path from "node:path";
 import { buildReportPdfViewModel } from "../report-pdf-view-model.ts";
 
 describe("PDF Generation & View Model Module", () => {
@@ -95,7 +97,13 @@ describe("PDF Generation & View Model Module", () => {
     assert.strictEqual(viewModel.technicalSpec.fuelType, "Benzyna");
     assert.strictEqual(viewModel.claims.length, 1);
     assert.strictEqual(viewModel.claims[0].claimId, "claim-88219");
-    assert.strictEqual(viewModel.claims[0].presentation.totalMarkersCount, 2);
+    // Markers are re-derived from the raw Audatex fields: zones 05, 18 + groups 004, 006
+    // (flags mechanical / glass front are text-only because zone codes are present).
+    assert.strictEqual(viewModel.claims[0].presentation.totalMarkersCount, 4);
+    assert.strictEqual(
+      viewModel.claims[0].presentation.flagsText,
+      "Flagi ogólne Audatex: mechaniczne · Szyby: przednia"
+    );
   });
 
   test("Builds ReportPdfViewModel with fallback markers for historical reports lacking damageAssessmentJson", () => {
@@ -110,7 +118,7 @@ describe("PDF Generation & View Model Module", () => {
           damageValue: 9500.0,
           currency: "PLN",
           isTotalLoss: false,
-          damageZones: JSON.stringify(["Przód prawy środek", "Szyba przednia"]),
+          damageZones: JSON.stringify(["Przód", "Szyba przednia"]),
           significantParts: JSON.stringify(["Elementy poszycia zewnętrznego nadwozia"]),
           damageAssessmentJson: null,
         },
@@ -122,8 +130,9 @@ describe("PDF Generation & View Model Module", () => {
     assert.ok(viewModel.claims[0].presentation.totalMarkersCount >= 3);
 
     const markers = viewModel.claims[0].presentation.markers;
-    assert.ok(markers.some((m) => m.sourceCode === "05"));
-    assert.ok(markers.some((m) => m.primaryCategory === "GLASS_LIGHTING"));
+    // No zone codes in legacy data: flags become approximate markers (front -> 08, glass front -> 07)
+    assert.ok(markers.some((m) => m.sourceCode === "front" && m.approximate && m.view === "rf3q"));
+    assert.ok(markers.some((m) => m.primaryCategory === "GLASS_LIGHTING" && m.approximate));
   });
 
   test("Renders PDF buffer starting with %PDF- header with Polish Unicode font ArialCustom", async () => {
@@ -191,9 +200,11 @@ describe("PDF Generation & View Model Module", () => {
     // Verify valid PDF header
     assert.strictEqual(pdfString.substring(0, 5), "%PDF-");
 
-    // Verify exact multi-page count from row-major layout (Page 1 + 2 overflow equipment pages + 1 claim page = 4 pages)
+    // Page 1 carries the vehicle band, KPI row, valuation bar and claims timeline/table, so the 84 equipment rows
+    // overflow onto several pages, followed by the claim page. The exact count depends on layout details, so only
+    // assert that the overflow happened; a lonely-disclaimer page is ruled out structurally (see "kept together").
     const pageCount = (pdfString.match(/\/Type\s*\/Page\b/g) || []).length;
-    assert.strictEqual(pageCount, 4, `84 rows of equipment with 1 claim must span exactly 4 pages (got ${pageCount})`);
+    assert.ok(pageCount >= 5, `84 rows of equipment with 1 claim must overflow onto several pages (got ${pageCount})`);
   });
 
   test("Renders distinct empty state notices for missing valuation module vs zero items from Audatex", async () => {
@@ -341,22 +352,29 @@ describe("PDF Generation & View Model Module", () => {
       return texts;
     }
 
-    const SECTION_TITLE = "Historia Szkód (Audatex CHE)";
+    const SECTION_TITLE = "Historia szkód (Audatex CHE)";
 
     async function renderTexts(report: any) {
       const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
       const viewModel = buildReportPdfViewModel(report);
-      const texts = collectTexts(ReportPdfDocument({ model: viewModel }) as any);
+      // pl-PL grouping uses a non-breaking space: normalise it so expectations stay readable
+      const texts = collectTexts(ReportPdfDocument({ model: viewModel }) as any).map((t) => t.replace(/\u00a0/g, " "));
       return { viewModel, texts };
     }
 
-    test("Details available: warning with claim count and details pointer", async () => {
+    test("Details available: factual summary line with claim count and details pointer", async () => {
       const { viewModel, texts } = await renderTexts(mockReport);
       assert.strictEqual(viewModel.claimsHistoryPresentation, "CLAIM_DETAILS_AVAILABLE");
       assert.ok(texts.some((t) => t.includes(SECTION_TITLE)));
       assert.ok(
-        texts.some((t) => t.includes("Zarejestrowano 1 szkodę w bazie Audatex. Szczegóły na kolejnych stronach.")),
-        "Must render singular claim count notice"
+        texts.some((t) =>
+          t.includes("Zarejestrowano 1 szkodę (ostatnia: 2023-05-10). Łączna wartość szkód: 18 450 PLN netto (bez VAT).")
+        ),
+        "Must render singular claim count summary"
+      );
+      assert.ok(
+        texts.some((t) => t.includes("Szczegóły każdej szkody") && t.includes("na kolejnych stronach")),
+        "Must point to the claim pages"
       );
     });
 
@@ -367,13 +385,28 @@ describe("PDF Generation & View Model Module", () => {
           id: `dc-plural-${i}`,
           claimId: `claim-plural-${i}`,
           isTotalLoss: totalLoss && i === 0,
+          // disjoint zones: these are different claims, not assessments of one accident
+          damageAssessmentJson: JSON.stringify({
+            damagePositionCodes: [String(i + 1).padStart(2, "0")],
+            significantPartGroupCodes: [],
+          }),
         }));
 
       const two = await renderTexts({ ...mockReport, damageClaims: makeClaims(2) });
-      assert.ok(two.texts.some((t) => t.includes("Zarejestrowano 2 szkody w bazie Audatex.")));
+      assert.ok(
+        two.texts.some((t) =>
+          t.includes("Zarejestrowano 2 szkody (ostatnia: 2023-05-10). Łączna wartość szkód: 36 900 PLN netto (bez VAT).")
+        )
+      );
 
       const five = await renderTexts({ ...mockReport, damageClaims: makeClaims(5, true) });
-      assert.ok(five.texts.some((t) => t.includes("Zarejestrowano 5 szkód w bazie Audatex, w tym szkoda całkowita.")));
+      assert.ok(
+        five.texts.some((t) =>
+          t.includes(
+            "Zarejestrowano 5 szkód (ostatnia: 2023-05-10), w tym szkodę całkowitą. Łączna wartość szkód: 92 250 PLN netto (bez VAT)."
+          )
+        )
+      );
     });
 
     test("Check SUCCEEDED + details NOT_REQUESTED: history detected, details not ordered", async () => {
@@ -466,6 +499,425 @@ describe("PDF Generation & View Model Module", () => {
       });
       assert.strictEqual(missing.viewModel.claimCheckStatus, "NIEWYKONANO");
       assert.strictEqual(missing.texts.some((t) => t.includes(SECTION_TITLE)), false);
+    });
+  });
+  describe("Visual refresh: document-level behaviour", () => {
+    function walk(root: any, visit: (node: any) => void) {
+      (function traverse(node: any) {
+        if (!node) return;
+        if (Array.isArray(node)) return node.forEach(traverse);
+        if (typeof node !== "object") return;
+        visit(node);
+        if (node.props?.children) traverse(node.props.children);
+      })(root);
+    }
+    // Texts of the whole tree, expanding the (pure, hook-free) function components such as KPI tiles and grids.
+    function textsOf(root: any): string[] {
+      const out: string[] = [];
+      (function traverse(node: any) {
+        if (!node) return;
+        if (typeof node === "string") out.push(node);
+        else if (typeof node === "number") out.push(String(node));
+        else if (Array.isArray(node)) node.forEach(traverse);
+        else if (typeof node.type === "function") traverse(node.type(node.props));
+        else if (node.props?.children) traverse(node.props.children);
+      })(root);
+      return out.map((t) => t.replace(/\u00a0/g, " "));
+    }
+    function sectionNumbers(root: any): number[] {
+      const nums: number[] = [];
+      walk(root, (n) => {
+        if (typeof n.props?.number === "number") nums.push(n.props.number);
+      });
+      return nums;
+    }
+
+    async function render(report: any) {
+      const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
+      const viewModel = buildReportPdfViewModel(report);
+      return { viewModel, tree: ReportPdfDocument({ model: viewModel }) as any };
+    }
+
+    test("Sections are numbered 1..n in rendered order, also without valuation and technical spec", async () => {
+      const full = await render(mockReport);
+      assert.deepStrictEqual(sectionNumbers(full.tree), [1, 2, 3, 4, 5]);
+
+      const noValuation = await render({
+        ...mockReport,
+        moduleResults: [{ moduleId: "VALUATION", status: "FAILED" }, { moduleId: "CLAIM_CHECK", status: "SUCCEEDED" }],
+        vehicleSnapshot: null,
+        damageClaims: [],
+      });
+      // claims overview + one "Wyposażenie" section (no valuation, no technical spec, equipment not split)
+      assert.deepStrictEqual(sectionNumbers(noValuation.tree), [1, 2]);
+    });
+
+    test("Document title uses the public reference, falling back to VIN", async () => {
+      const withRef = await render(mockReport);
+      assert.strictEqual(withRef.tree.props.title, "Raport IzzyCheck IC-2026-08-0417");
+      const withoutRef = await render({ ...mockReport, publicReference: null });
+      assert.strictEqual(withoutRef.tree.props.title, "Raport IzzyCheck WBA3N51030KS15173");
+    });
+
+    test("createdAtFormatted is rendered in Europe/Warsaw time", () => {
+      const vm = buildReportPdfViewModel(mockReport);
+      assert.strictEqual(vm.createdAtFormatted, "06.08.2026, 14:00");
+      const winter = buildReportPdfViewModel({ ...mockReport, createdAt: "2026-01-15T23:30:00.000Z" });
+      assert.strictEqual(winter.createdAtFormatted, "16.01.2026, 00:30");
+    });
+
+    test("KPI row: market value, claims tile and completeness for a complete report", async () => {
+      const { tree } = await render(mockReport);
+      const texts = textsOf(tree);
+      assert.ok(texts.includes("124 500"), "market value as integer with Polish grouping");
+      assert.ok(texts.includes("PLN netto (bez VAT)"), "net label next to the hero value");
+      assert.ok(texts.includes("1 szkoda"));
+      assert.ok(texts.includes("Kompletny"));
+    });
+
+    test("KPI row: missing valuation shows Brak wyceny and partial status shows the as-is tile", async () => {
+      const { tree } = await render({
+        ...mockReport,
+        status: "PARTIALLY_FAILED",
+        vehicleSnapshot: null,
+        damageClaims: [],
+        moduleResults: [{ moduleId: "VALUATION", status: "FAILED" }, { moduleId: "CLAIM_CHECK", status: "NO_DATA" }],
+      });
+      const texts = textsOf(tree);
+      assert.ok(texts.includes("Brak wyceny"));
+      assert.ok(texts.includes("Niepełny (as-is)"));
+      assert.ok(texts.includes("Brak szkód"));
+      assert.ok(texts.includes("W bazie Audatex nie odnotowano szkód dla tego pojazdu."));
+      assert.ok(texts.includes("Pojazd o numerze VIN"), "generic title without a make");
+      assert.strictEqual(
+        texts.filter((t) => t.includes("WBA3N51030KS15173")).length,
+        2,
+        "VIN appears once in the band and once in the header, not repeated in the title"
+      );
+      assert.strictEqual(
+        texts.filter((t) => t === "Moduł wyceny nie został wykonany").length,
+        1,
+        "a single equipment section with one failed notice"
+      );
+      assert.ok(texts.includes("Wyposażenie"));
+      assert.strictEqual(texts.some((t) => t.includes("Wyposażenie standardowe")), false);
+    });
+
+    test("Equipment count chips use the correct Polish plural", async () => {
+      const items = (n: number) => Array.from({ length: n }, (_, i) => ({ code: `C${i}`, name: `Pozycja ${i}` }));
+      const chipFor = async (std: number, opt: number) => {
+        const { tree } = await render({
+          ...mockReport,
+          vehicleSnapshot: {
+            ...mockReport.vehicleSnapshot,
+            standardEquipment: JSON.stringify(items(std)),
+            optionalEquipment: JSON.stringify(items(opt)),
+          },
+        });
+        const chips: string[] = [];
+        walk(tree, (n) => {
+          if (typeof n.props?.chip === "string") chips.push(n.props.chip);
+        });
+        return chips;
+      };
+      assert.deepStrictEqual(await chipFor(1, 2), ["2 pozycje", "1 pozycja"]);
+      assert.deepStrictEqual(await chipFor(5, 3), ["3 pozycje", "5 pozycji"]);
+      assert.deepStrictEqual(await chipFor(12, 22), ["22 pozycje", "12 pozycji"]);
+    });
+
+    test("Valuation section shows plain-Polish labels and the market/new-price percentage", async () => {
+      const { tree } = await render(mockReport);
+      const texts = textsOf(tree);
+      assert.ok(texts.includes("Cena nowego pojazdu (CV)"));
+      assert.ok(texts.includes("Wartość rynkowa (COB)"));
+      assert.ok(texts.includes("Wartość techniczna (TH)"));
+      assert.ok(texts.includes("Wartość rynkowa = 60% ceny nowego"));
+    });
+
+    test("Technical spec raw attributes are an allowlist: system keys hidden, labelled ones printed in Polish", async () => {
+      const withRaw = {
+        ...mockReport,
+        vehicleSnapshot: {
+          ...mockReport.vehicleSnapshot,
+          technicalSpecJson: JSON.stringify({
+            ...JSON.parse(mockReport.vehicleSnapshot.technicalSpecJson),
+            rawAttributes: { marketCode: "PL", Fake100900: "20220427", HS_M: "1788", engineMark: "420d", couple: "400" },
+          }),
+        },
+      };
+      const { tree } = await render(withRaw);
+      const texts = textsOf(tree);
+      for (const hidden of ["marketCode", "Fake100900", "HS_M", "20220427", "1788"]) {
+        assert.strictEqual(texts.includes(hidden), false, hidden);
+      }
+      assert.ok(texts.includes("Pozostałe parametry"));
+      assert.ok(texts.includes("Oznaczenie silnika"));
+      assert.ok(texts.includes("420d"));
+      assert.ok(texts.includes("Moment obrotowy (Nm)"));
+    });
+
+    test("Technical spec omits the 'Pozostałe parametry' block when no raw attribute has a label", async () => {
+      const withRaw = {
+        ...mockReport,
+        vehicleSnapshot: {
+          ...mockReport.vehicleSnapshot,
+          technicalSpecJson: JSON.stringify({
+            ...JSON.parse(mockReport.vehicleSnapshot.technicalSpecJson),
+            rawAttributes: { marketCode: "PL", ax_Options: "P8,P9,O2", KP_UNI: "0.015", engineMark: "" },
+          }),
+        },
+      };
+      const { tree } = await render(withRaw);
+      const texts = textsOf(tree);
+      assert.strictEqual(texts.includes("Pozostałe parametry"), false);
+      assert.strictEqual(texts.includes("ax_Options"), false);
+    });
+
+    describe("Real production data (BMW 420d Gran Coupé)", () => {
+      const realReport = JSON.parse(
+        fs.readFileSync(path.join(process.cwd(), "lib/pdf/tests/fixtures/real-bmw-420d-report.json"), "utf8")
+      );
+
+      test("Hides system keys and the mandate placeholder, shows Polish country, body type and group names", async () => {
+        const { viewModel, tree } = await render(realReport);
+        const texts = textsOf(tree);
+
+        assert.strictEqual(texts.some((t) => t.includes("Fake100900")), false);
+        assert.strictEqual(texts.some((t) => t.includes("ax_Options")), false);
+        assert.strictEqual(texts.some((t) => t.toLowerCase().includes("brak kodu mandatu")), false);
+        assert.ok(texts.includes("Polska"));
+        assert.strictEqual(texts.includes("PL"), false);
+        assert.ok(texts.includes("Oznaczenie silnika"));
+        assert.ok(texts.includes("Emisja CO2 (g/km)"));
+        assert.ok(texts.some((t) => t.startsWith("Liftback")), "body type is capitalised");
+        assert.strictEqual(viewModel.claims[0].presentation.template.bodyType, "passenger-sedan");
+        assert.strictEqual(viewModel.claims[0].presentation.template.isGeneric, false);
+
+        // claim 2 has the unpadded group code "4": it must resolve to the Polish group name
+        const group2 = viewModel.claims[1].presentation.markers.find((m) => m.sourceKind === "group");
+        assert.strictEqual(group2?.sourceCode, "004");
+        assert.strictEqual(group2?.titlePl, "Elementy poszycia zewnętrznego nadwozia");
+        assert.strictEqual(texts.filter((t) => t === "Elementy poszycia zewnętrznego nadwozia").length, 2);
+        assert.strictEqual(texts.some((t) => t.startsWith("Grupa części w kalkulacji")), false);
+      });
+
+      test("Claim pages: plain zone list with category dots, group chips, no codes, no photo column", async () => {
+        const { tree } = await render(realReport);
+        const texts = textsOf(tree);
+        assert.ok(texts.includes("Zdjęcie 1: przód i prawy bok"));
+        assert.ok(texts.includes("Zdjęcie 2: tył i lewy bok"));
+        assert.strictEqual(texts.includes("Strefy uszkodzeń"), true);
+        assert.ok(texts.includes("Tył, prawa strona, góra"));
+        assert.ok(texts.includes("okolice: prawy słupek C (orientacyjnie)"));
+        assert.ok(texts.includes("Zakres naprawy (grupy części w kalkulacji Audatex)"));
+        assert.ok(texts.includes("Elementy poszycia zewnętrznego nadwozia"));
+        assert.ok(texts.includes("Oszklenie"));
+        assert.strictEqual(
+          texts.filter((t) => t === "Audatex wskazał także elementy bez przypisanej strefy.").length,
+          2,
+          "zone 00 is only a caption under the list, once per claim"
+        );
+        // removed: code column, photo column, "1 · / 2 ·" texts, zone 00 row, part-group codes, badge numbers
+        for (const gone of ["Strefa / kod", "Opis", "Widoczność", "Zdjęcie", "Grupa funkcjonalna", "Strefa nieokreślona", "Inne / nieokreślone"]) {
+          assert.strictEqual(texts.includes(gone), false, gone);
+        }
+        assert.strictEqual(texts.some((t) => t.includes("1 · przód") || t.includes("2 · tył")), false);
+        for (const code of ["00", "05", "13", "14", "15", "19", "22", "23", "004", "007"]) {
+          assert.strictEqual(texts.includes(code), false, `code ${code} must not be rendered`);
+        }
+        assert.strictEqual(texts.some((t) => t.includes("Prawy skos")), false);
+      });
+
+      test("Claim pages: one plain dot per zone row and per group chip, in the category colour", async () => {
+        const { tree } = await render(realReport);
+        const dots: any[] = [];
+        (function traverse(node: any) {
+          if (!node) return;
+          if (Array.isArray(node)) return node.forEach(traverse);
+          if (typeof node !== "object") return;
+          if (typeof node.type === "function") return traverse(node.type(node.props));
+          const flat = Object.assign({}, ...[node.props?.style].flat(Infinity).filter(Boolean));
+          if (flat.width === 7 && flat.height === 7 && flat.borderRadius === 3.5) dots.push(flat);
+          if (node.props?.children) traverse(node.props.children);
+        })(tree);
+        // claim 1: 6 zones + 2 groups (004, 007); claim 2: 6 zones + 1 group (004)
+        assert.strictEqual(dots.length, 15);
+        const colours = new Set(dots.map((d) => d.backgroundColor));
+        assert.deepStrictEqual([...colours].sort(), ["#3B82F6", "#EF4444"]);
+      });
+
+      test("A claim without accidentDate shows the claim date as 'Data zgłoszenia' (claim page and overview)", async () => {
+        const { viewModel, tree } = await render(realReport);
+        assert.strictEqual(viewModel.claims[0].accidentDate, "2025-02-20");
+        assert.ok(!viewModel.claims[1].accidentDate);
+        const texts = textsOf(tree);
+        assert.strictEqual(texts.filter((t) => t === "Data zdarzenia").length, 2); // overview header + claim 1 page
+        assert.strictEqual(texts.filter((t) => t === "Data zgłoszenia").length, 1); // claim 2 page
+        assert.ok(texts.includes("2025-10-07"));
+        assert.strictEqual(texts.filter((t) => t === "(zgłoszenie)").length, 1); // overview marker for claim 2 only
+      });
+
+      test("A and B are one probable event: KPI '2 wpisy', summary, badges, captions and disclaimer", async () => {
+        const { viewModel, tree } = await render(realReport);
+        assert.strictEqual(viewModel.claims.length, 2);
+        assert.deepStrictEqual(viewModel.claims.map((c) => c.probableWith), [[2], [1]]);
+        assert.deepStrictEqual(viewModel.dedup, {
+          entriesCount: 2,
+          likelyEventsCount: 1,
+          likelyTotal: { total: 19768.92, currency: "PLN" },
+          hasMerged: false,
+        });
+        const texts = textsOf(tree);
+        assert.ok(texts.includes("2 wpisy"));
+        assert.ok(texts.includes("prawdopodobnie 1 szkoda"));
+        assert.strictEqual(texts.includes("2 szkody"), false);
+        assert.ok(
+          texts.includes(
+            "Zarejestrowano 2 wpisy, prawdopodobnie dotyczące 1 szkody. Łączna wartość szkód według najnowszych wycen: 19 769 PLN netto (bez VAT)."
+          )
+        );
+        // badge: 2 rows of the page-1 table + 2 claim pages
+        assert.strictEqual(texts.filter((t) => t === "Prawdopodobnie ta sama szkoda").length, 4);
+        assert.ok(
+          texts.includes(
+            "Zbliżony zakres uszkodzeń i termin jak szkoda 2. Audatex nie podaje wspólnego identyfikatora zdarzenia."
+          )
+        );
+        assert.ok(
+          texts.includes(
+            "Zbliżony zakres uszkodzeń i termin jak szkoda 1. Audatex nie podaje wspólnego identyfikatora zdarzenia."
+          )
+        );
+        assert.ok(texts.some((t) => t.startsWith("Wyceny tej samej szkody scalamy automatycznie")));
+        assert.strictEqual(texts.includes("Wcześniejsze wyceny tej szkody"), false);
+        // timeline: probable label suffix and the "(zgłoszenie)" marker on the claim without accident date
+        assert.strictEqual(texts.filter((t) => t === " ≈").length, 2);
+        assert.strictEqual(texts.filter((t) => t === " (zgłoszenie)").length, 1);
+      });
+
+      test("Merged assessments (same accident date): one claim, KPI '1 szkoda', earlier assessments block", async () => {
+        const merged = {
+          ...realReport,
+          damageClaims: realReport.damageClaims.map((c: any, i: number) =>
+            i === 1 ? { ...c, accidentDate: "2025-02-20" } : c
+          ),
+        };
+        const { viewModel, tree } = await render(merged);
+        assert.strictEqual(viewModel.claims.length, 1);
+        assert.strictEqual(viewModel.claims[0].dedupKind, "MERGED");
+        assert.strictEqual(viewModel.claims[0].earlierAssessments.length, 1);
+        assert.strictEqual(viewModel.claims[0].damageValue, 19768.92);
+        const texts = textsOf(tree);
+        assert.ok(texts.includes("1 szkoda"));
+        assert.strictEqual(texts.some((t) => /^\d+ wpis/.test(t) || t.startsWith("prawdopodobnie")), false);
+        assert.ok(
+          texts.includes("Zarejestrowano 1 szkodę (najnowsza wycena: 2025-10-11). Łączna wartość szkód: 19 769 PLN netto (bez VAT).")
+        );
+        assert.ok(texts.includes("Wcześniejsze wyceny tej szkody"));
+        assert.ok(texts.includes("2025-10-07"));
+        assert.ok(texts.includes("2025-10-07.PL.B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2"));
+        assert.ok(texts.includes("Najnowsza z 2 wycen tej szkody"));
+        assert.ok(texts.includes("najnowsza z 2 wycen"));
+        assert.ok(texts.includes("Szkoda 1 z 1"));
+        assert.strictEqual(texts.includes("Prawdopodobnie ta sama szkoda"), false);
+        assert.ok(texts.some((t) => t.startsWith("Wyceny tej samej szkody scalamy automatycznie")));
+      });
+
+      test("Disclaimer is kept together with the last zone row (never alone on a page)", async () => {
+        const { tree } = await render(realReport);
+        const keptTogether: string[][] = [];
+        (function traverse(node: any) {
+          if (!node) return;
+          if (Array.isArray(node)) return node.forEach(traverse);
+          if (typeof node !== "object") return;
+          if (typeof node.type === "function") return traverse(node.type(node.props));
+          if (node.props?.wrap === false) keptTogether.push(textsOf(node.props.children));
+          if (node.props?.children) traverse(node.props.children);
+        })(tree);
+        const withDisclaimer = keptTogether.filter((t) => t.some((x) => x.startsWith("1. Niniejszy raport ma charakter")));
+        assert.ok(
+          withDisclaimer.some((t) => t.includes("Tył, prawa strona, środek")),
+          "a wrap={false} block must hold the disclaimer together with the last zone row"
+        );
+      });
+
+      test("Total loss is never hidden by a newer partial assessment of the same accident", async () => {
+        const tl = {
+          ...realReport,
+          damageClaims: realReport.damageClaims.map((c: any, i: number) =>
+            i === 1 ? { ...c, accidentDate: "2025-02-20", isTotalLoss: true } : c
+          ),
+        };
+        const { viewModel, tree } = await render(tl);
+        assert.strictEqual(viewModel.claims.length, 1);
+        // claim A (newer, primary) is partial; claim B (older) is a total loss
+        assert.strictEqual(realReport.damageClaims[0].isTotalLoss, false);
+        assert.strictEqual(viewModel.claims[0].isTotalLoss, true);
+        assert.deepStrictEqual(viewModel.claims[0].earlierAssessments.map((e) => e.isTotalLoss), [true]);
+        const texts = textsOf(tree);
+        // page-1 table badge + claim-page badge + badge on the earlier assessment
+        assert.strictEqual(texts.filter((t) => t === "Szkoda całkowita").length, 3);
+        assert.strictEqual(texts.includes("Częściowa"), false);
+        assert.ok(texts.includes("w tym szkoda całkowita"), "KPI sub-line");
+        assert.ok(texts.some((t) => t.includes("w tym szkodę całkowitą")), "factual summary");
+      });
+
+      test("'Poza zdjęciami' lists only interior zones; underbody zones stay on the underbody photo; one heading when there is no underbody photo", async () => {
+        const withZones = (codes: string[]) => ({
+          ...realReport,
+          damageClaims: [
+            {
+              ...realReport.damageClaims[0],
+              damageAssessmentJson: JSON.stringify({ damagePositionCodes: codes, significantPartGroupCodes: [] }),
+            },
+          ],
+        });
+        const count = (texts: string[], t: string) => texts.filter((x) => x === t).length;
+        const interior = "Środek, oś pojazdu, środek"; // zone 17
+        const underbody = "Środek, oś pojazdu, dół"; // zone 18
+
+        const both = textsOf((await render(withZones(["05", "17", "18"]))).tree);
+        assert.ok(both.includes("Podwozie (widok od spodu)"));
+        assert.strictEqual(count(both, "Poza zdjęciami"), 1);
+        assert.strictEqual(count(both, interior), 2, "zone list + off-photo list");
+        assert.strictEqual(count(both, underbody), 1, "zone list only: it is drawn on the underbody photo");
+
+        const interiorOnly = textsOf((await render(withZones(["05", "17"]))).tree);
+        assert.strictEqual(count(interiorOnly, "Strefy poza zdjęciami"), 1);
+        assert.strictEqual(count(interiorOnly, "Poza zdjęciami"), 0, "no duplicated sub-heading");
+        assert.strictEqual(count(interiorOnly, interior), 2);
+
+        const underbodyOnly = textsOf((await render(withZones(["05", "18"]))).tree);
+        assert.ok(underbodyOnly.includes("Podwozie (widok od spodu)"));
+        assert.strictEqual(count(underbodyOnly, "Poza zdjęciami"), 0, "nothing off-photo: no empty list");
+        assert.strictEqual(count(underbodyOnly, "Strefy poza zdjęciami"), 0);
+      });
+
+      test("Renders to a valid PDF", async () => {
+        const { renderToBuffer } = await import("@react-pdf/renderer");
+        const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
+        const vm = buildReportPdfViewModel(realReport);
+        const buffer = await renderToBuffer(React.createElement(ReportPdfDocument, { model: vm }) as any);
+        assert.strictEqual(buffer.toString("latin1", 0, 5), "%PDF-");
+      });
+    });
+
+    test("Renders a claim with missing country and a long equipment list without throwing", async () => {
+      const { renderToBuffer } = await import("@react-pdf/renderer");
+      const { ReportPdfDocument } = await import("../report-pdf-document.tsx");
+      const items = (n: number, p: string) => Array.from({ length: n }, (_, i) => ({ code: `${p}${i}`, name: `Pozycja ${p}${i}` }));
+      const vm = buildReportPdfViewModel({
+        ...mockReport,
+        vehicleSnapshot: {
+          ...mockReport.vehicleSnapshot,
+          standardEquipment: JSON.stringify(items(80, "S")),
+          optionalEquipment: JSON.stringify(items(25, "O")),
+        },
+        damageClaims: [{ ...mockReport.damageClaims[0], country: undefined }],
+      });
+      assert.strictEqual(vm.claims[0].country, undefined);
+      const buffer = await renderToBuffer(React.createElement(ReportPdfDocument, { model: vm }) as any);
+      assert.strictEqual(buffer.toString("latin1", 0, 5), "%PDF-");
     });
   });
 });
