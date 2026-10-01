@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use, useCallback } from "react";
+import { useEffect, useState, use, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   Car,
@@ -40,17 +40,30 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
   const [freezeReason, setFreezeReason] = useState("");
   const [freezing, setFreezing] = useState(false);
 
+  // Tracks whether a report was already loaded (readable inside stable callbacks without stale closures)
+  const reportLoadedRef = useRef(false);
+  // Last failed dispatch timestamp per module; used to back off automatic re-dispatch
+  const failedAtRef = useRef<Record<string, number>>({});
+
   const fetchReport = useCallback(async () => {
     try {
       const res = await fetch(`/api/reports/${reportId}`);
       const data = await res.json();
       if (data.report) {
         setReport(data.report);
+        reportLoadedRef.current = true;
+        setError("");
+      } else if (reportLoadedRef.current) {
+        console.warn("Background report refresh failed", data.error);
       } else {
         setError(data.error || "Nie odnaleziono raportu w bazie.");
       }
     } catch {
-      setError("Wystąpił błąd podczas ładowania raportu z bazy danych.");
+      if (reportLoadedRef.current) {
+        console.warn("Background report refresh failed (network error)");
+      } else {
+        setError("Wystąpił błąd podczas ładowania raportu z bazy danych.");
+      }
     } finally {
       setLoading(false);
     }
@@ -65,21 +78,29 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
     async (moduleId: string) => {
       setExecutingModules((prev) => ({ ...prev, [moduleId]: true }));
       try {
-        await fetch(`/api/reports/${reportId}/modules/${moduleId}`, {
+        const res = await fetch(`/api/reports/${reportId}/modules/${moduleId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
         });
+        if (res.ok) {
+          delete failedAtRef.current[moduleId];
+        } else {
+          failedAtRef.current[moduleId] = Date.now();
+        }
       } catch (e) {
+        failedAtRef.current[moduleId] = Date.now();
         console.error(`Error executing module ${moduleId}`, e);
       } finally {
-        setExecutingModules((prev) => ({ ...prev, [moduleId]: false }));
+        // Refresh first, then release the local "executing" flag, so the orchestration effect
+        // never sees a stale report together with executing=false (double-dispatch window).
         await fetchReport();
+        setExecutingModules((prev) => ({ ...prev, [moduleId]: false }));
       }
     },
     [reportId, fetchReport]
   );
 
-  // Progressive Orchestration Effect: dispatches PENDING modules
+  // Progressive Orchestration Effect: dispatches PENDING modules (and RUNNING modules with a stale server lock)
   useEffect(() => {
     if (!report || report.status === "COMPLETED" || report.status === "PARTIALLY_FAILED" || report.status === "FAILED") {
       return;
@@ -90,11 +111,17 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
     const detailsMod = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_DETAILS");
 
     // Parallel execution of initial independent modules
-    if (valMod?.status === "PENDING" && !executingModules["VALUATION"]) {
+    const shouldDispatch = (mod: any) => {
+      if (!mod) return false;
+      if (Date.now() - (failedAtRef.current[mod.moduleId] ?? 0) < 15000) return false; // back off after a failed dispatch
+      return mod.status === "PENDING" || mod.isStaleLock === true;
+    };
+
+    if (shouldDispatch(valMod) && !executingModules["VALUATION"]) {
       executeModule("VALUATION");
     }
 
-    if (checkMod?.status === "PENDING" && !executingModules["CLAIM_CHECK"]) {
+    if (shouldDispatch(checkMod) && !executingModules["CLAIM_CHECK"]) {
       executeModule("CLAIM_CHECK");
     }
 
@@ -102,12 +129,31 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
     if (
       checkMod &&
       (checkMod.status === "SUCCEEDED" || checkMod.status === "NO_DATA") &&
-      detailsMod?.status === "PENDING" &&
+      shouldDispatch(detailsMod) &&
       !executingModules["CLAIM_DETAILS"]
     ) {
       executeModule("CLAIM_DETAILS");
     }
   }, [report, executingModules, executeModule]);
+
+  // Polling: while the report is PROCESSING and a requested module is PENDING/RUNNING without a local
+  // execution (running in another tab/session, stale lock, or waiting in dispatch backoff), refresh every
+  // 15s so stale locks get picked up and failed dispatches are eventually retried.
+  const needsPolling =
+    report?.status === "PROCESSING" &&
+    Boolean(
+      report.moduleResults?.some(
+        (m: any) => (m.status === "PENDING" || m.status === "RUNNING") && !executingModules[m.moduleId]
+      )
+    );
+
+  useEffect(() => {
+    if (!needsPolling) return;
+    const interval = setInterval(() => {
+      fetchReport();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [needsPolling, fetchReport]);
 
   const handleFreezeReport = async () => {
     setFreezing(true);
@@ -115,7 +161,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
       const res = await fetch(`/api/reports/${reportId}/freeze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: freezeReason || "Zatwierdzenie przez operatora" }),
+        body: JSON.stringify({ reason: freezeReason.trim() }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -180,6 +226,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
   });
   const hasClaims = claimsHistoryPresentation === "CLAIM_DETAILS_AVAILABLE";
   const historyDetectedWithoutDetails = claimsHistoryPresentation === "HISTORY_DETECTED_DETAILS_NOT_REQUESTED";
+  const historyDetectedDetailsUnavailable = claimsHistoryPresentation === "HISTORY_DETECTED_DETAILS_UNAVAILABLE";
   const noClaimsFound = claimsHistoryPresentation === "NO_HISTORY";
 
   return (
@@ -386,7 +433,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               : "border-transparent text-slate-400 hover:text-slate-200"
           }`}
         >
-          <AlertTriangle className="h-4 w-4" /> Historia & Szczegóły Szkód ({historyDetectedWithoutDetails ? "wpisy wykryte" : claims.length})
+          <AlertTriangle className="h-4 w-4" /> Historia & Szczegóły Szkód ({historyDetectedWithoutDetails || historyDetectedDetailsUnavailable ? "wpisy wykryte" : claims.length})
         </button>
 
         <button
@@ -644,6 +691,18 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                 </p>
                 <p className="text-[11px] text-slate-400 pt-1">
                   Aby pobrać szczegóły, utwórz nowy raport z zaznaczonym Modułem 3: Szczegóły Szkód.
+                </p>
+              </div>
+            </div>
+          ) : historyDetectedDetailsUnavailable ? (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-6 flex items-start gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-400 shrink-0">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-lg font-bold text-amber-400">Wykryto wpisy historii szkód</h2>
+                <p className="text-xs text-slate-300">
+                  Wykryto wpisy historii szkód w bazie Audatex. Szczegóły zdarzeń nie są dostępne w tym raporcie.
                 </p>
               </div>
             </div>

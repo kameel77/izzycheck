@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { isModuleLockStale } from "@/lib/reports/module-executor";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -29,7 +30,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         updatedAt: true,
         createdById: true,
         createdBy: { select: { id: true, name: true, email: true } },
-        moduleResults: { select: { moduleId: true, status: true, responseMetadata: true, errorMessage: true } },
+        moduleResults: { select: { moduleId: true, status: true, responseMetadata: true, errorMessage: true, updatedAt: true } },
         vehicleSnapshot: true,
         damageClaims: true,
       },
@@ -49,7 +50,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       );
     }
 
-    return NextResponse.json({ success: true, report });
+    // Server clock decides whether a RUNNING module lock is stale (client may re-dispatch it)
+    const reportWithStaleFlags = {
+      ...report,
+      moduleResults: report.moduleResults.map((m) => ({ ...m, isStaleLock: isModuleLockStale(m) })),
+    };
+
+    return NextResponse.json({ success: true, report: reportWithStaleFlags });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Błąd pobierania raportu z bazy." }, { status: 500 });
   }

@@ -1,5 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import { createHash } from "crypto";
+import { escapeXml } from "./xml.ts";
 import { ClaimCheckInput, ClaimCheckResult, ClaimDetailsResult, DamageClaimDetail, NonRetryableError } from "./types.ts";
 import { normalizeDamageAssessment } from "../damage/normalize-damage-assessment.ts";
 import {
@@ -56,12 +57,12 @@ export class AudatexHistoryAdapter {
         <soapenv:Body>
           <urn:hasHistoryRequest>
             <urn:requestParam>
-              <urn:username>${username}</urn:username>
-              <urn:password>${password}</urn:password>
-              <urn:country>${country}</urn:country>
-              <urn:currency>${currency}</urn:currency>
-              <urn:vin>${input.vin.trim()}</urn:vin>
-              ${input.firstRegistration ? `<urn:firstRegistration>${input.firstRegistration.trim()}</urn:firstRegistration>` : ""}
+              <urn:username>${escapeXml(username)}</urn:username>
+              <urn:password>${escapeXml(password)}</urn:password>
+              <urn:country>${escapeXml(country)}</urn:country>
+              <urn:currency>${escapeXml(currency)}</urn:currency>
+              <urn:vin>${escapeXml(String(input.vin).trim())}</urn:vin>
+              ${input.firstRegistration ? `<urn:firstRegistration>${escapeXml(String(input.firstRegistration).trim())}</urn:firstRegistration>` : ""}
               <urn:showIsMileage>true</urn:showIsMileage>
               <urn:showVinType>true</urn:showVinType>
               <urn:withPhotos>false</urn:withPhotos>
@@ -95,12 +96,12 @@ export class AudatexHistoryAdapter {
         <soapenv:Body>
           <urn:getDetailsRequest>
             <urn:requestParam>
-              <urn:username>${username}</urn:username>
-              <urn:password>${password}</urn:password>
-              <urn:country>${country}</urn:country>
-              <urn:currency>${currency}</urn:currency>
-              <urn:vin>${input.vin.trim()}</urn:vin>
-              ${input.firstRegistration ? `<urn:firstRegistration>${input.firstRegistration.trim()}</urn:firstRegistration>` : ""}
+              <urn:username>${escapeXml(username)}</urn:username>
+              <urn:password>${escapeXml(password)}</urn:password>
+              <urn:country>${escapeXml(country)}</urn:country>
+              <urn:currency>${escapeXml(currency)}</urn:currency>
+              <urn:vin>${escapeXml(String(input.vin).trim())}</urn:vin>
+              ${input.firstRegistration ? `<urn:firstRegistration>${escapeXml(String(input.firstRegistration).trim())}</urn:firstRegistration>` : ""}
               <urn:showIsMileage>true</urn:showIsMileage>
               <urn:showVinType>true</urn:showVinType>
             </urn:requestParam>

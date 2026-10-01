@@ -12,6 +12,15 @@ import { finalizeReport } from "@/lib/reports/finalize";
 const valuationAdapter = new AudatexValuationAdapter();
 const historyAdapter = new AudatexHistoryAdapter();
 
+function isValidIsoDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
+
+const isProvided = (value: unknown) => value !== undefined && value !== null && value !== "";
+
 export async function POST(req: Request) {
   try {
     const user = await getCurrentUser();
@@ -46,11 +55,19 @@ export async function POST(req: Request) {
     }
 
     // 2. First registration date validation
-    if (!firstRegistrationDate || !/^\d{4}-\d{2}-\d{2}$/.test(firstRegistrationDate)) {
+    if (!isValidIsoDate(firstRegistrationDate)) {
       return NextResponse.json(
         { error: "Data pierwszej rejestracji jest wymagana w formacie YYYY-MM-DD." },
         { status: 400 }
       );
+    }
+
+    if (isProvided(valuationDate) && !isValidIsoDate(valuationDate)) {
+      return NextResponse.json({ error: "Data wyceny musi być w formacie YYYY-MM-DD." }, { status: 400 });
+    }
+
+    if (isProvided(manufactureDate) && !isValidIsoDate(manufactureDate)) {
+      return NextResponse.json({ error: "Data produkcji musi być w formacie YYYY-MM-DD." }, { status: 400 });
     }
 
     // 3. Modules selection check
@@ -68,6 +85,9 @@ export async function POST(req: Request) {
     const valDate = valuationDate || todayStr;
 
     const idempotencyHeader = req.headers.get("idempotency-key") || req.headers.get("x-idempotency-key");
+    if (idempotencyHeader && idempotencyHeader.length > 128) {
+      return NextResponse.json({ error: "Nieprawidłowy klucz idempotencji." }, { status: 400 });
+    }
     const currentRequestHash = computeRequestHash({
       vin,
       firstRegistrationDate,

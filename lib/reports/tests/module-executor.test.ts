@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { test, describe, beforeEach, afterEach } from "node:test";
-import { executeReportModule, ModuleExecutionError } from "../module-executor.ts";
+import { executeReportModule, ModuleExecutionError, isModuleLockStale, STALE_LOCK_MS } from "../module-executor.ts";
 
 describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
   beforeEach(() => {
@@ -31,7 +31,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
     };
 
     await assert.rejects(
-      async () => executeReportModule("rep-dep-1", "CLAIM_DETAILS", { customPrisma: mockPrisma }),
+      async () => executeReportModule("rep-dep-1", "CLAIM_DETAILS", { customPrisma: mockPrisma, internal: true }),
       (err: any) => {
         assert.ok(err instanceof ModuleExecutionError);
         assert.strictEqual(err.statusCode, 412);
@@ -69,7 +69,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
       },
     };
 
-    const res = await executeReportModule("rep-nodata-1", "CLAIM_DETAILS", { customPrisma: mockPrisma });
+    const res = await executeReportModule("rep-nodata-1", "CLAIM_DETAILS", { customPrisma: mockPrisma, internal: true });
     assert.strictEqual(res.success, true);
     assert.strictEqual(res.status, "NO_DATA");
     assert.strictEqual(res.skippedDueToNoHistory, true);
@@ -98,7 +98,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
     };
 
     await assert.rejects(
-      async () => executeReportModule("rep-lock-1", "VALUATION", { customPrisma: mockPrisma }),
+      async () => executeReportModule("rep-lock-1", "VALUATION", { customPrisma: mockPrisma, internal: true }),
       (err: any) => {
         assert.ok(err instanceof ModuleExecutionError);
         assert.strictEqual(err.statusCode, 409);
@@ -127,7 +127,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
     };
 
     await assert.rejects(
-      async () => executeReportModule("rep-limit-1", "VALUATION", { customPrisma: mockPrisma }),
+      async () => executeReportModule("rep-limit-1", "VALUATION", { customPrisma: mockPrisma, internal: true }),
       (err: any) => {
         assert.ok(err instanceof ModuleExecutionError);
         assert.strictEqual(err.statusCode, 422);
@@ -156,7 +156,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
     };
 
     await assert.rejects(
-      async () => executeReportModule("rep-nonret-1", "VALUATION", { customPrisma: mockPrisma }),
+      async () => executeReportModule("rep-nonret-1", "VALUATION", { customPrisma: mockPrisma, internal: true }),
       (err: any) => {
         assert.ok(err instanceof ModuleExecutionError);
         assert.strictEqual(err.statusCode, 422);
@@ -216,9 +216,147 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
     const res = await executeReportModule("rep-casc-1", "CLAIM_CHECK", {
       customPrisma: mockPrisma,
       customHistoryAdapter: mockHistAdapter,
+      internal: true,
     });
     assert.strictEqual(res.success, true);
     assert.strictEqual(deletedClaims, true, "Must delete old claims on re-checking history");
     assert.strictEqual(detailsResetStatus, "PENDING", "Must reset dependent CLAIM_DETAILS to PENDING when history is found");
+  });
+  describe("Report ownership check (IDOR)", () => {
+    function buildOwnershipPrisma(calls: { updateMany: number; update: number }) {
+      return {
+        report: {
+          findUnique: async () => ({
+            id: "rep-own-1",
+            vin: "WBA3N51030KS15173",
+            firstRegistrationDate: "2021-04-15",
+            valuationDate: "2026-08-06",
+            status: "PROCESSING",
+            createdById: "owner-1",
+            moduleResults: [
+              { id: "m-val", moduleId: "VALUATION", status: "PENDING", retryCount: 0 },
+            ],
+            vehicleSnapshot: null,
+            damageClaims: [],
+          }),
+          update: async () => ({ id: "rep-own-1" }),
+        },
+        reportModuleResult: {
+          updateMany: async () => {
+            calls.updateMany++;
+            return { count: 1 };
+          },
+          update: async ({ where, data }: any) => {
+            calls.update++;
+            return { id: where.id, ...data };
+          },
+        },
+        vehicleSnapshot: { upsert: async () => ({}) },
+      };
+    }
+
+    const mockValAdapter = {
+      evaluateVehicle: async () => ({
+        ibsCode: "IBS1",
+        make: "BMW",
+        model: "3",
+        variant: "320d",
+        newPriceCv: 1,
+        marketPriceCob: 1,
+        technicalValueTh: 1,
+        mileageUsed: 1,
+        isAverageMileageUsed: false,
+        standardEquipment: [],
+        optionalEquipment: [],
+      }),
+    };
+
+    test("OPERATOR on someone else's report gets 403 and no lock/update is performed", async () => {
+      const calls = { updateMany: 0, update: 0 };
+      await assert.rejects(
+        async () =>
+          executeReportModule("rep-own-1", "VALUATION", {
+            customPrisma: buildOwnershipPrisma(calls),
+            customValuationAdapter: mockValAdapter,
+            userId: "intruder-1",
+            role: "OPERATOR",
+          }),
+        (err: any) => {
+          assert.ok(err instanceof ModuleExecutionError);
+          assert.strictEqual(err.statusCode, 403);
+          return true;
+        }
+      );
+      assert.strictEqual(calls.updateMany, 0, "Must not take the lock");
+      assert.strictEqual(calls.update, 0, "Must not update module results");
+    });
+
+    test("Fails closed with 403 when neither userId nor internal is provided", async () => {
+      const calls = { updateMany: 0, update: 0 };
+      await assert.rejects(
+        async () =>
+          executeReportModule("rep-own-1", "VALUATION", {
+            customPrisma: buildOwnershipPrisma(calls),
+            customValuationAdapter: mockValAdapter,
+          }),
+        (err: any) => {
+          assert.ok(err instanceof ModuleExecutionError);
+          assert.strictEqual(err.statusCode, 403);
+          return true;
+        }
+      );
+      assert.strictEqual(calls.updateMany, 0);
+      assert.strictEqual(calls.update, 0);
+    });
+
+    test("ADMIN on someone else's report proceeds", async () => {
+      const calls = { updateMany: 0, update: 0 };
+      const res = await executeReportModule("rep-own-1", "VALUATION", {
+        customPrisma: buildOwnershipPrisma(calls),
+        customValuationAdapter: mockValAdapter,
+        userId: "admin-1",
+        role: "ADMIN",
+      });
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(calls.updateMany, 1);
+    });
+
+    test("Owner OPERATOR proceeds", async () => {
+      const calls = { updateMany: 0, update: 0 };
+      const res = await executeReportModule("rep-own-1", "VALUATION", {
+        customPrisma: buildOwnershipPrisma(calls),
+        customValuationAdapter: mockValAdapter,
+        userId: "owner-1",
+        role: "OPERATOR",
+      });
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(calls.updateMany, 1);
+    });
+  });
+
+  describe("isModuleLockStale", () => {
+    const now = Date.parse("2026-10-01T12:00:00.000Z");
+
+    test("RUNNING module older than STALE_LOCK_MS is stale", () => {
+      const updatedAt = new Date(now - STALE_LOCK_MS - 1000);
+      assert.strictEqual(isModuleLockStale({ status: "RUNNING", updatedAt }, now), true);
+    });
+
+    test("RUNNING module younger than STALE_LOCK_MS is not stale", () => {
+      const updatedAt = new Date(now - STALE_LOCK_MS + 1000);
+      assert.strictEqual(isModuleLockStale({ status: "RUNNING", updatedAt }, now), false);
+    });
+
+    test("Non-RUNNING modules are never stale, even when old", () => {
+      const updatedAt = new Date(now - STALE_LOCK_MS * 10);
+      for (const status of ["PENDING", "FAILED", "SUCCEEDED", "NO_DATA", "NOT_REQUESTED"]) {
+        assert.strictEqual(isModuleLockStale({ status, updatedAt }, now), false);
+      }
+    });
+
+    test("Accepts ISO string updatedAt (JSON-serialised)", () => {
+      const updatedAt = new Date(now - STALE_LOCK_MS - 5000).toISOString();
+      assert.strictEqual(isModuleLockStale({ status: "RUNNING", updatedAt }, now), true);
+    });
   });
 });
