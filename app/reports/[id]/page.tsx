@@ -32,6 +32,9 @@ import {
   formatMandateDescription,
   entryCountLabel,
   claimCountGenitive,
+  formatDamageGrossRange,
+  formatAmount,
+  DAMAGE_GROSS_CAPTION,
 } from "@/lib/pdf/pdf-format";
 import { dedupeRawClaims } from "@/lib/reports/claim-dedup";
 
@@ -791,8 +794,17 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                         <div className="text-left sm:text-right">
                           <span className="text-[11px] text-slate-400 block">Wartość Szkody</span>
                           <span className="text-xl font-black text-red-400">
-                            {c.damageValue ? `${c.damageValue.toLocaleString("pl-PL")} ${c.currency || "PLN"}` : "Brak kwoty"}
+                            {!c.damageValue || c.damageValue <= 0
+                              ? "Brak kwoty"
+                              : (c.currency || "PLN") === "PLN"
+                              ? formatDamageGrossRange(c.damageValue)
+                              : `${formatAmount(c.damageValue)} ${c.currency}`}
                           </span>
+                          {c.damageValue > 0 && (
+                            <span className="text-[11px] text-slate-500 block">
+                              {(c.currency || "PLN") === "PLN" ? DAMAGE_GROSS_CAPTION : `${c.currency} netto (bez VAT)`}
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -804,7 +816,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                           <span className="font-semibold text-white">{item.accidentDate || c.claimDate || "Brak danych"}</span>
                         </div>
                         <div>
-                          <span className="text-[11px] text-slate-400 block">Przebieg Zgłoszony</span>
+                          <span className="text-[11px] text-slate-400 block">Stan drogomierza</span>
                           <span className="font-semibold text-white">{c.mileage ? `${c.mileage.toLocaleString("pl-PL")} km` : "Brak danych"}</span>
                         </div>
                         <div>
@@ -831,7 +843,13 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                                     SZKODA CAŁKOWITA
                                   </span>
                                 )}
-                                <span>{typeof e.damageValue === "number" ? `${e.damageValue.toLocaleString("pl-PL")} ${e.currency || "PLN"} netto (bez VAT)` : "Brak kwoty"}</span>
+                                <span>
+                                  {typeof e.damageValue !== "number" || e.damageValue <= 0
+                                    ? "Brak kwoty"
+                                    : (e.currency || "PLN") === "PLN"
+                                    ? `${formatDamageGrossRange(e.damageValue)} brutto, szacunek`
+                                    : `${formatAmount(e.damageValue)} ${e.currency} netto (bez VAT)`}
+                                </span>
                                 <span className="text-[11px] text-slate-500">{e.claimId}</span>
                               </li>
                             ))}

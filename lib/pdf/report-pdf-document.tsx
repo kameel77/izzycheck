@@ -17,7 +17,6 @@ import { ReportPdfViewModel, ReportPdfClaimItem } from "./report-pdf-view-model.
 import { ISSUER_CONFIG } from "../config/issuer.ts";
 import { sortEquipmentAlphabetically, chunkEquipmentForRows } from "../reports/equipment.ts";
 import { CATEGORY_DEFINITIONS } from "../damage/audatex-classification.ts";
-import { resolveVehicleTemplate } from "../damage/vehicle-templates.ts";
 import type { ProcessedMarkerItem } from "../damage/build-damage-presentation.ts";
 import { PHOTO_1_CAPTION, PHOTO_2_CAPTION } from "../damage/build-damage-presentation.ts";
 import {
@@ -29,6 +28,8 @@ import {
   Tone,
   KpiSpec,
   formatAmount,
+  formatDamageGrossRange,
+  DAMAGE_GROSS_CAPTION,
   formatCountry,
   formatDateTimeWarsaw,
   formatMandateDescription,
@@ -372,24 +373,41 @@ function Notice({
   );
 }
 
-/** Amount with the explicit D-7 net label as a second line. */
-function Amount({
+/**
+ * Damage amount as an estimated GROSS range (net Audatex amount + 23% VAT, bucketed) with a muted caption.
+ * Non-PLN amounts are not converted and keep the net display with the currency.
+ */
+function DamageAmount({
   value,
   currency = "PLN",
   size = TYPE.body,
   color = COLORS.ink,
   align = "flex-start",
+  shortCaption = false,
 }: {
-  value: number;
+  value?: number | null;
   currency?: string;
   size?: number;
   color?: string;
   align?: "flex-start" | "flex-end";
+  shortCaption?: boolean;
 }) {
+  if (typeof value !== "number" || value <= 0) {
+    return (
+      <View style={{ alignItems: align }}>
+        <Text style={{ fontSize: size, fontWeight: "bold", color: COLORS.muted }}>Brak kwoty</Text>
+      </View>
+    );
+  }
+  const isPln = currency === "PLN";
   return (
     <View style={{ alignItems: align }}>
-      <Text style={{ fontSize: size, fontWeight: "bold", color }}>{formatAmount(value)}</Text>
-      <Text style={styles.caption}>{`${currency} netto (bez VAT)`}</Text>
+      <Text style={{ fontSize: size, fontWeight: "bold", color }}>
+        {isPln ? formatDamageGrossRange(value) : formatAmount(value)}
+      </Text>
+      <Text style={styles.caption}>
+        {isPln ? (shortCaption ? "brutto, szacunek" : DAMAGE_GROSS_CAPTION) : `${currency} netto (bez VAT)`}
+      </Text>
     </View>
   );
 }
@@ -587,11 +605,18 @@ function renderClaimsTimeline(model: ReportPdfViewModel) {
             ) : null}
             {pl.claim.probableWith.length > 0 ? " ≈" : ""}
           </Text>
-          {typeof pl.claim.damageValue === "number" ? (
-            <>
-              <Text style={{ fontSize: 7, color: COLORS.ink2 }}>{`${formatAmount(pl.claim.damageValue)} ${pl.claim.currency}`}</Text>
-              <Text style={{ fontSize: 6, color: COLORS.muted }}>netto (bez VAT)</Text>
-            </>
+          {typeof pl.claim.damageValue === "number" && pl.claim.damageValue > 0 ? (
+            pl.claim.currency === "PLN" ? (
+              <>
+                <Text style={{ fontSize: 7, color: COLORS.ink2 }}>{formatDamageGrossRange(pl.claim.damageValue)}</Text>
+                <Text style={{ fontSize: 6, color: COLORS.muted }}>brutto, szacunek</Text>
+              </>
+            ) : (
+              <>
+                <Text style={{ fontSize: 7, color: COLORS.ink2 }}>{`${formatAmount(pl.claim.damageValue)} ${pl.claim.currency}`}</Text>
+                <Text style={{ fontSize: 6, color: COLORS.muted }}>netto (bez VAT)</Text>
+              </>
+            )
           ) : (
             <Text style={{ fontSize: 7, color: COLORS.muted }}>Brak kwoty</Text>
           )}
@@ -620,7 +645,7 @@ function renderClaimsOverviewTable(claims: ReportPdfClaimItem[]) {
         <Text style={[styles.tableHeaderText, { width: OV_COLS.date }]}>Data zdarzenia</Text>
         <Text style={[styles.tableHeaderText, { width: OV_COLS.mandate }]}>Kwalifikacja</Text>
         <Text style={[styles.tableHeaderText, { width: OV_COLS.value }]}>Wartość</Text>
-        <Text style={[styles.tableHeaderText, { width: OV_COLS.type }]}>Typ</Text>
+        <Text style={[styles.tableHeaderText, { width: OV_COLS.type }]}>Uwagi</Text>
       </View>
       {claims.map((c) => (
         <View key={`ov-${c.claimId}`} style={styles.tableRow} wrap={false}>
@@ -640,42 +665,25 @@ function renderClaimsOverviewTable(claims: ReportPdfClaimItem[]) {
             )}
           </View>
           <View style={{ width: OV_COLS.value }}>
-            {typeof c.damageValue === "number" ? (
-              <Amount value={c.damageValue} currency={c.currency} />
-            ) : (
-              <Text style={{ color: COLORS.muted }}>Brak kwoty</Text>
-            )}
+            <DamageAmount value={c.damageValue} currency={c.currency} shortCaption />
           </View>
           <View style={{ width: OV_COLS.type }}>
-            <View style={{ flexDirection: "row" }}>
-              <Badge tone={c.isTotalLoss ? "risk" : "caution"}>{c.isTotalLoss ? "Szkoda całkowita" : "Częściowa"}</Badge>
-            </View>
+            {c.isTotalLoss && (
+              <View style={{ flexDirection: "row" }}>
+                <Badge tone="risk">Szkoda całkowita</Badge>
+              </View>
+            )}
             {c.probableWith.length > 0 && (
-              <View style={{ flexDirection: "row", marginTop: 3 }}>
+              <View style={{ flexDirection: "row", marginTop: c.isTotalLoss ? 3 : 0 }}>
                 <Badge tone="caution">Prawdopodobnie ta sama szkoda</Badge>
               </View>
             )}
+            {!c.isTotalLoss && c.probableWith.length === 0 && <Text style={{ color: COLORS.muted }}>—</Text>}
           </View>
         </View>
       ))}
     </View>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Vehicle image for the page-1 band
-// ---------------------------------------------------------------------------
-
-function resolveBandImage(model: ReportPdfViewModel): string | null {
-  if (!model.make) return null; // no valuation: nothing reliable to illustrate
-  try {
-    const template = resolveVehicleTemplate(`${model.make} ${model.model || ""}`.trim(), model.technicalSpec?.bodyType);
-    if (template.isGeneric) return null; // do not show a sedan render for a body type we could not resolve
-    const imagePath = path.join(process.cwd(), "public", "vehicles", "pdf", template.assetFrontPdfJpg);
-    return fs.existsSync(imagePath) ? imagePath : null;
-  } catch {
-    return null;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -704,7 +712,6 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
 
   // Without a make the title is generic; the VIN line below the title is then the only VIN occurrence.
   const vehicleTitle = [model.make, model.model, model.variant].filter(Boolean).join(" ") || "Pojazd o numerze VIN";
-  const bandImage = resolveBandImage(model);
 
   const claimsKpi = buildClaimsKpi({
     claimsHistoryPresentation: model.claimsHistoryPresentation,
@@ -773,7 +780,7 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
         1. Niniejszy raport ma charakter analityczno-informacyjny i został sporządzony na podstawie danych dostarczonych przez system Audatex (AudaValuation oraz Claims History Engine). Dokument nie stanowi urzędowej opinii biegłego rzeczoznawcy majątkowego ani gwarancji bezwypadkowości pojazdu.
       </Text>
       <Text style={[styles.disclaimerText, { marginBottom: 2 }]}>
-        2. Wszelkie zaprezentowane wartości kwotowe są wartościami bazowymi netto (bez VAT), zgodnie z danymi źródłowymi Audatex. System IzzyCheck nie dokonuje wyliczeń ani korekt stawek podatku od towarów i usług.
+        2. Wartości wyceny pojazdu są wartościami netto (bez VAT) według Audatex. Wartości szkód prezentujemy jako szacunkowy przedział brutto wyliczony z kwoty netto Audatex powiększonej o 23% VAT.
       </Text>
       <Text style={styles.disclaimerText}>
         3. Zastrzeżenie prawne (wersja robocza): Zakres odpowiedzialności wystawcy wobec nabywcy raportu (w szczególności konsumenta) podlega ostatecznej regulacji w regulaminie usługi zgodnie z prawem właściwym.
@@ -800,7 +807,6 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
               {model.ibsCode ? <Chip>{`IBS ${model.ibsCode}`}</Chip> : null}
             </View>
           </View>
-          {bandImage ? <Image src={bandImage} style={{ width: 120, height: 60, objectFit: "contain" }} /> : null}
         </View>
 
         {/* KPI row */}
@@ -890,7 +896,7 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
         {/* Claims overview */}
         {showClaimsHistorySection && (
           <>
-            <SectionTitle number={nums.claims}>Historia szkód (Audatex CHE)</SectionTitle>
+            <SectionTitle number={nums.claims}>Historia szkód</SectionTitle>
             {model.claimsHistoryPresentation === "CLAIM_DETAILS_AVAILABLE" && (
               <>
                 {renderClaimsTimeline(model)}
@@ -1063,9 +1069,7 @@ function ClaimPage({
       <View style={styles.sectionTitleWrap} wrap={false}>
         <View style={styles.sectionBar} />
         <Text style={styles.sectionTitleText}>{`Szkoda ${claim.index} z ${total}`}</Text>
-        <Badge tone={claim.isTotalLoss ? "risk" : "caution"}>
-          {claim.isTotalLoss ? "Szkoda całkowita" : "Częściowa"}
-        </Badge>
+        {claim.isTotalLoss && <Badge tone="risk">Szkoda całkowita</Badge>}
         {claim.probableWith.length > 0 && <Badge tone="caution">Prawdopodobnie ta sama szkoda</Badge>}
       </View>
       {claim.dedupKind === "MERGED" && (
@@ -1096,23 +1100,23 @@ function ClaimPage({
           </View>
           <View style={{ alignItems: "flex-end" }}>
             <Text style={styles.label}>Wartość szkody</Text>
-            {typeof claim.damageValue === "number" ? (
-              <Amount value={claim.damageValue} currency={claim.currency} size={TYPE.title} align="flex-end" />
-            ) : (
-              <Text style={{ fontSize: TYPE.title, fontWeight: "bold", color: COLORS.muted }}>Brak kwoty</Text>
-            )}
+            <DamageAmount value={claim.damageValue} currency={claim.currency} size={TYPE.title} align="flex-end" />
           </View>
         </View>
         <View style={{ flexDirection: "row", marginTop: 8 }}>
-          <View style={{ width: "25%", paddingRight: 6 }}>
+          <View style={{ width: "16%", paddingRight: 6 }}>
             <Text style={styles.label}>Kraj zgłoszenia</Text>
             <Text style={styles.value}>{formatCountry(claim.country)}</Text>
           </View>
-          <View style={{ width: "20%", paddingRight: 6 }}>
+          <View style={{ width: "19%", paddingRight: 6 }}>
+            <Text style={styles.label}>Stan drogomierza</Text>
+            <Text style={styles.value}>{claim.mileage ? `${formatAmount(claim.mileage)} km` : "Brak danych"}</Text>
+          </View>
+          <View style={{ width: "24%", paddingRight: 6 }}>
             <Text style={styles.label}>Kod mandatu Audatex</Text>
             <Text style={styles.value}>{claim.mandateCode || "—"}</Text>
           </View>
-          <View style={{ width: "55%" }}>
+          <View style={{ width: "41%" }}>
             <Text style={styles.label}>Kwalifikacja zdarzenia</Text>
             <Text style={styles.value}>{formatMandateDescription(claim.mandateDescription)}</Text>
           </View>
@@ -1214,11 +1218,7 @@ function ClaimPage({
                 <Text style={{ fontSize: TYPE.caption, color: COLORS.muted }}>zgłoszenie</Text>
               </View>
               <View style={{ width: "18%" }}>
-                {typeof e.damageValue === "number" ? (
-                  <Amount value={e.damageValue} currency={e.currency} />
-                ) : (
-                  <Text style={{ color: COLORS.muted }}>Brak kwoty</Text>
-                )}
+                <DamageAmount value={e.damageValue} currency={e.currency} shortCaption />
               </View>
               <View style={{ width: "22%", flexDirection: "row" }}>
                 {e.isTotalLoss && <Badge tone="risk">Szkoda całkowita</Badge>}

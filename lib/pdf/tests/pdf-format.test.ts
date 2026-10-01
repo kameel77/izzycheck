@@ -9,6 +9,9 @@ import {
   polishPlural,
   itemCountLabel,
   entryCountLabel,
+  damageGrossBucket,
+  formatDamageGrossRange,
+  formatDamageTotal,
   totalLossPhrase,
   filterRawAttributes,
   RAW_ATTRIBUTE_LABELS,
@@ -201,6 +204,60 @@ describe("pdf-format: labels and raw attributes", () => {
   });
 });
 
+describe("pdf-format: damage amounts as an estimated gross range", () => {
+  test("bucket widths: 500 below 5 000, 1 000 below 50 000, 5 000 below 200 000, 10 000 from 200 000 (boundaries)", () => {
+    const cases: [number, number, number][] = [
+      [0, 0, 500],
+      [499.99, 0, 500],
+      [500, 500, 1000],
+      [4999.99, 4500, 5000],
+      [5000, 5000, 6000],
+      [5999.99, 5000, 6000],
+      [49999.99, 49000, 50000],
+      [50000, 50000, 55000],
+      [54999.99, 50000, 55000],
+      [199999.99, 195000, 200000],
+      [200000, 200000, 210000],
+      [209999.99, 200000, 210000],
+      [1234567, 1230000, 1240000],
+    ];
+    for (const [gross, lower, upper] of cases) {
+      assert.deepStrictEqual(damageGrossBucket(gross), { lower, upper }, String(gross));
+    }
+  });
+
+  test("net x 1.23, bucketed, pl-PL grouping, en dash with spaces", () => {
+    assert.strictEqual(nbsp(formatDamageGrossRange(19768.92)), "24 000 – 25 000 zł"); // gross 24 315.77
+    assert.strictEqual(nbsp(formatDamageGrossRange(15483.51)), "19 000 – 20 000 zł"); // gross 19 044.72
+    assert.strictEqual(nbsp(formatDamageGrossRange(1000)), "1000 – 1500 zł"); // gross 1 230 (pl-PL groups from 5 digits)
+    assert.strictEqual(nbsp(formatDamageGrossRange(100)), "0 – 500 zł"); // gross 123
+    assert.strictEqual(nbsp(formatDamageGrossRange(4000)), "4500 – 5000 zł"); // gross 4 920
+    assert.strictEqual(nbsp(formatDamageGrossRange(4065.04)), "5000 – 6000 zł"); // gross 4 999.99 rounds to 5 000.00
+    assert.strictEqual(nbsp(formatDamageGrossRange(100000)), "120 000 – 125 000 zł"); // gross 123 000
+    assert.strictEqual(nbsp(formatDamageGrossRange(200000)), "240 000 – 250 000 zł"); // gross 246 000
+  });
+
+  test("missing, zero, negative or invalid values: Brak kwoty", () => {
+    for (const bad of [undefined, null, 0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.strictEqual(formatDamageGrossRange(bad as any), "Brak kwoty", String(bad));
+    }
+  });
+
+  test("totals: PLN as an estimated gross range (sum the net values first), other currencies stay net", () => {
+    // 19 768.92 + 15 483.51 = 35 252.43 net -> 43 360.49 gross
+    assert.strictEqual(nbsp(formatDamageTotal(19768.92 + 15483.51, "PLN")), "ok. 43 000 – 44 000 zł brutto");
+    assert.strictEqual(nbsp(formatDamageTotal(12345, "EUR")), "12 345 EUR netto (bez VAT)");
+  });
+
+  test("KPI sub-line and summary keep non-PLN amounts net", () => {
+    const eur = { accidentDate: "2024-01-01", damageValue: 12345, currency: "EUR", isTotalLoss: false };
+    const kpi = buildClaimsKpi({ claimsHistoryPresentation: "CLAIM_DETAILS_AVAILABLE", claims: [eur] });
+    assert.strictEqual(nbsp(kpi.sub as string), "łącznie 12 345 EUR netto (bez VAT)");
+    const text = buildFactualSummary({ claimsHistoryPresentation: "CLAIM_DETAILS_AVAILABLE", claims: [eur] });
+    assert.ok(nbsp(text as string).endsWith("Łączna wartość szkód: 12 345 EUR netto (bez VAT)."));
+  });
+});
+
 describe("pdf-format: de-duplicated claims summary and KPI", () => {
   const claim = (over: Record<string, unknown> = {}) => ({
     accidentDate: "2025-02-20",
@@ -259,7 +316,7 @@ describe("pdf-format: de-duplicated claims summary and KPI", () => {
     });
     assert.strictEqual(
       nbsp(text as string),
-      "Zarejestrowano 2 wpisy, prawdopodobnie dotyczące 1 szkody. Łączna wartość szkód według najnowszych wycen: 19 769 PLN netto (bez VAT)."
+      "Zarejestrowano 2 wpisy, prawdopodobnie dotyczące 1 szkody. Łączna wartość szkód według najnowszych wycen: ok. 24 000 – 25 000 zł brutto."
     );
     const many = buildFactualSummary({
       claimsHistoryPresentation: "CLAIM_DETAILS_AVAILABLE",
@@ -277,7 +334,7 @@ describe("pdf-format: de-duplicated claims summary and KPI", () => {
     });
     assert.strictEqual(
       nbsp(text as string),
-      "Zarejestrowano 1 szkodę (najnowsza wycena: 2025-10-11). Łączna wartość szkód: 19 769 PLN netto (bez VAT)."
+      "Zarejestrowano 1 szkodę (najnowsza wycena: 2025-10-11). Łączna wartość szkód: ok. 24 000 – 25 000 zł brutto."
     );
   });
 });
@@ -298,7 +355,7 @@ describe("pdf-format: factual summary and KPI", () => {
     });
     assert.strictEqual(
       nbsp(text as string),
-      "Zarejestrowano 2 szkody (ostatnia: 2024-05-05), w tym szkodę całkowitą. Łączna wartość szkód: 103 650 PLN netto (bez VAT)."
+      "Zarejestrowano 2 szkody (ostatnia: 2024-05-05), w tym szkodę całkowitą. Łączna wartość szkód: ok. 125 000 – 130 000 zł brutto."
     );
   });
 
@@ -330,7 +387,7 @@ describe("pdf-format: factual summary and KPI", () => {
     });
     assert.strictEqual(caution.tone, "caution");
     assert.strictEqual(caution.value, "2 szkody");
-    assert.strictEqual(nbsp(caution.sub as string), "łącznie 36 900 PLN netto (bez VAT)");
+    assert.strictEqual(nbsp(caution.sub as string), "łącznie ok. 45 000 – 46 000 zł brutto");
 
     const risk = buildClaimsKpi({
       claimsHistoryPresentation: "CLAIM_DETAILS_AVAILABLE",
