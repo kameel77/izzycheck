@@ -26,6 +26,14 @@ import { getClaimsHistoryPresentation } from "@/lib/report-claims-summary";
 import { DamageClaimVisualization } from "@/components/report/DamageClaimVisualization";
 import { DownloadReportPdfButton } from "@/components/report/DownloadReportPdfButton";
 import { sortEquipmentAlphabetically } from "@/lib/reports/equipment";
+import {
+  filterRawAttributes,
+  formatBodyType,
+  formatMandateDescription,
+  entryCountLabel,
+  claimCountGenitive,
+} from "@/lib/pdf/pdf-format";
+import { dedupeRawClaims } from "@/lib/reports/claim-dedup";
 
 export default function ReportDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -207,7 +215,12 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
   }
 
   const snapshot = report.vehicleSnapshot;
-  const claims = report.damageClaims || [];
+  const rawClaims = report.damageClaims || [];
+  // Assessments of one accident are merged / marked as probably the same claim (same rules as the PDF).
+  const dedup = dedupeRawClaims<any>(rawClaims);
+  const claims = dedup.items;
+  const hasProbableClaims = dedup.likelyEventsCount < dedup.entriesCount;
+  const hasMergedClaims = dedup.items.some((i) => i.dedupKind === "MERGED");
 
   const stdEquipment = snapshot?.standardEquipment ? JSON.parse(snapshot.standardEquipment) : [];
   const optEquipment = snapshot?.optionalEquipment ? JSON.parse(snapshot.optionalEquipment) : [];
@@ -433,7 +446,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               : "border-transparent text-slate-400 hover:text-slate-200"
           }`}
         >
-          <AlertTriangle className="h-4 w-4" /> Historia & Szczegóły Szkód ({historyDetectedWithoutDetails || historyDetectedDetailsUnavailable ? "wpisy wykryte" : claims.length})
+          <AlertTriangle className="h-4 w-4" /> Historia & Szczegóły Szkód ({historyDetectedWithoutDetails || historyDetectedDetailsUnavailable ? "wpisy wykryte" : hasProbableClaims ? `${dedup.entriesCount}, prawdop. ${dedup.likelyEventsCount}` : claims.length})
         </button>
 
         <button
@@ -536,7 +549,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                 <div className="space-y-1 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
                   <span className="text-slate-400 font-semibold uppercase text-[10px]">Nadwozie / Miejsca</span>
                   <p className="text-sm font-bold text-white">
-                    {[technicalSpec.bodyType, technicalSpec.seatsCount ? `${technicalSpec.seatsCount} miejsc` : undefined].filter(Boolean).join(" / ") || "Brak danych"}
+                    {[formatBodyType(technicalSpec.bodyType), technicalSpec.seatsCount ? `${technicalSpec.seatsCount} miejsc` : undefined].filter(Boolean).join(" / ") || "Brak danych"}
                   </p>
                 </div>
 
@@ -563,16 +576,16 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               </div>
 
               {/* Unmapped Raw Attributes Fallback */}
-              {technicalSpec.rawAttributes && Object.keys(technicalSpec.rawAttributes).length > 0 && (
+              {filterRawAttributes(technicalSpec.rawAttributes).length > 0 && (
                 <div className="pt-3 border-t border-slate-800/80 space-y-2">
                   <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
                     Pozostałe parametry od Audatex
                   </span>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 text-xs">
-                    {Object.entries(technicalSpec.rawAttributes).map(([k, v]) => (
-                      <div key={k} className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
-                        <span className="text-[10px] text-slate-500 font-mono block">{k}</span>
-                        <span className="text-xs font-medium text-slate-300">{String(v)}</span>
+                    {filterRawAttributes(technicalSpec.rawAttributes).map(([label, value]) => (
+                      <div key={label} className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/50">
+                        <span className="text-[10px] text-slate-500 block">{label}</span>
+                        <span className="text-xs font-medium text-slate-300">{value}</span>
                       </div>
                     ))}
                   </div>
@@ -675,8 +688,15 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               <div className="space-y-1">
                 <h2 className="text-lg font-bold text-red-400">Znaleziono Wpisy Historii Szkód</h2>
                 <p className="text-xs text-slate-300">
-                  Baza Audatex Claims History Engine zawiera {claims.length} zarejestrowane zdarzenia dla tego pojazdu.
+                  {hasProbableClaims
+                    ? `Baza Audatex Claims History Engine zawiera ${entryCountLabel(dedup.entriesCount)} dla tego pojazdu, prawdopodobnie dotyczące ${claimCountGenitive(dedup.likelyEventsCount)}.`
+                    : `Baza Audatex Claims History Engine zawiera ${claims.length} zarejestrowane zdarzenia dla tego pojazdu.`}
                 </p>
+                {(hasMergedClaims || hasProbableClaims) && (
+                  <p className="text-[11px] text-slate-400">
+                    Wyceny tej samej szkody scalamy automatycznie, gdy zgadzają się data zdarzenia i zakres uszkodzeń; przy częściowej zgodności oznaczamy wpisy jako prawdopodobnie tę samą szkodę.
+                  </p>
+                )}
               </div>
             </div>
           ) : historyDetectedWithoutDetails ? (
@@ -732,9 +752,8 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300">Chronologiczny Wykaz Szkód</h3>
 
               <div className="space-y-6">
-                {claims.map((c: any, index: number) => {
-                  const affectedZonesList = c.damageZones ? JSON.parse(c.damageZones) : [];
-                  const sigPartsList = c.significantParts ? JSON.parse(c.significantParts) : [];
+                {claims.map((item, index: number) => {
+                  const c: any = item.primary;
 
                   return (
                     <div key={c.id || index} className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 space-y-6">
@@ -742,7 +761,12 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                         <div className="space-y-1">
                           <div className="flex items-center gap-3">
                             <span className="text-sm font-bold text-white">Szkoda #{index + 1}</span>
-                            {c.isTotalLoss && (
+                            {item.probableWith.length > 0 && (
+                              <span className="rounded-full border border-amber-500/40 bg-amber-950/30 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                                Prawdopodobnie ta sama szkoda
+                              </span>
+                            )}
+                            {item.isTotalLoss && (
                               <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-[10px] font-black uppercase text-white tracking-widest animate-pulse">
                                 SZKODA CAŁKOWITA
                               </span>
@@ -752,6 +776,16 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                             </span>
                           </div>
                           <p className="text-xs text-slate-400">Identyfikator rekordu: {c.claimId}</p>
+                          {item.dedupKind === "MERGED" && (
+                            <p className="text-[11px] text-slate-400">
+                              Najnowsza z {item.earlierAssessments.length + 1} wycen tej szkody
+                            </p>
+                          )}
+                          {item.probableWith.length > 0 && (
+                            <p className="text-[11px] text-amber-300/80">
+                              Zbliżony zakres uszkodzeń i termin jak {item.probableWith.length === 1 ? "szkoda" : "szkody"} {item.probableWith.join(", ")}. Audatex nie podaje wspólnego identyfikatora zdarzenia.
+                            </p>
+                          )}
                         </div>
 
                         <div className="text-left sm:text-right">
@@ -764,8 +798,10 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
 
                       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 text-xs">
                         <div>
-                          <span className="text-[11px] text-slate-400 block">Data Zdarzenia</span>
-                          <span className="font-semibold text-white">{c.accidentDate || "Brak danych"}</span>
+                          <span className="text-[11px] text-slate-400 block">
+                            {!item.accidentDate && c.claimDate ? "Data Zgłoszenia" : "Data Zdarzenia"}
+                          </span>
+                          <span className="font-semibold text-white">{item.accidentDate || c.claimDate || "Brak danych"}</span>
                         </div>
                         <div>
                           <span className="text-[11px] text-slate-400 block">Przebieg Zgłoszony</span>
@@ -777,9 +813,31 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                         <div>
                           <span className="text-[11px] text-slate-400 block">Kwalifikacja Mandatu</span>
-                          <span className="font-semibold text-slate-200">{c.mandateDescription || "Brak opisu"}</span>
+                          <span className="font-semibold text-slate-200">{formatMandateDescription(c.mandateDescription)}</span>
                         </div>
                       </div>
+
+                      {item.earlierAssessments.length > 0 && (
+                        <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 space-y-2">
+                          <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Wcześniejsze wyceny tej szkody</h4>
+                          <ul className="space-y-1.5 text-xs">
+                            {item.earlierAssessments.map((e: any) => (
+                              <li key={e.claimId} className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 text-slate-200">
+                                <span className="font-semibold">
+                                  {e.claimDate || e.accidentDate || "Brak danych"} <span className="font-normal text-slate-500">zgłoszenie</span>
+                                </span>
+                                {e.isTotalLoss && (
+                                  <span className="rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-black uppercase text-white tracking-widest">
+                                    SZKODA CAŁKOWITA
+                                  </span>
+                                )}
+                                <span>{typeof e.damageValue === "number" ? `${e.damageValue.toLocaleString("pl-PL")} ${e.currency || "PLN"} netto (bez VAT)` : "Brak kwoty"}</span>
+                                <span className="text-[11px] text-slate-500">{e.claimId}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
 
                       {/* Audatex Damage Visualization Section */}
                       <DamageClaimVisualization

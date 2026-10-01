@@ -10,6 +10,18 @@ import {
   ClaimsHistoryPresentation,
   getClaimsHistoryPresentation,
 } from "../report-claims-summary.ts";
+import { DedupSummary, formatDateTimeWarsaw } from "./pdf-format.ts";
+import { dedupeRawClaims } from "../reports/claim-dedup.ts";
+
+/** Earlier assessment of the same accident (merged into a claim item). */
+export interface ReportPdfEarlierAssessment {
+  claimId: string;
+  claimDate?: string;
+  accidentDate?: string;
+  damageValue?: number;
+  currency: string;
+  isTotalLoss: boolean;
+}
 
 export interface ReportPdfClaimItem {
   index: number;
@@ -25,6 +37,11 @@ export interface ReportPdfClaimItem {
   mandateCode?: string;
   mandateDescription?: string;
   presentation: DamagePresentationModel;
+  /** MERGED: several assessments of one accident; this item is the newest one. */
+  dedupKind: "SINGLE" | "MERGED";
+  earlierAssessments: ReportPdfEarlierAssessment[];
+  /** 1-based claim numbers of the other items that probably describe the same accident. */
+  probableWith: number[];
 }
 
 export interface ReportPdfViewModel {
@@ -54,7 +71,9 @@ export interface ReportPdfViewModel {
 
   // Claims
   hasClaims: boolean;
+  /** One item per de-duplicated claim (assessments of the same accident are merged). */
   claims: ReportPdfClaimItem[];
+  dedup: DedupSummary;
 
   // Module statuses
   valuationStatus?: string;
@@ -76,7 +95,10 @@ export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
 
   const techSpec = snapshot?.technicalSpecJson ? JSON.parse(snapshot.technicalSpecJson) : undefined;
 
-  const claims: ReportPdfClaimItem[] = rawClaims.map((c: any, idx: number) => {
+  const dedup = dedupeRawClaims<any>(rawClaims);
+
+  const claims: ReportPdfClaimItem[] = dedup.items.map((item, idx: number) => {
+    const c: any = item.primary;
     let assessment = c.damageAssessmentJson
       ? JSON.parse(c.damageAssessmentJson)
       : undefined;
@@ -100,17 +122,28 @@ export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
     return {
       index: idx + 1,
       claimId: c.claimId,
-      accidentDate: c.accidentDate,
+      accidentDate: item.accidentDate,
       claimDate: c.claimDate,
       country: c.country,
       makeModel: c.makeModel,
       mileage: c.mileage,
       damageValue: c.damageValue,
       currency: c.currency || "PLN",
-      isTotalLoss: Boolean(c.isTotalLoss),
+      // merged assessments: a total loss in ANY of them is shown (a newer partial estimate must not hide it)
+      isTotalLoss: item.isTotalLoss,
       mandateCode: c.mandateCode,
       mandateDescription: c.mandateDescription,
       presentation,
+      dedupKind: item.dedupKind,
+      earlierAssessments: item.earlierAssessments.map((e: any) => ({
+        claimId: e.claimId,
+        claimDate: e.claimDate ?? undefined,
+        accidentDate: e.accidentDate ?? undefined,
+        damageValue: e.damageValue ?? undefined,
+        currency: e.currency || "PLN",
+        isTotalLoss: Boolean(e.isTotalLoss),
+      })),
+      probableWith: item.probableWith,
     };
   });
 
@@ -122,7 +155,7 @@ export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
     mileage: report.mileage,
     valuationDate: report.valuationDate,
     status: report.status,
-    createdAtFormatted: new Date(report.createdAt).toLocaleString("pl-PL"),
+    createdAtFormatted: formatDateTimeWarsaw(report.createdAt),
     operatorName: report.createdBy?.name || "Operator",
     operatorEmail: report.createdBy?.email || "",
 
@@ -140,6 +173,15 @@ export function buildReportPdfViewModel(report: any): ReportPdfViewModel {
 
     hasClaims: claims.length > 0,
     claims,
+    dedup: {
+      entriesCount: dedup.entriesCount,
+      likelyEventsCount: dedup.likelyEventsCount,
+      likelyTotal:
+        dedup.likelyTotalCurrency !== undefined
+          ? { total: dedup.likelyTotalValue, currency: dedup.likelyTotalCurrency }
+          : undefined,
+      hasMerged: dedup.items.some((i) => i.dedupKind === "MERGED"),
+    },
 
     valuationStatus: valModule?.status || "NIEWYKONANO",
     claimCheckStatus: checkModule?.status || "NIEWYKONANO",

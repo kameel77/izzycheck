@@ -1,0 +1,81 @@
+{
+  "id": "00000000-0000-4000-8000-000000000001",
+  "publicReference": "IC-2026-08-0001",
+  "vin": "WBATEST0000000001",
+  "firstRegistrationDate": "2017-11-15",
+  "mileage": 245000,
+  "valuationDate": "2026-08-27",
+  "status": "COMPLETED",
+  "createdAt": "2026-08-27T20:15:59.627Z",
+  "updatedAt": "2026-08-27T20:16:04.994Z",
+  "createdById": "operator-test",
+  "createdBy": {
+    "id": "operator-test",
+    "name": "Operator Testowy",
+    "email": "operator@example.com"
+  },
+  "moduleResults": [
+    {
+      "moduleId": "VALUATION",
+      "status": "SUCCEEDED"
+    },
+    {
+      "moduleId": "CLAIM_CHECK",
+      "status": "SUCCEEDED",
+      "responseMetadata": "{\"hasHistory\":true,\"photosStatus\":\"NO_PHOTOS\"}"
+    },
+    {
+      "moduleId": "CLAIM_DETAILS",
+      "status": "SUCCEEDED"
+    }
+  ],
+  "vehicleSnapshot": {
+    "ibsCode": "965894",
+    "make": "BMW",
+    "model": "Seria 4 Gran Coupé Diesel F36 17-",
+    "variant": "420d xDrive (A8)",
+    "newPriceCv": 213595.08,
+    "marketPriceCob": 51842,
+    "technicalValueTh": 51842,
+    "mileageUsed": 245000,
+    "isAverageMileageUsed": false,
+    "manufactureDate": null,
+    "standardEquipment": "[{\"code\":\"B01\",\"name\":\"ABS\"},{\"code\":\"B20\",\"name\":\"Alarm bezpieczeństwa\"},{\"code\":\"K03\",\"name\":\"Audio - Odtwarzacz CD\"},{\"code\":\"K9M\",\"name\":\"Klimatyzacja automatyczna 2-strefowa\"},{\"code\":\"J80\",\"name\":\"Napęd stały 4x4\"},{\"code\":\"B1L\",\"name\":\"Reflektory przednie LED\"},{\"code\":\"O68\",\"name\":\"Skrzynia biegów automatyczna 8 stopniowa\"},{\"code\":\"B05\",\"name\":\"System stabilizacji jazdy - ESP\"}]",
+    "optionalEquipment": "[{\"code\":\"B1N\",\"name\":\"Asystent monitorowania martwego pola\"},{\"code\":\"K4Y\",\"name\":\"Asystent parkowania\"},{\"code\":\"B1T\",\"name\":\"Czujniki parkowania z przodu i z tyłu\"},{\"code\":\"L10\",\"name\":\"Lakier metalic\"}]",
+    "technicalSpecJson": "{\"engineCapacityCm3\":1995,\"enginePowerKw\":140,\"enginePowerHp\":190,\"isEnginePowerHpCalculated\":false,\"fuelType\":\"Diesel\",\"driveType\":\"4x4\",\"gearboxType\":\"Automatyczna\",\"gearCount\":8,\"bodyType\":\"liftback\",\"doorsCount\":5,\"seatsCount\":5,\"curbWeightKg\":1690,\"grossWeightKg\":2175,\"lengthMm\":4640,\"widthMm\":1825,\"heightMm\":1389,\"wheelbaseMm\":2810,\"wheelSize\":\"225/50 R17\",\"emissionStandard\":\"EU6\",\"maxSpeedKmh\":230,\"rawAttributes\":{\"brakeTypeBack\":\"K\",\"ax_Options\":\"P8,P9,O2\",\"spareWheel\":\"ne\",\"towedLoadBraking\":\"1800\",\"kindCode\":\"OA\",\"axleNr\":\"2\",\"emissionLevel1\":\"118\",\"productionBeginYear\":\"2016\",\"couple\":\"400\",\"countryOrigin\":\"D\",\"rowName\":\"SERIA 4\",\"Fake100900\":\"20220427\",\"engineMark\":\"420d\",\"HS_M\":\"1788\",\"active\":\"1\",\"marketCode\":\"PL\",\"KP_UNI\":\"0.015\",\"VehicleClass\":\"stredni\"}}"
+  },
+  "damageClaims": [
+    {
+      "claimId": "2025-10-11.PL.A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1A1",
+      "accidentDate": "2025-02-20",
+      "claimDate": "2025-10-11",
+      "country": "PL",
+      "makeModel": "BMW [01] 420d 2017 [4H]",
+      "mileage": 214357,
+      "damageValue": 19768.92,
+      "currency": "PLN",
+      "isTotalLoss": false,
+      "mandateCode": "",
+      "mandateDescription": "Brak kodu mandatu",
+      "damageZones": "[]",
+      "significantParts": "[]",
+      "damageAssessmentJson": "{\"generalFlags\":{\"front-right\":true,\"rear-left\":true,\"rear-right\":true,\"side-right\":true},\"glassFlags\":{},\"damagePositionCodes\":[\"23\",\"14\",\"00\",\"22\",\"15\",\"19\",\"05\"],\"significantPartGroupCodes\":[\"004\",\"007\"],\"markers\":[]}"
+    },
+    {
+      "claimId": "2025-10-07.PL.B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2B2",
+      "accidentDate": null,
+      "claimDate": "2025-10-07",
+      "country": "PL",
+      "makeModel": "BMW [01] 420d 2017 [4H]",
+      "mileage": null,
+      "damageValue": 15483.51,
+      "currency": "PLN",
+      "isTotalLoss": false,
+      "mandateCode": "",
+      "mandateDescription": "Brak kodu mandatu",
+      "damageZones": "[]",
+      "significantParts": "[]",
+      "damageAssessmentJson": "{\"generalFlags\":{\"front-right\":true,\"rear-left\":true,\"rear-right\":true,\"side-right\":true},\"glassFlags\":{},\"damagePositionCodes\":[\"14\",\"19\",\"23\",\"22\",\"13\",\"00\",\"05\"],\"significantPartGroupCodes\":[\"4\"],\"markers\":[]}"
+    }
+  ]
+}

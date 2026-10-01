@@ -1,21 +1,36 @@
 import {
   DamageCategory,
   AUDATEX_ZONE_LABELS,
+  AUDATEX_ZONES,
   AUDATEX_PART_GROUPS,
+  normalizePartGroupCode,
+  normalizeZoneCode,
+  zoneHintCaption,
   getPrimaryCategory,
   classifyZoneCode,
   classifyGeneralFlag,
   classifyGlassFlag,
 } from "./audatex-classification.ts";
 
+export type DamageViewId = "right-front-3q" | "left-rear-3q" | "underbody-bottom" | "off-photo";
+
 export interface DamageMarker {
   id: string;
   sourceKind: "zone" | "group" | "general_flag" | "glass_flag";
   sourceCode: string;
   labelPl: string;
+  /** Description without the "Strefa XX:" prefix (natural Polish axis description for zones). */
+  titlePl: string;
+  /** Orientation caption for zones, e.g. "okolice: prawy słupek C (orientacyjnie)". */
+  hintPl?: string;
   categories: DamageCategory[];
   primaryCategory: DamageCategory;
-  viewAnchors: ("right-front-3q" | "left-rear-3q" | "underbody-bottom")[];
+  /** At most one entry: every zone lives on exactly one photo (or off-photo). */
+  viewAnchors: DamageViewId[];
+  /** Zone code whose template anchor is used for placement (differs from sourceCode for legacy flags). */
+  anchorZone?: string;
+  /** True for legacy flag markers converted to an approximate zone. */
+  approximate?: boolean;
   confidence: "zone" | "general" | "none";
   subType?: "glass" | "lighting";
 }
@@ -28,63 +43,71 @@ export interface DamageAssessment {
   markers: DamageMarker[];
 }
 
-export const ZONE_VIEW_ANCHORS: Record<string, ("right-front-3q" | "left-rear-3q" | "underbody-bottom")[]> = {
-  // Front zones (Left, Right, Center) -> visible on right-front-3q
-  "01": ["right-front-3q"],
-  "02": ["right-front-3q"],
-  "03": ["right-front-3q"],
+// Each zone is placed on exactly ONE view. 17 (interior) has no photo and is listed next to the
+// underbody schematic ("off-photo"); 18 (centre underbody) is drawn on the underbody schematic.
+export const ZONE_VIEW_ANCHORS: Record<string, DamageViewId[]> = {
+  // Right side + front centre + roof -> right-front-3q
   "04": ["right-front-3q"],
   "05": ["right-front-3q"],
   "06": ["right-front-3q"],
   "07": ["right-front-3q"],
   "08": ["right-front-3q"],
   "09": ["right-front-3q"],
-  // Left Side zones -> visible on left-rear-3q
-  "10": ["left-rear-3q"],
-  "11": ["left-rear-3q"],
-  "12": ["left-rear-3q"],
-  // Right Side zones -> visible on right-front-3q
   "13": ["right-front-3q"],
   "14": ["right-front-3q"],
   "15": ["right-front-3q"],
-  // Roof & Interior -> visible on both perspectives
-  "16": ["right-front-3q", "left-rear-3q"],
-  "17": ["right-front-3q", "left-rear-3q"],
-  // Underbody -> visible on underbody bottom scheme
-  "18": ["underbody-bottom"],
-  // Rear Left, Right & Center zones -> visible on left-rear-3q
+  "16": ["right-front-3q"],
+  "22": ["right-front-3q"],
+  "23": ["right-front-3q"],
+  "24": ["right-front-3q"],
+  // Left side + rear centre -> left-rear-3q
+  "01": ["left-rear-3q"],
+  "02": ["left-rear-3q"],
+  "03": ["left-rear-3q"],
+  "10": ["left-rear-3q"],
+  "11": ["left-rear-3q"],
+  "12": ["left-rear-3q"],
   "19": ["left-rear-3q"],
   "20": ["left-rear-3q"],
   "21": ["left-rear-3q"],
-  "22": ["left-rear-3q"],
-  "23": ["left-rear-3q"],
-  "24": ["left-rear-3q"],
   "25": ["left-rear-3q"],
   "26": ["left-rear-3q"],
   "27": ["left-rear-3q"],
+  // Off-photo
+  "17": ["off-photo"],
+  "18": ["underbody-bottom"],
 };
 
-export const GENERAL_FLAG_LABELS: Record<string, { labelPl: string; anchors: ("right-front-3q" | "left-rear-3q" | "underbody-bottom")[] }> = {
-  front: { labelPl: "Strefa przednia (ogólna)", anchors: ["right-front-3q"] },
-  "front-left": { labelPl: "Strefa przednia lewa (ogólna)", anchors: ["right-front-3q"] },
-  "front-right": { labelPl: "Strefa przednia prawa (ogólna)", anchors: ["right-front-3q"] },
-  rear: { labelPl: "Strefa tylna (ogólna)", anchors: ["left-rear-3q"] },
-  "rear-left": { labelPl: "Strefa tylna lewa (ogólna)", anchors: ["left-rear-3q"] },
-  "rear-right": { labelPl: "Strefa tylna prawa (ogólna)", anchors: ["left-rear-3q"] },
-  "side-left": { labelPl: "Strefa boczna lewa (ogólna)", anchors: ["left-rear-3q"] },
-  "side-right": { labelPl: "Strefa boczna prawa (ogólna)", anchors: ["right-front-3q"] },
-  roof: { labelPl: "Strefa dachu (ogólna)", anchors: ["right-front-3q", "left-rear-3q"] },
-  interior: { labelPl: "Kabinowe wnętrze (ogólne)", anchors: ["right-front-3q", "left-rear-3q"] },
-  underbody: { labelPl: "Strefa podwozia (ogólna)", anchors: ["underbody-bottom"] },
-  mechanical: { labelPl: "Zespół mechaniczny (ogólny)", anchors: [] },
+/** Zone 00 = "undefined" in the Audatex spec: table row only, never a marker. */
+export const UNDEFINED_ZONE_CODE = "00";
+
+function isLocatableZoneCode(code: string): boolean {
+  return Object.prototype.hasOwnProperty.call(ZONE_VIEW_ANCHORS, code);
+}
+
+// Legacy fallback (no zone codes in damage-positions): flags are converted to an approximate zone.
+// `shortPl` is used for the "Flagi ogólne Audatex" text line.
+export const GENERAL_FLAG_LABELS: Record<string, { labelPl: string; shortPl: string; legacyZone?: string }> = {
+  front: { labelPl: "Strefa przednia (ogólna)", shortPl: "przód", legacyZone: "08" },
+  "front-left": { labelPl: "Strefa przednia lewa (ogólna)", shortPl: "przód lewy", legacyZone: "02" },
+  "front-right": { labelPl: "Strefa przednia prawa (ogólna)", shortPl: "przód prawy", legacyZone: "05" },
+  rear: { labelPl: "Strefa tylna (ogólna)", shortPl: "tył", legacyZone: "26" },
+  "rear-left": { labelPl: "Strefa tylna lewa (ogólna)", shortPl: "tył lewy", legacyZone: "20" },
+  "rear-right": { labelPl: "Strefa tylna prawa (ogólna)", shortPl: "tył prawy", legacyZone: "23" },
+  "side-left": { labelPl: "Strefa boczna lewa (ogólna)", shortPl: "bok lewy", legacyZone: "11" },
+  "side-right": { labelPl: "Strefa boczna prawa (ogólna)", shortPl: "bok prawy", legacyZone: "14" },
+  roof: { labelPl: "Strefa dachu (ogólna)", shortPl: "dach", legacyZone: "16" },
+  interior: { labelPl: "Kabinowe wnętrze (ogólne)", shortPl: "wnętrze", legacyZone: "17" },
+  underbody: { labelPl: "Strefa podwozia (ogólna)", shortPl: "podwozie", legacyZone: "18" },
+  mechanical: { labelPl: "Zespół mechaniczny (ogólny)", shortPl: "mechaniczne" },
 };
 
-export const GLASS_FLAG_LABELS: Record<string, { labelPl: string; anchors: ("right-front-3q" | "left-rear-3q" | "underbody-bottom")[] }> = {
-  front: { labelPl: "Szyba przednia", anchors: ["right-front-3q"] },
-  rear: { labelPl: "Szyba tylna", anchors: ["left-rear-3q"] },
-  "side-left": { labelPl: "Szyby boczne lewe", anchors: ["left-rear-3q"] },
-  "side-right": { labelPl: "Szyby boczne prawe", anchors: ["right-front-3q"] },
-  roof: { labelPl: "Dach przeszklony", anchors: ["right-front-3q", "left-rear-3q"] },
+export const GLASS_FLAG_LABELS: Record<string, { labelPl: string; shortPl: string; legacyZone?: string }> = {
+  front: { labelPl: "Szyba przednia", shortPl: "przednia", legacyZone: "07" },
+  rear: { labelPl: "Szyba tylna", shortPl: "tylna", legacyZone: "25" },
+  "side-left": { labelPl: "Szyby boczne lewe", shortPl: "boczne lewe", legacyZone: "10" },
+  "side-right": { labelPl: "Szyby boczne prawe", shortPl: "boczne prawe", legacyZone: "13" },
+  roof: { labelPl: "Dach przeszklony", shortPl: "dach", legacyZone: "16" },
 };
 
 export function normalizeDamageAssessment(raw: {
@@ -101,15 +124,16 @@ export function normalizeDamageAssessment(raw: {
   const markers: DamageMarker[] = [];
   const processedKeys = new Set<string>();
 
-  // 1. Process specific damage position codes (zones 01-27)
+  // 1. Process specific damage position codes (zones 00-27)
   for (const code of damagePositionCodes) {
     if (!code) continue;
-    const cleanCode = code.trim();
+    const cleanCode = normalizeZoneCode(code);
     if (!cleanCode) continue;
 
-    const labelPl = AUDATEX_ZONE_LABELS[cleanCode]
-      ? `Strefa ${cleanCode}: ${AUDATEX_ZONE_LABELS[cleanCode]}`
-      : `Strefa Audatex kod: ${cleanCode}`;
+    const isUndefinedZone = cleanCode === UNDEFINED_ZONE_CODE;
+    const zoneDef = AUDATEX_ZONES[cleanCode];
+    const titlePl = zoneDef ? zoneDef.titlePl : `Strefa Audatex kod: ${cleanCode}`;
+    const labelPl = zoneDef && !isUndefinedZone ? `Strefa ${cleanCode}: ${titlePl}` : titlePl;
 
     const categories = classifyZoneCode(cleanCode);
     const primaryCategory = getPrimaryCategory(categories);
@@ -123,71 +147,66 @@ export function normalizeDamageAssessment(raw: {
         sourceKind: "zone",
         sourceCode: cleanCode,
         labelPl,
+        titlePl,
+        hintPl: zoneHintCaption(cleanCode),
         categories,
         primaryCategory,
         viewAnchors,
-        confidence: "zone",
+        anchorZone: viewAnchors.length > 0 ? cleanCode : undefined,
+        confidence: isUndefinedZone ? "none" : "zone",
       });
     }
   }
 
-  // 2. Process general flags
-  for (const [flagKey, val] of Object.entries(generalFlags)) {
-    if (!val) continue;
-    const info = GENERAL_FLAG_LABELS[flagKey] || {
-      labelPl: `Audatex flaga: ${flagKey}`,
-      anchors: [],
-    };
-    const categories = classifyGeneralFlag(flagKey);
-    const primaryCategory = getPrimaryCategory(categories);
+  // 2-3. Flags. When the claim has zone codes 01-27, flags are NOT markers (the presentation shows
+  // them as a text line). Only without zone codes (legacy) they become approximate markers,
+  // deduplicated to one marker per resulting zone.
+  const hasZoneCodes = damagePositionCodes.some((c) => c && isLocatableZoneCode(normalizeZoneCode(c)));
 
-    const key = `genflag-${flagKey}`;
-    if (!processedKeys.has(key)) {
-      processedKeys.add(key);
-      markers.push({
-        id: `marker-${key}`,
-        sourceKind: "general_flag",
-        sourceCode: flagKey,
-        labelPl: info.labelPl,
-        categories,
-        primaryCategory,
-        viewAnchors: info.anchors,
-        confidence: "general",
-      });
-    }
-  }
+  if (!hasZoneCodes) {
+    const legacyFlags: {
+      kind: "general_flag" | "glass_flag";
+      flags: Record<string, boolean>;
+      labels: Record<string, { labelPl: string; legacyZone?: string }>;
+      classify: (flagKey: string) => DamageCategory[];
+    }[] = [
+      { kind: "general_flag", flags: generalFlags, labels: GENERAL_FLAG_LABELS, classify: classifyGeneralFlag },
+      { kind: "glass_flag", flags: glassFlags, labels: GLASS_FLAG_LABELS, classify: classifyGlassFlag },
+    ];
 
-  // 3. Process glass flags
-  for (const [flagKey, val] of Object.entries(glassFlags)) {
-    if (!val) continue;
-    const info = GLASS_FLAG_LABELS[flagKey] || {
-      labelPl: `Audatex flaga szyby: ${flagKey}`,
-      anchors: [],
-    };
-    const categories = classifyGlassFlag(flagKey);
-    const primaryCategory = getPrimaryCategory(categories);
+    for (const { kind, flags, labels, classify } of legacyFlags) {
+      for (const [flagKey, val] of Object.entries(flags)) {
+        if (!val) continue;
+        const zone = labels[flagKey]?.legacyZone;
+        if (!zone) continue; // mechanical / unknown flags: text only
 
-    const key = `glassflag-${flagKey}`;
-    if (!processedKeys.has(key)) {
-      processedKeys.add(key);
-      markers.push({
-        id: `marker-${key}`,
-        sourceKind: "glass_flag",
-        sourceCode: flagKey,
-        labelPl: info.labelPl,
-        categories,
-        primaryCategory,
-        viewAnchors: info.anchors,
-        confidence: "zone",
-        subType: "glass",
-      });
+        const key = `legacy-zone-${zone}`;
+        if (processedKeys.has(key)) continue;
+        processedKeys.add(key);
+
+        const categories = classify(flagKey);
+        markers.push({
+          id: `marker-${kind === "general_flag" ? "genflag" : "glassflag"}-${flagKey}`,
+          sourceKind: kind,
+          sourceCode: flagKey,
+          labelPl: labels[flagKey].labelPl,
+          titlePl: labels[flagKey].labelPl,
+          categories,
+          primaryCategory: getPrimaryCategory(categories),
+          viewAnchors: ZONE_VIEW_ANCHORS[zone],
+          anchorZone: zone,
+          approximate: true,
+          confidence: kind === "general_flag" ? "general" : "zone",
+          subType: kind === "glass_flag" ? "glass" : undefined,
+        });
+      }
     }
   }
 
   // 4. Process part groups
   for (const groupCode of significantPartGroupCodes) {
     if (!groupCode) continue;
-    const cleanCode = groupCode.trim();
+    const cleanCode = normalizePartGroupCode(groupCode);
     if (!cleanCode) continue;
 
     const groupDef = AUDATEX_PART_GROUPS[cleanCode];
@@ -204,6 +223,7 @@ export function normalizeDamageAssessment(raw: {
         sourceKind: "group",
         sourceCode: cleanCode,
         labelPl,
+        titlePl: labelPl,
         categories,
         primaryCategory,
         viewAnchors: [],
@@ -213,11 +233,16 @@ export function normalizeDamageAssessment(raw: {
     }
   }
 
+  // Order: zones (incl. approximate legacy flag zones) by zone code ascending, then part groups by code.
+  const sortKey = (m: DamageMarker) => (m.sourceKind === "group" ? 1 : 0);
+  const codeKey = (m: DamageMarker) => m.anchorZone ?? m.sourceCode;
+  markers.sort((a, b) => sortKey(a) - sortKey(b) || codeKey(a).localeCompare(codeKey(b)));
+
   return {
     generalFlags,
     glassFlags,
-    damagePositionCodes,
-    significantPartGroupCodes,
+    damagePositionCodes: damagePositionCodes.map((c) => (c ? normalizeZoneCode(c) : c)),
+    significantPartGroupCodes: significantPartGroupCodes.map((c) => (c ? normalizePartGroupCode(c) : c)),
     markers,
   };
 }
@@ -268,12 +293,15 @@ export function buildFallbackDamageAssessment(
     const lower = partStr.trim().toLowerCase();
     let found = false;
 
-    for (const [code, def] of Object.entries(AUDATEX_PART_GROUPS)) {
-      if (def.labelPl.toLowerCase() === lower || lower.includes(def.labelPl.toLowerCase().slice(0, 15))) {
-        significantPartGroupCodes.push(code);
-        found = true;
-        break;
-      }
+    // Exact match (current or legacy label) first, so e.g. 001 and 002 (same 15-char prefix) do not collide.
+    const groups = Object.entries(AUDATEX_PART_GROUPS);
+    const exact = groups.find(([, def]) =>
+      [def.labelPl, ...(def.legacyLabelsPl ?? [])].some((l) => l.toLowerCase() === lower)
+    );
+    const match = exact ?? groups.find(([, def]) => lower.includes(def.labelPl.toLowerCase().slice(0, 15)));
+    if (match) {
+      significantPartGroupCodes.push(match[0]);
+      found = true;
     }
 
     if (!found) {

@@ -27,138 +27,163 @@ export interface VehicleTemplateDefinition {
 }
 
 // ---------------------------------------------------------------------------
-// 1. BASE ANCHORS (Calibrated for Sedan baseline in 2:1 viewBox 0 0 400 200)
+// 1. ZONE ANCHORS (one full table per body type and photo, 400x200 viewBox)
 // ---------------------------------------------------------------------------
+//
+// Audatex zone codes 01-27 form a 3x3x3 grid: X (Front/Middle/Rear) x Y (Left/Middle/Right) x
+// Z (Top/Middle/Bottom). Every zone is drawn on exactly ONE of the two photos:
+// - rf3q (right-front 3/4):  04 05 06, 07 08 09, 13 14 15, 16, 22 23 24
+//                            (whole right side + front centre + roof)
+// - lr3q (left-rear 3/4):    01 02 03, 10 11 12, 19 20 21, 25 26 27
+//                            (whole left side + rear centre)
+// - Off-photo: 17 (interior) and 18 (centre underbody) - see ZONE_VIEW_ANCHORS in
+//   normalize-damage-assessment.ts. 18 is drawn on the underbody schematic below.
+//
+// Z rule (use it when recalibrating): Top = A-pillar / C-pillar / roofline height,
+// Middle = half of the car height, Bottom = sills / lower bumpers.
+//
+// Values were measured on the real images in public/vehicles/pdf (the web stage images in
+// public/vehicles/stage share the same framing). Keep min distance between anchors >= 28.
 
-// RF3Q: Right Front 3/4 view (camera at front-right, seeing front and right side)
-// Relational invariants:
-// - Front X order: Right (04, 05, 06) < Center (07, 08, 09) < Left (01, 02, 03)
-// - Front Y order: Top (04, 07, 01) < Middle (05, 08, 02) < Bottom (06, 09, 03)
-// - Right side X order: Side (13, 14, 15) < Front (04..09)
-const BASE_ANCHORS_RF3Q: Record<string, ViewAnchorPosition> = {
-  // Front right corner (near to camera)
-  "04": { x: 265, y: 98 },  // Przód prawy góra (prawa strona maski)
-  "05": { x: 295, y: 120 }, // Przód prawy środek (prawy reflektor / narożnik zderzaka)
-  "06": { x: 305, y: 152 }, // Przód prawy dół (dolny prawy zderzak / koło)
-
-  // Front center
-  "07": { x: 285, y: 94 },  // Przód środek góra (środek maski)
-  "08": { x: 318, y: 122 }, // Przód środek środek (atrapa / grill / znaczek centralny - 05 < 08 < 02)
-  "09": { x: 325, y: 155 }, // Przód środek dół (dolny wlot zderzaka)
-
-  // Front left corner (far from camera)
-  "01": { x: 310, y: 90 },  // Przód lewy góra (lewa krawędź maski)
-  "02": { x: 335, y: 110 }, // Przód lewy środek (lewy reflektor / lewy narożnik)
-  "03": { x: 345, y: 140 }, // Przód lewy dół (dolny lewy zderzak)
-
-  // Visible right side (sills & doors)
-  "13": { x: 150, y: 75 },  // Środek prawy góra (słupek A/B prawy / linia dachu)
-  "14": { x: 145, y: 110 }, // Środek prawy środek (drzwi prawe)
-  "15": { x: 150, y: 145 }, // Środek prawy dół (próg prawy)
-
-  // Roof & Cabin
-  "16": { x: 165, y: 50 },  // Dach / środek góra
-  "17": { x: 200, y: 82 },  // Kabinowe wnętrze
-
-  // General & Glass flags
-  front: { x: 318, y: 122 },
-  "front-left": { x: 335, y: 110 },
-  "front-right": { x: 295, y: 120 },
-  "side-right": { x: 145, y: 110 },
-  roof: { x: 165, y: 50 },
-  interior: { x: 200, y: 82 },
+const SEDAN_ANCHORS_RF3Q: Record<string, ViewAnchorPosition> = {
+  "04": { x: 160, y: 52 },
+  "05": { x: 238, y: 104 },
+  "06": { x: 245, y: 140 },
+  "07": { x: 240, y: 58 },
+  "08": { x: 318, y: 106 },
+  "09": { x: 320, y: 140 },
+  "13": { x: 115, y: 37 },
+  "14": { x: 125, y: 100 },
+  "15": { x: 128, y: 138 },
+  "16": { x: 200, y: 31 },
+  "22": { x: 68, y: 60 },
+  "23": { x: 42, y: 102 },
+  "24": { x: 45, y: 137 },
 };
 
-// LR3Q: Left Rear 3/4 view (camera at left-rear, seeing rear and left side)
-// Relational invariants:
-// - Left side X order: Side (10, 11, 12) < Rear (19..27)
-// - Rear X order: Left (19, 20, 21) < Center (25, 26, 27) < Right (22, 23, 24)
-// - Rear Y order: Top (19, 25, 22) < Middle (20, 26, 23) < Bottom (21, 27, 24)
-const BASE_ANCHORS_LR3Q: Record<string, ViewAnchorPosition> = {
-  // Visible left side (sills & doors)
-  "10": { x: 150, y: 75 },  // Środek lewy góra (słupek A/B lewy / linia dachu)
-  "11": { x: 145, y: 110 }, // Środek lewy środek (drzwi lewe)
-  "12": { x: 150, y: 145 }, // Środek lewy dół (próg lewy)
-
-  // Roof & Cabin
-  "16": { x: 195, y: 50 },  // Dach / środek góra
-  "17": { x: 185, y: 82 },  // Kabinowe wnętrze
-
-  // Rear left corner (near to camera)
-  "19": { x: 235, y: 92 },  // Tył lewy góra (lewy słupek C / górna krawędź błotnika)
-  "20": { x: 255, y: 115 }, // Tył lewy środek (lewa tylna lampa zespolona)
-  "21": { x: 245, y: 152 }, // Tył lewy dół (dolny lewy zderzak)
-
-  // Rear center
-  "25": { x: 275, y: 82 },  // Tył środek góra (tylna szyba / spojler klapy)
-  "26": { x: 305, y: 115 }, // Tył środek środek (klapa bagażnika / tablica)
-  "27": { x: 305, y: 150 }, // Tył środek dół (dyfuzor / dolna część zderzaka)
-
-  // Rear right corner (far from camera - P-4 fix)
-  "22": { x: 340, y: 88 },  // Tył prawy góra (prawy słupek C / prawa krawędź szyby)
-  "23": { x: 350, y: 112 }, // Tył prawy środek (prawa tylna lampa zespolona)
-  "24": { x: 345, y: 148 }, // Tył prawy dół (prawy róg dolnego zderzaka / wydech)
-
-  // General & Glass flags
-  rear: { x: 305, y: 115 },
-  "rear-left": { x: 255, y: 115 },
-  "rear-right": { x: 350, y: 112 },
-  "side-left": { x: 145, y: 110 },
-  roof: { x: 195, y: 50 },
-  interior: { x: 185, y: 82 },
+const SEDAN_ANCHORS_LR3Q: Record<string, ViewAnchorPosition> = {
+  "01": { x: 98, y: 58 },
+  "02": { x: 55, y: 102 },
+  "03": { x: 38, y: 130 },
+  "10": { x: 160, y: 38 },
+  "11": { x: 150, y: 98 },
+  "12": { x: 150, y: 136 },
+  "19": { x: 205, y: 52 },
+  "20": { x: 232, y: 102 },
+  "21": { x: 235, y: 135 },
+  "25": { x: 285, y: 52 },
+  "26": { x: 320, y: 104 },
+  "27": { x: 320, y: 138 },
 };
+
+const HATCHBACK_ANCHORS_RF3Q: Record<string, ViewAnchorPosition> = {
+  "04": { x: 165, y: 45 },
+  "05": { x: 245, y: 105 },
+  "06": { x: 250, y: 145 },
+  "07": { x: 225, y: 52 },
+  "08": { x: 320, y: 112 },
+  "09": { x: 320, y: 142 },
+  "13": { x: 110, y: 30 },
+  "14": { x: 115, y: 97 },
+  "15": { x: 130, y: 135 },
+  "16": { x: 190, y: 27 },
+  "22": { x: 68, y: 55 },
+  "23": { x: 40, y: 100 },
+  "24": { x: 35, y: 132 },
+};
+
+const HATCHBACK_ANCHORS_LR3Q: Record<string, ViewAnchorPosition> = {
+  "01": { x: 105, y: 55 },
+  "02": { x: 55, y: 100 },
+  "03": { x: 40, y: 128 },
+  "10": { x: 175, y: 32 },
+  "11": { x: 155, y: 98 },
+  "12": { x: 155, y: 138 },
+  "19": { x: 238, y: 52 },
+  "20": { x: 235, y: 102 },
+  "21": { x: 258, y: 138 },
+  "25": { x: 305, y: 58 },
+  "26": { x: 320, y: 105 },
+  "27": { x: 325, y: 142 },
+};
+
+const WAGON_ANCHORS_RF3Q: Record<string, ViewAnchorPosition> = {
+  "04": { x: 172, y: 55 },
+  "05": { x: 245, y: 110 },
+  "06": { x: 250, y: 145 },
+  "07": { x: 240, y: 60 },
+  "08": { x: 320, y: 112 },
+  "09": { x: 320, y: 145 },
+  "13": { x: 120, y: 40 },
+  "14": { x: 125, y: 100 },
+  "15": { x: 130, y: 138 },
+  "16": { x: 200, y: 40 },
+  "22": { x: 52, y: 58 },
+  "23": { x: 32, y: 100 },
+  "24": { x: 35, y: 130 },
+};
+
+const WAGON_ANCHORS_LR3Q: Record<string, ViewAnchorPosition> = {
+  "01": { x: 105, y: 58 },
+  "02": { x: 50, y: 103 },
+  "03": { x: 35, y: 130 },
+  "10": { x: 175, y: 40 },
+  "11": { x: 155, y: 100 },
+  "12": { x: 155, y: 138 },
+  "19": { x: 258, y: 55 },
+  "20": { x: 245, y: 103 },
+  "21": { x: 262, y: 140 },
+  "25": { x: 310, y: 58 },
+  "26": { x: 330, y: 108 },
+  "27": { x: 330, y: 142 },
+};
+
+const SUV_ANCHORS_RF3Q: Record<string, ViewAnchorPosition> = {
+  "04": { x: 165, y: 35 },
+  "05": { x: 255, y: 90 },
+  "06": { x: 262, y: 120 },
+  "07": { x: 225, y: 38 },
+  "08": { x: 325, y: 90 },
+  "09": { x: 325, y: 128 },
+  "13": { x: 110, y: 15 },
+  "14": { x: 115, y: 90 },
+  "15": { x: 130, y: 128 },
+  "16": { x: 185, y: 13 },
+  "22": { x: 55, y: 35 },
+  "23": { x: 30, y: 92 },
+  "24": { x: 30, y: 120 },
+};
+
+const SUV_ANCHORS_LR3Q: Record<string, ViewAnchorPosition> = {
+  "01": { x: 120, y: 48 },
+  "02": { x: 50, y: 95 },
+  "03": { x: 35, y: 125 },
+  "10": { x: 185, y: 28 },
+  "11": { x: 165, y: 95 },
+  "12": { x: 165, y: 130 },
+  "19": { x: 245, y: 45 },
+  "20": { x: 245, y: 98 },
+  "21": { x: 285, y: 130 },
+  "25": { x: 305, y: 45 },
+  "26": { x: 330, y: 95 },
+  "27": { x: 340, y: 135 },
+};
+
+// Underbody photo (same image for all body types, public/vehicles/{pdf/underbody.jpg,stage/underbody.webp},
+// 2000x1116 -> 400x223 viewBox, front on the LEFT). Anchor = centre of the floor pan, between the
+// exhaust tunnel and the fuel tanks, clear of the wheels.
+export const UNDERBODY_VIEWBOX_W = 400;
+export const UNDERBODY_VIEWBOX_H = 223;
+export const UNDERBODY_IMAGE_PDF_JPG = "underbody.jpg";
+export const UNDERBODY_IMAGE_WEBP = "/vehicles/stage/underbody.webp";
 
 const COMMON_ANCHORS_UNDERBODY: Record<string, ViewAnchorPosition> = {
-  "18": { x: 200, y: 100 },
-  underbody: { x: 200, y: 100 },
+  "18": { x: 200, y: 112 },
+  underbody: { x: 200, y: 112 },
 };
 
 // ---------------------------------------------------------------------------
-// 2. BODY TYPE OVERRIDES (Vertical adjustments for roofline and tailgates)
-// ---------------------------------------------------------------------------
-
-// SUV: Taller body, higher roofline, higher hood line, vertical tailgate
-const SUV_OVERRIDES_RF3Q: Record<string, ViewAnchorPosition> = {
-  "16": { x: 165, y: 38 },
-  roof: { x: 165, y: 38 },
-  "13": { x: 150, y: 64 },
-  "04": { x: 265, y: 90 },
-  "07": { x: 285, y: 86 },
-  "01": { x: 310, y: 82 },
-};
-
-const SUV_OVERRIDES_LR3Q: Record<string, ViewAnchorPosition> = {
-  "16": { x: 195, y: 38 },
-  roof: { x: 195, y: 38 },
-  "10": { x: 150, y: 64 },
-  "19": { x: 235, y: 80 },
-  "22": { x: 340, y: 76 },
-  "25": { x: 275, y: 65 },
-  "26": { x: 305, y: 108 },
-};
-
-// Kombi (Wagon): Long straight roofline to D-pillar and vertical tailgate
-const WAGON_OVERRIDES_LR3Q: Record<string, ViewAnchorPosition> = {
-  "16": { x: 195, y: 44 },
-  roof: { x: 195, y: 44 },
-  "19": { x: 235, y: 82 },
-  "22": { x: 340, y: 78 },
-  "25": { x: 275, y: 65 },
-  "26": { x: 305, y: 108 },
-};
-
-// Hatchback: Compact rear, slanted tailgate
-const HATCH_OVERRIDES_LR3Q: Record<string, ViewAnchorPosition> = {
-  "16": { x: 195, y: 44 },
-  roof: { x: 195, y: 44 },
-  "19": { x: 235, y: 86 },
-  "22": { x: 340, y: 82 },
-  "25": { x: 270, y: 72 },
-  "26": { x: 305, y: 110 },
-};
-
-// ---------------------------------------------------------------------------
-// 3. VEHICLE TEMPLATES
+// 2. VEHICLE TEMPLATES
 // ---------------------------------------------------------------------------
 
 export const VEHICLE_TEMPLATES: Record<VehicleBodyType, VehicleTemplateDefinition> = {
@@ -172,8 +197,8 @@ export const VEHICLE_TEMPLATES: Record<VehicleBodyType, VehicleTemplateDefinitio
     assetFrontPdfJpg: "sedan-rf3q.jpg",
     assetBackPdfJpg: "sedan-lr3q.jpg",
     anchors: {
-      "right-front-3q": BASE_ANCHORS_RF3Q,
-      "left-rear-3q": BASE_ANCHORS_LR3Q,
+      "right-front-3q": SEDAN_ANCHORS_RF3Q,
+      "left-rear-3q": SEDAN_ANCHORS_LR3Q,
       "underbody-bottom": COMMON_ANCHORS_UNDERBODY,
     },
   },
@@ -187,8 +212,8 @@ export const VEHICLE_TEMPLATES: Record<VehicleBodyType, VehicleTemplateDefinitio
     assetFrontPdfJpg: "suv-rf3q.jpg",
     assetBackPdfJpg: "suv-lr3q.jpg",
     anchors: {
-      "right-front-3q": { ...BASE_ANCHORS_RF3Q, ...SUV_OVERRIDES_RF3Q },
-      "left-rear-3q": { ...BASE_ANCHORS_LR3Q, ...SUV_OVERRIDES_LR3Q },
+      "right-front-3q": SUV_ANCHORS_RF3Q,
+      "left-rear-3q": SUV_ANCHORS_LR3Q,
       "underbody-bottom": COMMON_ANCHORS_UNDERBODY,
     },
   },
@@ -202,8 +227,8 @@ export const VEHICLE_TEMPLATES: Record<VehicleBodyType, VehicleTemplateDefinitio
     assetFrontPdfJpg: "hatchback-rf3q.jpg",
     assetBackPdfJpg: "hatchback-lr3q.jpg",
     anchors: {
-      "right-front-3q": BASE_ANCHORS_RF3Q,
-      "left-rear-3q": { ...BASE_ANCHORS_LR3Q, ...HATCH_OVERRIDES_LR3Q },
+      "right-front-3q": HATCHBACK_ANCHORS_RF3Q,
+      "left-rear-3q": HATCHBACK_ANCHORS_LR3Q,
       "underbody-bottom": COMMON_ANCHORS_UNDERBODY,
     },
   },
@@ -217,8 +242,8 @@ export const VEHICLE_TEMPLATES: Record<VehicleBodyType, VehicleTemplateDefinitio
     assetFrontPdfJpg: "kombi-rf3q.jpg",
     assetBackPdfJpg: "kombi-lr3q.jpg",
     anchors: {
-      "right-front-3q": BASE_ANCHORS_RF3Q,
-      "left-rear-3q": { ...BASE_ANCHORS_LR3Q, ...WAGON_OVERRIDES_LR3Q },
+      "right-front-3q": WAGON_ANCHORS_RF3Q,
+      "left-rear-3q": WAGON_ANCHORS_LR3Q,
       "underbody-bottom": COMMON_ANCHORS_UNDERBODY,
     },
   },
@@ -233,8 +258,8 @@ export const VEHICLE_TEMPLATES: Record<VehicleBodyType, VehicleTemplateDefinitio
     assetFrontPdfJpg: "sedan-rf3q.jpg",
     assetBackPdfJpg: "sedan-lr3q.jpg",
     anchors: {
-      "right-front-3q": BASE_ANCHORS_RF3Q,
-      "left-rear-3q": BASE_ANCHORS_LR3Q,
+      "right-front-3q": SEDAN_ANCHORS_RF3Q,
+      "left-rear-3q": SEDAN_ANCHORS_LR3Q,
       "underbody-bottom": COMMON_ANCHORS_UNDERBODY,
     },
   },

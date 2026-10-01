@@ -1,8 +1,15 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { ProcessedMarkerItem } from "@/lib/damage/build-damage-presentation";
-import { VehicleBodyType, VehicleTemplateDefinition, VEHICLE_TEMPLATES } from "@/lib/damage/vehicle-templates";
+import { ProcessedMarkerItem, PHOTO_1_CAPTION, PHOTO_2_CAPTION } from "@/lib/damage/build-damage-presentation";
+import {
+  VehicleBodyType,
+  VehicleTemplateDefinition,
+  VEHICLE_TEMPLATES,
+  UNDERBODY_IMAGE_WEBP,
+  UNDERBODY_VIEWBOX_H,
+  UNDERBODY_VIEWBOX_W,
+} from "@/lib/damage/vehicle-templates";
 
 export type StageMode = "standard" | "contrast" | "schematic";
 
@@ -24,6 +31,7 @@ export function VehicleDamageViews({
   hasUnderbodyView,
 }: VehicleDamageViewsProps) {
   const [stageMode, setStageMode] = useState<StageMode>("standard");
+  const [underbodyImageFailed, setUnderbodyImageFailed] = useState(false);
 
   useEffect(() => {
     try {
@@ -52,6 +60,9 @@ export function VehicleDamageViews({
   const rf3qMarkers = markers.filter((m) => m.rf3qAnchor);
   const lr3qMarkers = markers.filter((m) => m.lr3qAnchor);
   const underbodyMarkers = markers.filter((m) => m.underbodyAnchor || m.primaryCategory === "UNDERBODY");
+  const offPhotoMarkers = markers.filter((m) => m.view === "off-photo");
+  // The auxiliary row shows the underbody schematic (only with an underbody marker) and, next to it, the
+  // "Poza zdjęciami" list of zones without a photo (interior). Underbody zones are drawn on the schematic, not listed.
 
   return (
     <div className="space-y-6">
@@ -115,7 +126,7 @@ export function VehicleDamageViews({
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-blue-500"></span>
-              Prawy skos od przodu (3/4)
+              {PHOTO_1_CAPTION}
             </span>
             <span className="text-[11px] font-mono text-slate-400">
               Markery w tym ujęciu: {rf3qMarkers.length}
@@ -130,7 +141,7 @@ export function VehicleDamageViews({
             ) : (
               <img
                 src={frontWebp}
-                alt="Prawy skos od przodu (3/4)"
+                alt={PHOTO_1_CAPTION}
                 className={`w-full h-full object-contain select-none pointer-events-none transition-all duration-200 ${
                   stageMode === "contrast" ? "grayscale contrast-[0.85] brightness-[0.92]" : ""
                 }`}
@@ -150,7 +161,7 @@ export function VehicleDamageViews({
                   className="absolute -translate-x-1/2 -translate-y-1/2 group z-10 cursor-pointer"
                 >
                   <MarkerBadge marker={m} />
-                  <MarkerTooltip marker={m} viewName="Prawy przód" />
+                  <MarkerTooltip marker={m} viewName="Zdjęcie 1" />
                 </div>
               );
             })}
@@ -162,7 +173,7 @@ export function VehicleDamageViews({
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-purple-500"></span>
-              Lewy skos od tyłu (3/4)
+              {PHOTO_2_CAPTION}
             </span>
             <span className="text-[11px] font-mono text-slate-400">
               Markery w tym ujęciu: {lr3qMarkers.length}
@@ -177,7 +188,7 @@ export function VehicleDamageViews({
             ) : (
               <img
                 src={backWebp}
-                alt="Lewy skos od tyłu (3/4)"
+                alt={PHOTO_2_CAPTION}
                 className={`w-full h-full object-contain select-none pointer-events-none transition-all duration-200 ${
                   stageMode === "contrast" ? "grayscale contrast-[0.85] brightness-[0.92]" : ""
                 }`}
@@ -197,7 +208,7 @@ export function VehicleDamageViews({
                   className="absolute -translate-x-1/2 -translate-y-1/2 group z-10 cursor-pointer"
                 >
                   <MarkerBadge marker={m} />
-                  <MarkerTooltip marker={m} viewName="Lewy tył" />
+                  <MarkerTooltip marker={m} viewName="Zdjęcie 2" />
                 </div>
               );
             })}
@@ -205,38 +216,75 @@ export function VehicleDamageViews({
         </div>
       </div>
 
-      {/* OPTIONAL VIEW 3: Underbody Bottom View */}
-      {hasUnderbodyView && (
+      {/* OPTIONAL VIEW 3: Underbody schematic + off-photo list (zone 17 interior, zone 18 underbody) */}
+      {(hasUnderbodyView || offPhotoMarkers.length > 0) && (
         <div className="rounded-2xl border border-purple-500/30 bg-purple-950/20 p-4 space-y-3">
           <div className="flex items-center justify-between border-b border-purple-500/20 pb-2">
             <span className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-purple-400"></span>
-              Widok od spodu (Podwozie)
+              {hasUnderbodyView ? "Podwozie (widok od spodu)" : "Strefy poza zdjęciami"}
             </span>
             <span className="text-[11px] font-mono text-purple-300">
-              Widok pomocniczy podwozia
+              {hasUnderbodyView ? "Widok pomocniczy podwozia" : "Strefy bez ujęcia na zdjęciach"}
             </span>
           </div>
 
-          <div className="relative w-full aspect-[3/1] max-w-xl mx-auto bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center p-2 border border-slate-800">
-            <UnderbodySvg />
-
-            {underbodyMarkers.map((m) => {
-              const anchor = m.underbodyAnchor || { x: 200, y: 100 };
-              const leftPct = (anchor.x / 400) * 100;
-              const topPct = (anchor.y / 200) * 100;
-
-              return (
+          <div className="flex flex-col md:flex-row gap-4 items-start">
+            {hasUnderbodyView && (
+              <div className="w-full md:flex-1 max-w-xl mx-auto space-y-1">
                 <div
-                  key={`ub-${m.id}`}
-                  style={{ left: `${leftPct}%`, top: `${topPct}%` }}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 group z-10 cursor-pointer"
+                  style={{ aspectRatio: `${UNDERBODY_VIEWBOX_W} / ${UNDERBODY_VIEWBOX_H}` }}
+                  className="relative w-full bg-slate-100 rounded-xl overflow-hidden border border-slate-800"
                 >
-                  <MarkerBadge marker={m} />
-                  <MarkerTooltip marker={m} viewName="Widok od spodu" />
+                  {!underbodyImageFailed && (
+                    <img
+                      src={UNDERBODY_IMAGE_WEBP}
+                      alt="Podwozie (widok od spodu)"
+                      onError={() => {
+                        console.warn(`[VehicleDamageViews] Underbody image not found: ${UNDERBODY_IMAGE_WEBP}`);
+                        setUnderbodyImageFailed(true);
+                      }}
+                      className="w-full h-full object-contain select-none pointer-events-none"
+                    />
+                  )}
+
+                  {underbodyMarkers.map((m) => {
+                    const anchor = m.underbodyAnchor || { x: UNDERBODY_VIEWBOX_W / 2, y: UNDERBODY_VIEWBOX_H / 2 };
+                    const leftPct = (anchor.x / UNDERBODY_VIEWBOX_W) * 100;
+                    const topPct = (anchor.y / UNDERBODY_VIEWBOX_H) * 100;
+
+                    return (
+                      <div
+                        key={`ub-${m.id}`}
+                        style={{ left: `${leftPct}%`, top: `${topPct}%` }}
+                        className="absolute -translate-x-1/2 -translate-y-1/2 group z-10 cursor-pointer"
+                      >
+                        <MarkerBadge marker={m} />
+                        <MarkerTooltip marker={m} viewName="Widok od spodu" />
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+                <p className="text-[11px] text-slate-400 text-center">Przód pojazdu z lewej strony</p>
+              </div>
+            )}
+
+            {offPhotoMarkers.length > 0 && (
+            <div className="w-full md:w-64 space-y-2">
+              {hasUnderbodyView && (
+                <div className="text-xs font-bold text-purple-300 uppercase tracking-wider">Poza zdjęciami</div>
+              )}
+              {offPhotoMarkers.map((m) => (
+                <div key={`off-${m.id}`} className="flex items-start gap-2 text-xs text-slate-200">
+                  <span style={{ backgroundColor: m.colorHex }} className="mt-0.5 h-3 w-3 shrink-0 rounded-full"></span>
+                  <span>
+                    {m.titlePl}
+                    {m.hintPl && <span className="block text-[10px] text-slate-500">{m.hintPl}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+            )}
           </div>
         </div>
       )}
@@ -248,25 +296,20 @@ function MarkerBadge({ marker }: { marker: ProcessedMarkerItem }) {
   return (
     <div
       style={{ backgroundColor: marker.colorHex }}
-      className="h-6 w-6 rounded-full flex items-center justify-center text-white text-xs font-black shadow-lg ring-2 ring-white drop-shadow-md transition-transform group-hover:scale-125"
-    >
-      {marker.markerIndex}
-    </div>
+      className="h-4 w-4 rounded-full shadow-lg ring-2 ring-white drop-shadow-md transition-transform group-hover:scale-125"
+    />
   );
 }
 
 function MarkerTooltip({ marker, viewName }: { marker: ProcessedMarkerItem; viewName: string }) {
   return (
     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-slate-900 border border-slate-700 rounded-lg text-[11px] text-white shadow-xl z-30 pointer-events-none space-y-1">
-      <div className="font-bold flex items-center justify-between">
-        <span>Marker #{marker.markerIndex}</span>
-        <span className="text-[10px] text-slate-400">{viewName}</span>
+      <div className="font-bold flex items-center justify-between gap-2">
+        <span>{marker.titlePl}</span>
+        <span className="text-[10px] font-normal text-slate-400 shrink-0">{viewName}</span>
       </div>
-      <p className="text-slate-300 font-medium">{marker.labelPl}</p>
-      <div className="text-[10px] text-slate-400 border-t border-slate-800 pt-1 flex justify-between">
-        <span>{marker.categoryLabelPl}</span>
-        <span className="font-mono">Kod: {marker.sourceCode}</span>
-      </div>
+      {marker.hintPl && <p className="text-slate-400">{marker.hintPl}</p>}
+      <div className="text-[10px] text-slate-400 border-t border-slate-800 pt-1">{marker.categoryLabelPl}</div>
     </div>
   );
 }
@@ -390,32 +433,6 @@ function LeftRear3QSvg({ bodyType }: { bodyType: VehicleBodyType }) {
       <polygon points="60,125 90,115 85,135" fill="#f87171" opacity="0.9" stroke="#ef4444" strokeWidth="1" />
       {/* Bumper Bottom Line */}
       <path d="M 60 135 L 90 155 L 130 155" stroke="#334155" strokeWidth="2" fill="none" />
-    </svg>
-  );
-}
-
-// Underbody Bottom View SVG (400 x 200)
-function UnderbodySvg() {
-  return (
-    <svg viewBox="0 0 400 200" className="w-full h-full text-slate-700 select-none">
-      {/* Outer Outline */}
-      <rect x="70" y="40" width="260" height="120" rx="30" fill="#0f172a" stroke="#64748b" strokeWidth="2" />
-
-      {/* Axles */}
-      <line x1="110" y1="30" x2="110" y2="170" stroke="#475569" strokeWidth="4" />
-      <line x1="290" y1="30" x2="290" y2="170" stroke="#475569" strokeWidth="4" />
-
-      {/* Wheels */}
-      <rect x="95" y="20" width="30" height="18" rx="4" fill="#1e293b" stroke="#94a3b8" strokeWidth="1" />
-      <rect x="95" y="162" width="30" height="18" rx="4" fill="#1e293b" stroke="#94a3b8" strokeWidth="1" />
-      <rect x="275" y="20" width="30" height="18" rx="4" fill="#1e293b" stroke="#94a3b8" strokeWidth="1" />
-      <rect x="275" y="162" width="30" height="18" rx="4" fill="#1e293b" stroke="#94a3b8" strokeWidth="1" />
-
-      {/* Floorpan / Underbody Center */}
-      <rect x="150" y="60" width="100" height="80" rx="10" fill="#1e293b" stroke="#8b5cf6" strokeWidth="1.5" strokeDasharray="4 2" />
-      <text x="200" y="104" textAnchor="middle" fill="#a78bfa" fontSize="11" fontWeight="bold">
-        SCHEMAT PODWOZIA
-      </text>
     </svg>
   );
 }
