@@ -51,13 +51,13 @@ export function DamageClaimVisualization({
   );
 
   return (
-    <div className="space-y-6 pt-4 border-t border-slate-800/80">
+    <div className="space-y-6 pt-4 border-t border-slate-200 dark:border-slate-800/80">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+        <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-red-500"></span>
           Mapa szkody według Audatex
         </h3>
-        <span className="text-xs text-slate-400 font-mono">
+        <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
           Makieta: {presentation.template.labelPl}
         </span>
       </div>
@@ -70,7 +70,7 @@ export function DamageClaimVisualization({
       />
 
       {presentation.flagsText && (
-        <p className="text-[11px] text-slate-400">{presentation.flagsText}</p>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">{presentation.flagsText}</p>
       )}
 
       <DamageGroupChips groups={presentation.groupChips} />

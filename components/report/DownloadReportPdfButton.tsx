@@ -70,7 +70,7 @@ export function DownloadReportPdfButton({
       </button>
 
       {errorMessage && (
-        <span className="text-[11px] font-semibold text-red-400 mt-1">
+        <span className="text-[11px] font-semibold text-red-600 dark:text-red-400 mt-1">
           {errorMessage}
         </span>
       )}

@@ -69,15 +69,15 @@ export function VehicleDamageViews({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           {isGeneric && (
-            <div className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-400 border border-amber-500/20">
+            <div className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 dark:bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20">
               Makieta poglądowa ({labelPl})
             </div>
           )}
         </div>
 
         {/* 3-Mode Stage Presentation Switcher */}
-        <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 p-1 rounded-xl shadow-inner">
-          <span className="text-[11px] font-medium text-slate-400 px-2 select-none">
+        <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-1 rounded-xl shadow-inner">
+          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 px-2 select-none">
             Widok makiety:
           </span>
           <button
@@ -86,7 +86,7 @@ export function VehicleDamageViews({
             className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
               stageMode === "standard"
                 ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60"
             }`}
             title="Standardowy fotorealistyczny render"
           >
@@ -98,7 +98,7 @@ export function VehicleDamageViews({
             className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
               stageMode === "contrast"
                 ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60"
             }`}
             title="Zwiększony kontrast: przyciemniony pojazd dla maksymalnej widoczności markerów"
           >
@@ -110,7 +110,7 @@ export function VehicleDamageViews({
             className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
               stageMode === "schematic"
                 ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60"
             }`}
             title="Wektorowy schemat SVG (tryb wycofania)"
           >
@@ -122,20 +122,20 @@ export function VehicleDamageViews({
       {/* Main 2 perspectives side by side */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* VIEW 1: Right Front 3/4 */}
-        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3 relative shadow-md">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3 relative shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+            <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-blue-500"></span>
               {PHOTO_1_CAPTION}
             </span>
-            <span className="text-[11px] font-mono text-slate-400">
+            <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
               Markery w tym ujęciu: {rf3qMarkers.length}
             </span>
           </div>
 
-          <div className="relative w-full aspect-[2/1] bg-white rounded-xl overflow-hidden flex items-center justify-center p-0 border border-slate-800 shadow-inner">
+          <div className="relative w-full aspect-[2/1] bg-white rounded-xl overflow-hidden flex items-center justify-center p-0 border border-slate-200 dark:border-slate-800 shadow-inner">
             {stageMode === "schematic" ? (
-              <div className="w-full h-full bg-slate-900/40 p-2">
+              <div className="w-full h-full bg-slate-100 dark:bg-slate-900/40 p-2">
                 <RightFront3QSvg bodyType={bodyType} />
               </div>
             ) : (
@@ -169,20 +169,20 @@ export function VehicleDamageViews({
         </div>
 
         {/* VIEW 2: Left Rear 3/4 */}
-        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3 relative shadow-md">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3 relative shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+            <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-purple-500"></span>
               {PHOTO_2_CAPTION}
             </span>
-            <span className="text-[11px] font-mono text-slate-400">
+            <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
               Markery w tym ujęciu: {lr3qMarkers.length}
             </span>
           </div>
 
-          <div className="relative w-full aspect-[2/1] bg-white rounded-xl overflow-hidden flex items-center justify-center p-0 border border-slate-800 shadow-inner">
+          <div className="relative w-full aspect-[2/1] bg-white rounded-xl overflow-hidden flex items-center justify-center p-0 border border-slate-200 dark:border-slate-800 shadow-inner">
             {stageMode === "schematic" ? (
-              <div className="w-full h-full bg-slate-900/40 p-2">
+              <div className="w-full h-full bg-slate-100 dark:bg-slate-900/40 p-2">
                 <LeftRear3QSvg bodyType={bodyType} />
               </div>
             ) : (
@@ -218,13 +218,13 @@ export function VehicleDamageViews({
 
       {/* OPTIONAL VIEW 3: Underbody schematic + off-photo list (zone 17 interior, zone 18 underbody) */}
       {(hasUnderbodyView || offPhotoMarkers.length > 0) && (
-        <div className="rounded-2xl border border-purple-500/30 bg-purple-950/20 p-4 space-y-3">
+        <div className="rounded-2xl border border-purple-500/20 bg-purple-50/50 p-4 space-y-3 dark:border-purple-500/30 dark:bg-purple-950/20">
           <div className="flex items-center justify-between border-b border-purple-500/20 pb-2">
-            <span className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-purple-400"></span>
+            <span className="text-xs font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-purple-500 dark:bg-purple-400"></span>
               {hasUnderbodyView ? "Podwozie (widok od spodu)" : "Strefy poza zdjęciami"}
             </span>
-            <span className="text-[11px] font-mono text-purple-300">
+            <span className="text-[11px] font-mono text-purple-700 dark:text-purple-300">
               {hasUnderbodyView ? "Widok pomocniczy podwozia" : "Strefy bez ujęcia na zdjęciach"}
             </span>
           </div>
@@ -234,7 +234,7 @@ export function VehicleDamageViews({
               <div className="w-full md:flex-1 max-w-xl mx-auto space-y-1">
                 <div
                   style={{ aspectRatio: `${UNDERBODY_VIEWBOX_W} / ${UNDERBODY_VIEWBOX_H}` }}
-                  className="relative w-full bg-slate-100 rounded-xl overflow-hidden border border-slate-800"
+                  className="relative w-full bg-slate-100 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800"
                 >
                   {!underbodyImageFailed && (
                     <img
@@ -265,17 +265,17 @@ export function VehicleDamageViews({
                     );
                   })}
                 </div>
-                <p className="text-[11px] text-slate-400 text-center">Przód pojazdu z lewej strony</p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 text-center">Przód pojazdu z lewej strony</p>
               </div>
             )}
 
             {offPhotoMarkers.length > 0 && (
             <div className="w-full md:w-64 space-y-2">
               {hasUnderbodyView && (
-                <div className="text-xs font-bold text-purple-300 uppercase tracking-wider">Poza zdjęciami</div>
+                <div className="text-xs font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider">Poza zdjęciami</div>
               )}
               {offPhotoMarkers.map((m) => (
-                <div key={`off-${m.id}`} className="flex items-start gap-2 text-xs text-slate-200">
+                <div key={`off-${m.id}`} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200">
                   <span style={{ backgroundColor: m.colorHex }} className="mt-0.5 h-3 w-3 shrink-0 rounded-full"></span>
                   <span>
                     {m.titlePl}
@@ -303,13 +303,13 @@ function MarkerBadge({ marker }: { marker: ProcessedMarkerItem }) {
 
 function MarkerTooltip({ marker, viewName }: { marker: ProcessedMarkerItem; viewName: string }) {
   return (
-    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-slate-900 border border-slate-700 rounded-lg text-[11px] text-white shadow-xl z-30 pointer-events-none space-y-1">
+    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-48 p-2 bg-white text-slate-900 border border-slate-200 dark:bg-slate-900 dark:border-slate-700 rounded-lg text-[11px] dark:text-white shadow-xl z-30 pointer-events-none space-y-1">
       <div className="font-bold flex items-center justify-between gap-2">
         <span>{marker.titlePl}</span>
-        <span className="text-[10px] font-normal text-slate-400 shrink-0">{viewName}</span>
+        <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400 shrink-0">{viewName}</span>
       </div>
-      {marker.hintPl && <p className="text-slate-400">{marker.hintPl}</p>}
-      <div className="text-[10px] text-slate-400 border-t border-slate-800 pt-1">{marker.categoryLabelPl}</div>
+      {marker.hintPl && <p className="text-slate-500 dark:text-slate-400">{marker.hintPl}</p>}
+      <div className="text-[10px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-800 pt-1">{marker.categoryLabelPl}</div>
     </div>
   );
 }
