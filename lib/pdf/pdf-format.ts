@@ -22,6 +22,11 @@ export function formatAmount(value: number): string {
 export const DAMAGE_VAT_RATE = 0.23;
 export const DAMAGE_GROSS_CAPTION = "brutto, szacunek (kwota netto Audatex + 23% VAT)";
 
+/** Vehicle valuation gross amount (net × 1.23, rounded to integer with Polish grouping). */
+export function formatGrossAmount(netValue: number): string {
+  return formatAmount(Math.round(netValue * (1 + DAMAGE_VAT_RATE)));
+}
+
 /** Bucket the gross amount falls into: width 500 below 5 000, 1 000 below 50 000, 5 000 below 200 000, else 10 000. */
 export function damageGrossBucket(gross: number): { lower: number; upper: number } {
   const width = gross < 5_000 ? 500 : gross < 50_000 ? 1_000 : gross < 200_000 ? 5_000 : 10_000;

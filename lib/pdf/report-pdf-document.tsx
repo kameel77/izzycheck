@@ -28,6 +28,7 @@ import {
   Tone,
   KpiSpec,
   formatAmount,
+  formatGrossAmount,
   formatDamageGrossRange,
   DAMAGE_GROSS_CAPTION,
   formatCountry,
@@ -815,14 +816,16 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
             <Tile label="Wartość rynkowa" tone="neutral">
               <View style={styles.tileValueBox}>
                 {hasValuation ? (
-                  <Text style={{ fontSize: TYPE.display, fontWeight: "bold", color: COLORS.brandNavy }}>
-                    {formatAmount(model.marketPriceCob as number)}
+                  <Text style={{ fontSize: TYPE.title, fontWeight: "bold", color: COLORS.brandNavy }}>
+                    {`${formatGrossAmount(model.marketPriceCob as number)} PLN brutto`}
                   </Text>
                 ) : (
                   <Text style={[styles.tileValue, { color: COLORS.muted }]}>Brak wyceny</Text>
                 )}
               </View>
-              {hasValuation ? <Text style={styles.tileSub}>{NET_LABEL}</Text> : null}
+              {hasValuation ? (
+                <Text style={styles.tileSub}>{`(${formatAmount(model.marketPriceCob as number)} PLN netto)`}</Text>
+              ) : null}
             </Tile>
           </View>
           <View style={{ flex: 1, marginRight: 8, flexDirection: "row" }}>
@@ -863,23 +866,27 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
               <View style={styles.valuationCell}>
                 <Text style={styles.label}>Cena nowego pojazdu (CV)</Text>
                 <Text style={styles.valuationValue}>
-                  {model.newPriceCv !== undefined ? formatAmount(model.newPriceCv) : "—"}
+                  {model.newPriceCv !== undefined ? `${formatGrossAmount(model.newPriceCv)} PLN brutto` : "—"}
                 </Text>
-                <Text style={styles.caption}>{NET_LABEL}</Text>
+                <Text style={styles.caption}>
+                  {model.newPriceCv !== undefined ? `(${formatAmount(model.newPriceCv)} PLN netto)` : NET_LABEL}
+                </Text>
               </View>
               <View style={styles.valuationCell}>
                 <Text style={styles.label}>Wartość rynkowa (COB)</Text>
                 <Text style={[styles.valuationValue, { color: COLORS.brandNavy }]}>
-                  {formatAmount(model.marketPriceCob as number)}
+                  {`${formatGrossAmount(model.marketPriceCob as number)} PLN brutto`}
                 </Text>
-                <Text style={styles.caption}>{NET_LABEL}</Text>
+                <Text style={styles.caption}>{`(${formatAmount(model.marketPriceCob as number)} PLN netto)`}</Text>
               </View>
               <View style={styles.valuationCell}>
                 <Text style={styles.label}>Wartość techniczna (TH)</Text>
                 <Text style={styles.valuationValue}>
-                  {model.technicalValueTh !== undefined ? formatAmount(model.technicalValueTh) : "—"}
+                  {model.technicalValueTh !== undefined ? `${formatGrossAmount(model.technicalValueTh)} PLN brutto` : "—"}
                 </Text>
-                <Text style={styles.caption}>{NET_LABEL}</Text>
+                <Text style={styles.caption}>
+                  {model.technicalValueTh !== undefined ? `(${formatAmount(model.technicalValueTh)} PLN netto)` : NET_LABEL}
+                </Text>
               </View>
             </View>
             {marketPct !== undefined && (

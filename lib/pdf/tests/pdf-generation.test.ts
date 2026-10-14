@@ -569,8 +569,8 @@ describe("PDF Generation & View Model Module", () => {
     test("KPI row: market value, claims tile and completeness for a complete report", async () => {
       const { tree } = await render(mockReport);
       const texts = textsOf(tree);
-      assert.ok(texts.includes("124 500"), "market value as integer with Polish grouping");
-      assert.ok(texts.includes("PLN netto (bez VAT)"), "net label next to the hero value");
+      assert.ok(texts.includes("153 135 PLN brutto"), "market gross value as primary value with Polish grouping");
+      assert.ok(texts.includes("(124 500 PLN netto)"), "net value in parentheses below gross value");
       assert.ok(texts.includes("1 szkoda"));
       assert.ok(texts.includes("Kompletny"));
     });
@@ -631,6 +631,10 @@ describe("PDF Generation & View Model Module", () => {
       assert.ok(texts.includes("Cena nowego pojazdu (CV)"));
       assert.ok(texts.includes("Wartość rynkowa (COB)"));
       assert.ok(texts.includes("Wartość techniczna (TH)"));
+      assert.ok(texts.includes("256 958 PLN brutto"));
+      assert.ok(texts.includes("(208 909 PLN netto)"));
+      assert.ok(texts.includes("145 140 PLN brutto"));
+      assert.ok(texts.includes("(118 000 PLN netto)"));
       assert.ok(texts.includes("Wartość rynkowa = 60% ceny nowego"));
     });
 
@@ -745,8 +749,9 @@ describe("PDF Generation & View Model Module", () => {
           "full caption on the two claim pages"
         );
         assert.ok(texts.includes("brutto, szacunek"), "short caption in the table / timeline");
-        // the net label is left only on vehicle valuation prices (KPI tile + 3 valuation cells)
-        assert.strictEqual(texts.filter((t) => t === "PLN netto (bez VAT)").length, 4);
+        // vehicle valuation prices show gross as primary and net in parentheses below (KPI tile + 3 valuation cells)
+        assert.strictEqual(texts.filter((t) => t.endsWith("PLN brutto")).length, 4);
+        assert.strictEqual(texts.filter((t) => /^\(.*PLN netto\)$/.test(t)).length, 4);
         assert.strictEqual(texts.some((t) => /^\d[\d ]* PLN$/.test(t)), false, "no net damage amount in the timeline");
         assert.ok(texts.includes("brutto, szacunek"));
       });
