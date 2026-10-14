@@ -161,7 +161,7 @@ export default function NewReportPage() {
         router.push(`/reports/${data.reportId}`);
       }
     } catch (err: any) {
-      setError("Wystąpił błąd sieciowy podczas wywoływania usług Audatex.");
+      setError("Wystąpił błąd połączenia z serwerem. Sprawdź połączenie z internetem i spróbuj ponownie.");
     } finally {
       setLoading(false);
     }
@@ -175,9 +175,9 @@ export default function NewReportPage() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Formularz Zapytania VIN</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Nowy Raport Pojazdu</h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Wprowadź dane pojazdu i wybierz zakres modułów zapytań do usług Audatex SOAP.
+          Wprowadź dane pojazdu i wybierz zakres informacji, które mają znaleźć się w raporcie.
         </p>
       </div>
 
@@ -202,7 +202,7 @@ export default function NewReportPage() {
         {/* Step 1: Vehicle Inputs */}
         <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
           <h2 className="text-sm font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-2">
-            <Car className="h-4 w-4" /> 1. Dane Wejściowe Pojazdu
+            <Car className="h-4 w-4" /> 1. Dane Pojazdu
           </h2>
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
@@ -223,7 +223,7 @@ export default function NewReportPage() {
                 placeholder="np. WBA3N51030KS15173"
                 className="w-full rounded-xl border border-slate-300 bg-slate-50 py-3 px-4 font-mono text-base font-semibold tracking-widest text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:placeholder-slate-600 dark:focus:bg-slate-950"
               />
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">Numer VIN zostanie automatycznie znormalizowany i zweryfikowany przed wysłaniem SOAP.</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Wpisz 17-znakowy numer nadwozia pojazdu (spacje i myślniki zostaną usunięte automatycznie).</p>
             </div>
 
             {/* First Registration Date */}
@@ -239,7 +239,7 @@ export default function NewReportPage() {
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-900 focus:border-blue-500 focus:bg-white focus:outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-white dark:focus:bg-slate-950"
                 />
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">Wymagana przez AudaValuation i zalecana dla filtru szkód CHE.</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Data pierwszej rejestracji pojazdu z dowodu rejestracyjnego.</p>
             </div>
 
             {/* Mileage */}
@@ -256,7 +256,7 @@ export default function NewReportPage() {
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 py-2.5 pl-10 pr-4 text-sm text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:bg-white focus:outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-white dark:placeholder-slate-600 dark:focus:bg-slate-950"
                 />
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">Przy braku przebiegu AudaValuation wylicza średni kilometraż rynkowy (0 km).</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Jeśli pole pozostanie puste, do wyceny zostanie przyjęty średni przebieg rynkowy dla rocznika.</p>
             </div>
 
             {/* Valuation Date */}
@@ -275,7 +275,7 @@ export default function NewReportPage() {
         {/* Step 2: Module Selection */}
         <div className="rounded-2xl border border-slate-200 bg-white p-6 space-y-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
           <h2 className="text-sm font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 flex items-center gap-2">
-            <CheckSquare className="h-4 w-4" /> 2. Wybór Modułów Raportu
+            <CheckSquare className="h-4 w-4" /> 2. Zakres Raportu
           </h2>
 
           <div className="space-y-4">
@@ -296,7 +296,7 @@ export default function NewReportPage() {
               />
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-slate-900 dark:text-white">Moduł 1: Wycena i Wyposażenie (AudaValuation WS 2023)</span>
+                  <span className="text-sm font-semibold text-slate-900 dark:text-white">Wycena pojazdu i specyfikacja wyposażenia</span>
                   {!canValuation && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700">
                       <Lock className="h-2.5 w-2.5" /> Brak uprawnienia
@@ -304,7 +304,7 @@ export default function NewReportPage() {
                   )}
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Identyfikacja IBS Code po VIN, pobranie wyceny rynkowej (COBv), wartości technicznej (THv), nowej ceny z wyposażeniem (CVv) oraz listy wyposażenia standardowego i opcjonalnego.
+                  Szacunkowa wartość rynkowa, cena nowego pojazdu, wartość techniczna, parametry techniczne oraz lista wyposażenia standardowego i dodatkowego.
                 </p>
               </div>
             </label>
@@ -328,10 +328,10 @@ export default function NewReportPage() {
               />
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-slate-900 dark:text-white">Moduł 2: Kontrola Historii Szkód (Claims History Engine `hasHistory`)</span>
+                  <span className="text-sm font-semibold text-slate-900 dark:text-white">Sprawdzenie obecności historii szkód</span>
                   {includeValuation ? (
                     <span className="rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                      Weryfikacja obecności wpisów szkód (Y/N) dołączana automatycznie do wyceny
+                      Dołączane automatycznie do wyceny pojazdu
                     </span>
                   ) : !canClaimCheck ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700">
@@ -340,7 +340,7 @@ export default function NewReportPage() {
                   ) : null}
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Weryfikacja w bazie Audatex, czy dla pojazdu istnieją zarejestrowane szkody komunikacyjne lub zdarzenia ubezpieczeniowe.
+                  Weryfikacja w bazie Audatex, czy dla pojazdu odnotowano jakiekolwiek szkody komunikacyjne lub zdarzenia ubezpieczeniowe.
                 </p>
               </div>
             </label>
@@ -362,19 +362,19 @@ export default function NewReportPage() {
               />
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-semibold text-slate-900 dark:text-white">Moduł 3: Szczegóły Szkód (`getDetails`)</span>
+                  <span className="text-sm font-semibold text-slate-900 dark:text-white">Szczegółowy wykaz i historia szkód</span>
                   {!canClaimDetails ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700">
                       <Lock className="h-2.5 w-2.5" /> Brak uprawnienia
                     </span>
                   ) : (
                     <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                      Wymaga dodatniego wyniku Modułu 2
+                      Pobierane w przypadku wykrycia szkód
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Pobranie chronologicznej listy szkód z podziałem na kwoty, daty zdarzenia, kody mandatów, strefy uszkodzeń (28 stref) oraz istotne grupy części. Uruchamia się wyłącznie po potwierdzeniu wpisów.
+                  Chronologiczna lista szkód z datami zdarzeń, szacunkową wartością napraw, kwalifikacją szkody oraz wizualizacją uszkodzonych stref pojazdu.
                 </p>
               </div>
             </label>
@@ -383,7 +383,7 @@ export default function NewReportPage() {
           <div className="flex items-center gap-2 rounded-xl bg-blue-500/10 p-3 text-xs text-blue-700 dark:text-blue-300 border border-blue-500/20">
             <Info className="h-4 w-4 shrink-0" />
             <span>
-              Wszystkie zapytania SOAP są wykonywane serwerowo po stronie Node.js. Dane poświadczeń i sekrety licencyjne są chronione.
+              Generowanie raportu trwa zazwyczaj od kilku do kilkunastu sekund. Gotowy dokument będzie można pobrać również w formacie PDF.
             </span>
           </div>
         </div>
@@ -396,7 +396,7 @@ export default function NewReportPage() {
         >
           {loading ? (
             <>
-              <Loader2 className="h-5 w-5 animate-spin" /> Łączenie z uslugami SOAP Audatex...
+              <Loader2 className="h-5 w-5 animate-spin" /> Generowanie raportu, proszę czekać...
             </>
           ) : !hasAnyPermission && !userLoading ? (
             <>
@@ -404,7 +404,7 @@ export default function NewReportPage() {
             </>
           ) : (
             <>
-              Generuj Raport IzzyCheck <ArrowRight className="h-5 w-5" />
+              Generuj Raport <ArrowRight className="h-5 w-5" />
             </>
           )}
         </button>

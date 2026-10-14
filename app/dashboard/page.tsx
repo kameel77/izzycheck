@@ -23,6 +23,8 @@ export default function DashboardPage() {
 
   const totalReports = reports.length;
   const claimsFoundCount = reports.filter((r) => r.damageClaims && r.damageClaims.length > 0).length;
+  const noClaimsCount = Math.max(0, totalReports - claimsFoundCount);
+  const valuedReportsCount = reports.filter((r) => r.vehicleSnapshot?.marketPriceCob).length;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
@@ -31,13 +33,13 @@ export default function DashboardPage() {
         <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/10 px-3 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20">
-              <ShieldCheck className="h-3.5 w-3.5" /> Środowisko Operacyjne Izzy Lease
+              <ShieldCheck className="h-3.5 w-3.5" /> Panel Weryfikacji Pojazdów
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
-              Weryfikacja Wyceny i Historii Szkód VIN
+              Wycena Wartości i Historia Szkód VIN
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
-              Ustandaryzowane tworzenie raportów na podstawie integracji SOAP z Audatex AudaValuation 2023 oraz Claims History Engine B2B v1.23.0.
+              Szybka weryfikacja wartości rynkowej pojazdu, specyfikacji wyposażenia oraz historii szkód komunikacyjnych na podstawie numeru nadwozia VIN.
             </p>
           </div>
 
@@ -45,7 +47,7 @@ export default function DashboardPage() {
             href="/reports/new"
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/25 hover:bg-blue-500 transition-all shrink-0"
           >
-            <Plus className="h-4 w-4" /> Uruchom Nowy Raport VIN
+            <Plus className="h-4 w-4" /> Nowy Raport VIN
           </Link>
         </div>
       </div>
@@ -60,40 +62,40 @@ export default function DashboardPage() {
             </div>
           </div>
           <p className="mt-3 text-3xl font-bold text-slate-900 dark:text-white">{totalReports}</p>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Wygenerowane raporty w bazie</p>
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Wszystkie wygenerowane raporty</p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 backdrop-blur-sm shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Pojazdy Ze Szkołami</span>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Pojazdy ze Szkodami</span>
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
               <AlertTriangle className="h-5 w-5" />
             </div>
           </div>
           <p className="mt-3 text-3xl font-bold text-amber-600 dark:text-amber-400">{claimsFoundCount}</p>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Potwierdzone rekordy w bazie Audatex</p>
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Pojazdy z odnotowaną historią szkód</p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 backdrop-blur-sm shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Integracje Audatex</span>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Bez Historii Szkód</span>
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
               <CheckCircle2 className="h-5 w-5" />
             </div>
           </div>
-          <p className="mt-3 text-3xl font-bold text-emerald-600 dark:text-emerald-400">WS 2023 & CHE</p>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">AudaValuation + SOAP v1.23.0</p>
+          <p className="mt-3 text-3xl font-bold text-emerald-600 dark:text-emerald-400">{noClaimsCount}</p>
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Pojazdy bez wykrytych wpisów szkodowych</p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 backdrop-blur-sm shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status Środowiska</span>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Wycenione Pojazdy</span>
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">
-              <Clock className="h-5 w-5" />
+              <FileText className="h-5 w-5" />
             </div>
           </div>
-          <p className="mt-3 text-lg font-bold text-slate-900 dark:text-white">Przetwarzanie Serwerowe</p>
-          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">SOAP wyłącznie po stronie Node.js</p>
+          <p className="mt-3 text-3xl font-bold text-slate-900 dark:text-white">{valuedReportsCount}</p>
+          <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Raporty z określoną wartością rynkową</p>
         </div>
       </div>
 

@@ -388,7 +388,13 @@ export class AudatexValuationAdapter {
           const responseHash = createHash("sha256").update(errText).digest("hex").substring(0, 12);
           console.error(`[AUDATEX_VALUATION_ERROR] Service: AudaValuation | Action: ${soapAction} | HTTP Status: ${res.status} | ResponseHash: ${responseHash} | Attempt: ${attempt}`);
 
-          const sanitizedMessage = `AUDATEX_VALUATION_ERROR: Błąd komunikacji z serwisem wycen Audatex (HTTP ${res.status}).`;
+          const isUnclassifiable =
+            errText.includes("Pojazd nie może być sklasyfikowany") ||
+            errText.toLowerCase().includes("cannot be classified");
+
+          const sanitizedMessage = isUnclassifiable
+            ? "AUDATEX_VALUATION_ERROR: Pojazd nie może zostać sklasyfikowany w katalogu wycen dla podanego numeru VIN i daty pierwszej rejestracji."
+            : `AUDATEX_VALUATION_ERROR: Błąd komunikacji z serwisem wycen Audatex (HTTP ${res.status}).`;
           const nonRetryable = new NonRetryableError(sanitizedMessage);
 
           if (res.status < 502 || res.status > 504) {

@@ -72,7 +72,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       moduleResults: report.moduleResults.map((m) => ({ ...m, isStaleLock: isModuleLockStale(m) })),
     };
 
-    return NextResponse.json({ success: true, report: reportWithStaleFlags });
+    return NextResponse.json({
+      success: true,
+      viewerRole: freshUser.role,
+      report: reportWithStaleFlags,
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Błąd pobierania raportu z bazy." }, { status: 500 });
   }
