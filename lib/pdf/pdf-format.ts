@@ -336,9 +336,9 @@ export function buildClaimsKpi(input: {
       return { tone: totalLosses > 0 ? "risk" : "caution", value: `${n} ${claimNoun(n)}`, sub };
     }
     case "HISTORY_DETECTED_DETAILS_NOT_REQUESTED":
-      return { tone: "caution", value: "Wykryto wpisy", sub: "szczegóły nie były zamówione" };
+      return { tone: "risk", value: "Wykryto wpisy", sub: "szczegóły nie były zamówione" };
     case "HISTORY_DETECTED_DETAILS_UNAVAILABLE":
-      return { tone: "caution", value: "Wykryto wpisy", sub: "szczegóły niedostępne" };
+      return { tone: "risk", value: "Wykryto wpisy", sub: "szczegóły niedostępne" };
     case "NO_HISTORY":
       return { tone: "ok", value: "Brak szkód", sub: "w bazie Audatex" };
     default:

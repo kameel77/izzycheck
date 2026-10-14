@@ -910,12 +910,12 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
               </>
             )}
             {model.claimsHistoryPresentation === "HISTORY_DETECTED_DETAILS_NOT_REQUESTED" && (
-              <Notice tone="caution">
-                Wykryto wpisy historii szkód w bazie Audatex. Szczegóły zdarzeń nie były objęte zamówieniem.
+              <Notice tone="risk">
+                Wykryto wpisy historii szkód w zewnętrznych bazach. Zamów szczegółowy raport szkód.
               </Notice>
             )}
             {model.claimsHistoryPresentation === "HISTORY_DETECTED_DETAILS_UNAVAILABLE" && (
-              <Notice tone="caution">
+              <Notice tone="risk">
                 Wykryto wpisy historii szkód w bazie Audatex. Szczegóły zdarzeń nie są dostępne w tym raporcie.
               </Notice>
             )}
@@ -994,12 +994,19 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
 // Header / footer (fixed on every page, including overflow pages)
 // ---------------------------------------------------------------------------
 
+const LOGO_IMAGE_PNG = path.join(process.cwd(), "public", "izzycheck-logo.png");
+
 function PdfHeader({ model }: { model: ReportPdfViewModel }) {
   const refText = model.publicReference || `ID: #${model.reportId.substring(0, 8)}`;
+  const hasLogoFile = fs.existsSync(LOGO_IMAGE_PNG);
   return (
     <View style={styles.header} fixed>
       <View>
-        <Text style={styles.logoText}>IzzyCheck</Text>
+        {hasLogoFile ? (
+          <Image src={LOGO_IMAGE_PNG} style={{ width: 110, height: 22 }} />
+        ) : (
+          <Text style={styles.logoText}>IzzyCheck</Text>
+        )}
         <Text style={styles.logoSub}>Raport historii i wyceny pojazdu</Text>
       </View>
       <View style={styles.headerMeta}>

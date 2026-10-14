@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Car, Lock, Mail, ArrowRight } from "lucide-react";
+import { Lock, Mail, ArrowRight } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -40,13 +40,14 @@ export default function LoginPage() {
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-4 sm:p-6 lg:p-8">
       <div className="w-full max-w-md space-y-8 rounded-2xl border border-slate-200 bg-white/95 p-8 backdrop-blur-xl shadow-xl dark:border-slate-800 dark:bg-slate-900/80">
         <div className="text-center space-y-3">
-          <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-tr from-blue-600 to-cyan-500 text-white shadow-lg shadow-blue-500/25">
-            <Car className="h-8 w-8" />
+          <div className="inline-flex items-center justify-center">
+            <img
+              src="/izzycheck-logo.svg"
+              alt="IzzyCheck"
+              className="h-12 w-auto dark:bg-white/95 dark:px-3 dark:py-1.5 dark:rounded-xl"
+            />
           </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Izzy<span className="text-blue-500">Check</span></h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">System Weryfikacji Pojazdów B2B — Izzy Lease</p>
-          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">System Weryfikacji Pojazdów B2B</p>
         </div>
 
         {error && (

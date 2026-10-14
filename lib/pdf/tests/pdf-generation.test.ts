@@ -424,7 +424,7 @@ describe("PDF Generation & View Model Module", () => {
       assert.ok(texts.some((t) => t.includes(SECTION_TITLE)));
       assert.ok(
         texts.some((t) =>
-          t.includes("Wykryto wpisy historii szkód w bazie Audatex. Szczegóły zdarzeń nie były objęte zamówieniem.")
+          t.includes("Wykryto wpisy historii szkód w zewnętrznych bazach. Zamów szczegółowy raport szkód.")
         )
       );
     });

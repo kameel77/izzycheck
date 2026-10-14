@@ -12,17 +12,24 @@ async function main() {
     return;
   }
 
+  const adminName = process.env.INITIAL_ADMIN_NAME?.trim() || "Kamil Tonkowicz";
   const passwordHash = await bcrypt.hash(adminPassword, 10);
+  const existingAdmin = await prisma.user.findUnique({ where: { email: adminEmail } });
+  const shouldUpdateName =
+    !existingAdmin ||
+    existingAdmin.name === "Administrator Izzy Lease" ||
+    Boolean(process.env.INITIAL_ADMIN_NAME?.trim());
 
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
     update: {
       passwordHash,
       role: "ADMIN",
+      ...(shouldUpdateName ? { name: adminName } : {}),
     },
     create: {
       email: adminEmail,
-      name: "Administrator Izzy Lease",
+      name: adminName,
       passwordHash,
       role: "ADMIN",
     },
