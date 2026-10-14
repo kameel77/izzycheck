@@ -56,7 +56,11 @@ export function isModuleLockStale(
 export interface ExecuteModuleOptions {
   customPrisma?: any;
   userId?: string;
-  role?: "OPERATOR" | "ADMIN";
+  role?: "ADMIN" | "MANAGER" | "USER" | "OPERATOR";
+  organizationId?: string | null;
+  canGenerateValuation?: boolean;
+  canGenerateClaimCheck?: boolean;
+  canGenerateClaimDetails?: boolean;
   /** Trusted server-side caller (no user context). Without userId and internal, execution is refused. */
   internal?: boolean;
   customValuationAdapter?: any;
@@ -102,13 +106,45 @@ export async function executeReportModule(
     throw new ModuleExecutionError("Raport nie został odnaleziony w systemie.", 404);
   }
 
-  // Ownership check (fail-closed): only the report owner or an ADMIN may execute its modules.
-  // Callers without a user context must explicitly opt in with `internal: true`.
+  // Ownership check (fail-closed): report owner, ADMIN, or MANAGER in the same organization
   if (!options.userId && !options.internal) {
     throw new ModuleExecutionError("Dostęp zabroniony. Nie posiadasz uprawnień do tego raportu.", 403);
   }
-  if (options.userId && options.role !== "ADMIN" && report.createdById !== options.userId) {
-    throw new ModuleExecutionError("Dostęp zabroniony. Nie posiadasz uprawnień do tego raportu.", 403);
+  if (options.userId) {
+    const isOwner = report.createdById === options.userId;
+    const isAdmin = options.role === "ADMIN";
+    const isOrgManager =
+      options.role === "MANAGER" &&
+      Boolean(options.organizationId && report.organizationId && options.organizationId === report.organizationId);
+
+    if (!isOwner && !isAdmin && !isOrgManager) {
+      throw new ModuleExecutionError("Dostęp zabroniony. Nie posiadasz uprawnień do tego raportu.", 403);
+    }
+
+    // Permission check for module execution for role USER (and OPERATOR with explicit permissions):
+    if (
+      options.role === "USER" ||
+      (options.role === "OPERATOR" &&
+        (options.canGenerateValuation !== undefined ||
+          options.canGenerateClaimDetails !== undefined ||
+          options.canGenerateClaimCheck !== undefined))
+    ) {
+      if (moduleId === "VALUATION" && !options.canGenerateValuation) {
+        throw new ModuleExecutionError("Brak uprawnień do generowania wyceny pojazdu.", 403);
+      }
+      if (moduleId === "CLAIM_DETAILS" && !options.canGenerateClaimDetails) {
+        throw new ModuleExecutionError("Brak uprawnień do generowania szczegółów szkód.", 403);
+      }
+      if (moduleId === "CLAIM_CHECK" && !options.canGenerateClaimCheck) {
+        // Exception: allow CLAIM_CHECK if report also requested VALUATION and user has canGenerateValuation
+        const hasValuationInReport = report.moduleResults.some(
+          (m: any) => m.moduleId === "VALUATION" && m.status !== "NOT_REQUESTED"
+        );
+        if (!hasValuationInReport || !options.canGenerateValuation) {
+          throw new ModuleExecutionError("Brak uprawnień do weryfikacji historii szkód.", 403);
+        }
+      }
+    }
   }
 
   const targetModule = report.moduleResults.find((m: any) => m.moduleId === moduleId);

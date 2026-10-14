@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, getFreshUser } from "@/lib/auth";
 import { executeReportModule, ModuleExecutionError } from "@/lib/reports/module-executor";
 import { prisma } from "@/lib/db";
 import { ReportModuleId } from "@prisma/client";
@@ -9,9 +9,18 @@ export async function POST(
   { params }: { params: Promise<{ id: string; moduleId: string }> }
 ) {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
+    const sessionUser = await getCurrentUser();
+    if (!sessionUser) {
       return NextResponse.json({ error: "Brak autoryzacji. Zaloguj się ponownie." }, { status: 401 });
+    }
+
+    const freshUser = await getFreshUser(sessionUser.userId);
+    if (!freshUser || !freshUser.isActive) {
+      return NextResponse.json({ error: "Konto użytkownika jest nieaktywne lub nie istnieje." }, { status: 401 });
+    }
+
+    if (freshUser.role !== "ADMIN" && freshUser.organization && !freshUser.organization.isActive) {
+      return NextResponse.json({ error: "Organizacja została zablokowana." }, { status: 403 });
     }
 
     const resolvedParams = await params;
@@ -33,13 +42,20 @@ export async function POST(
     });
     const isRetry = existingMod?.status === "FAILED";
 
-    const result = await executeReportModule(reportId, moduleId, { userId: user.userId, role: user.role });
+    const result = await executeReportModule(reportId, moduleId, {
+      userId: freshUser.id,
+      role: freshUser.role,
+      organizationId: freshUser.organizationId,
+      canGenerateValuation: freshUser.canGenerateValuation,
+      canGenerateClaimCheck: freshUser.canGenerateClaimCheck,
+      canGenerateClaimDetails: freshUser.canGenerateClaimDetails,
+    });
 
     // Record Audit Event
     await prisma.auditEvent.create({
       data: {
-        userId: user.userId,
-        userEmail: user.email,
+        userId: freshUser.id,
+        userEmail: freshUser.email,
         action: isRetry ? "RETRY_MODULE" : "EXECUTE_MODULE",
         resource: `Report:${reportId}:Module:${moduleId}`,
         metadataJson: JSON.stringify({

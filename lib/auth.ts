@@ -10,11 +10,62 @@ function getJwtSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
+import { prisma } from "./db.ts";
+
 export interface JWTPayload {
   userId: string;
   email: string;
   name: string;
-  role: "OPERATOR" | "ADMIN";
+  role: "ADMIN" | "MANAGER" | "USER" | "OPERATOR";
+  organizationId?: string | null;
+}
+
+export async function getFreshUser(userId: string) {
+  if (globalThis.__mockCurrentUser !== undefined) {
+    if (!globalThis.__mockCurrentUser) return null;
+    return {
+      id: globalThis.__mockCurrentUser.userId,
+      email: globalThis.__mockCurrentUser.email,
+      name: globalThis.__mockCurrentUser.name,
+      role: globalThis.__mockCurrentUser.role,
+      isActive: true,
+      organizationId: globalThis.__mockCurrentUser.organizationId || null,
+      canGenerateValuation: true,
+      canGenerateClaimCheck: true,
+      canGenerateClaimDetails: true,
+      canViewOrgReports: true,
+      organization: null,
+    };
+  }
+
+  return await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      isActive: true,
+      organizationId: true,
+      canGenerateValuation: true,
+      canGenerateClaimCheck: true,
+      canGenerateClaimDetails: true,
+      canViewOrgReports: true,
+      organization: {
+        select: {
+          id: true,
+          name: true,
+          nip: true,
+          street: true,
+          postalCode: true,
+          city: true,
+          country: true,
+          billingEmail: true,
+          isActive: true,
+        },
+      },
+    },
+  });
 }
 
 declare global {

@@ -23,18 +23,32 @@ const isProvided = (value: unknown) => value !== undefined && value !== null && 
 
 export async function POST(req: Request) {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
+    const sessionUser = await getCurrentUser();
+    if (!sessionUser) {
       return NextResponse.json({ error: "Brak autoryzacji. Zaloguj się ponownie." }, { status: 401 });
     }
 
     // Rate Limit: max 10 report creations per minute per user
-    const rateCheck = isRateLimited("reports_create", user.userId, 10, 60000);
+    const rateCheck = isRateLimited("reports_create", sessionUser.userId, 10, 60000);
     if (rateCheck.limited) {
       return NextResponse.json(
         { error: `Zbyt wiele zapytań o raporty. Odczekaj ${Math.ceil(rateCheck.resetMs / 1000)} sekund przed kolejnym zapytaniem.` },
         { status: 429 }
       );
+    }
+
+    // Fetch fresh user from database to ensure up-to-date permissions & active status
+    const freshUser = await prisma.user.findUnique({
+      where: { id: sessionUser.userId },
+      include: { organization: true },
+    });
+
+    if (!freshUser || !freshUser.isActive) {
+      return NextResponse.json({ error: "Konto użytkownika jest nieaktywne lub nie istnieje." }, { status: 401 });
+    }
+
+    if (freshUser.role !== "ADMIN" && freshUser.organization && !freshUser.organization.isActive) {
+      return NextResponse.json({ error: "Organizacja została zablokowana." }, { status: 403 });
     }
 
     const body = await req.json();
@@ -70,14 +84,32 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Data produkcji musi być w formacie YYYY-MM-DD." }, { status: 400 });
     }
 
-    // 3. Modules selection check
-    const { includeValuation, includeClaimCheck, includeClaimDetails } = modules || {};
+    // 3. Modules selection and permissions check
+    let { includeValuation, includeClaimCheck, includeClaimDetails } = modules || {};
+
+    // Business Rule: valuation automatically triggers CLAIM_CHECK (presence of claims check)
+    if (includeValuation) {
+      includeClaimCheck = true;
+    }
 
     if (!includeValuation && !includeClaimCheck && !includeClaimDetails) {
       return NextResponse.json(
         { error: "Musisz wybrać co najmniej jeden moduł raportu (wycena, kontrola szkód lub szczegóły szkód)." },
         { status: 400 }
       );
+    }
+
+    // Strict Permissions Enforcement for USER / OPERATOR roles:
+    if (freshUser.role === "USER" || freshUser.role === "OPERATOR") {
+      if (includeValuation && !freshUser.canGenerateValuation) {
+        return NextResponse.json({ error: "Brak uprawnień do generowania wyceny pojazdu." }, { status: 403 });
+      }
+      if (includeClaimDetails && !freshUser.canGenerateClaimDetails) {
+        return NextResponse.json({ error: "Brak uprawnień do generowania szczegółów szkód." }, { status: 403 });
+      }
+      if (includeClaimCheck && !includeValuation && !freshUser.canGenerateClaimCheck) {
+        return NextResponse.json({ error: "Brak uprawnień do weryfikacji historii szkód." }, { status: 403 });
+      }
     }
 
     const mileageNum = mileage ? parseInt(String(mileage), 10) : undefined;
@@ -102,7 +134,7 @@ export async function POST(req: Request) {
       // Atomic unique lookup per user + idempotency key
       const existingByKey = await prisma.report.findFirst({
         where: {
-          createdById: user.userId,
+          createdById: freshUser.id,
           idempotencyKey: idempotencyHeader,
         },
       });
@@ -121,7 +153,7 @@ export async function POST(req: Request) {
       const sixtySecondsAgo = new Date(Date.now() - 60000);
       const existingByHash = await prisma.report.findFirst({
         where: {
-          createdById: user.userId,
+          createdById: freshUser.id,
           requestHash: currentRequestHash,
           createdAt: { gte: sixtySecondsAgo },
         },
@@ -150,7 +182,8 @@ export async function POST(req: Request) {
           firstRegistrationDate,
           mileage: mileageNum,
           valuationDate: valDate,
-          createdById: user.userId,
+          createdById: freshUser.id,
+          organizationId: freshUser.organizationId || null,
           idempotencyKey: idempotencyHeader || null,
           requestHash: currentRequestHash,
           status: "PROCESSING",
@@ -161,7 +194,7 @@ export async function POST(req: Request) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" && idempotencyHeader) {
         const winningReport = await prisma.report.findFirst({
           where: {
-            createdById: user.userId,
+            createdById: freshUser.id,
             idempotencyKey: idempotencyHeader,
           },
         });
@@ -207,8 +240,8 @@ export async function POST(req: Request) {
     // 7. Record Audit Event: INITIALIZE_REPORT
     await prisma.auditEvent.create({
       data: {
-        userId: user.userId,
-        userEmail: user.email,
+        userId: freshUser.id,
+        userEmail: freshUser.email,
         action: "INITIALIZE_REPORT",
         resource: `Report:${report.id}`,
         metadataJson: JSON.stringify({

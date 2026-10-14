@@ -3,7 +3,19 @@
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { History, Search, ArrowUpRight, Car, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { History, Search, ArrowUpRight, AlertTriangle, CheckCircle2, Building2, User } from "lucide-react";
+
+interface CurrentUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  canViewOrgReports: boolean;
+  organization?: {
+    id: string;
+    name: string;
+  } | null;
+}
 
 function HistoryContent() {
   const searchParams = useSearchParams();
@@ -12,11 +24,35 @@ function HistoryContent() {
   const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState(initialVin);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [activeScope, setActiveScope] = useState<"organization" | "my">("my");
 
-  const fetchReports = (vinQuery: string) => {
+  const canViewOrg = Boolean(
+    currentUser?.canViewOrgReports || currentUser?.role === "MANAGER" || currentUser?.role === "ADMIN"
+  );
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.authenticated && data.user) {
+          const u: CurrentUser = data.user;
+          setCurrentUser(u);
+          if (u.role === "MANAGER" || u.role === "ADMIN" || u.canViewOrgReports) {
+            setActiveScope("organization");
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const fetchReports = (vinQuery: string, scope: "organization" | "my") => {
     setLoading(true);
-    const url = vinQuery ? `/api/reports/history?vin=${encodeURIComponent(vinQuery)}` : "/api/reports/history";
-    fetch(url)
+    const params = new URLSearchParams();
+    if (vinQuery) params.set("vin", vinQuery);
+    params.set("scope", scope);
+
+    fetch(`/api/reports/history?${params.toString()}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.reports) setReports(data.reports);
@@ -26,12 +62,12 @@ function HistoryContent() {
   };
 
   useEffect(() => {
-    fetchReports(initialVin);
-  }, [initialVin]);
+    fetchReports(searchTerm, activeScope);
+  }, [activeScope]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    fetchReports(searchTerm);
+    fetchReports(searchTerm, activeScope);
   };
 
   return (
@@ -44,6 +80,36 @@ function HistoryContent() {
           Przeglądaj wygenerowane raporty weryfikacji pojazdów i audytu Izzy Lease.
         </p>
       </div>
+
+      {/* Scope Tabs if user has organization view rights */}
+      {canViewOrg && (
+        <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+          <button
+            type="button"
+            onClick={() => setActiveScope("organization")}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+              activeScope === "organization"
+                ? "bg-blue-600 text-white shadow-sm shadow-blue-500/20"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+            }`}
+          >
+            <Building2 className="h-3.5 w-3.5" />
+            {currentUser?.role === "ADMIN" ? "Wszystkie raporty w systemie" : "Wszystkie w firmie"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveScope("my")}
+            className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+              activeScope === "my"
+                ? "bg-blue-600 text-white shadow-sm shadow-blue-500/20"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+            }`}
+          >
+            <User className="h-3.5 w-3.5" />
+            Moje raporty
+          </button>
+        </div>
+      )}
 
       {/* Search Bar */}
       <form onSubmit={handleSearchSubmit} className="flex gap-3">
@@ -78,7 +144,10 @@ function HistoryContent() {
                   <th className="px-5 py-3.5 font-semibold">Data 1. Rej.</th>
                   <th className="px-5 py-3.5 font-semibold">Wycena Rynkowa</th>
                   <th className="px-5 py-3.5 font-semibold">Szkody Audatex</th>
-                  <th className="px-5 py-3.5 font-semibold">Operator</th>
+                  {currentUser?.role === "ADMIN" && activeScope === "organization" && (
+                    <th className="px-5 py-3.5 font-semibold">Organizacja</th>
+                  )}
+                  <th className="px-5 py-3.5 font-semibold">Utworzył</th>
                   <th className="px-5 py-3.5 font-semibold">Data Sprawdzenia</th>
                   <th className="px-5 py-3.5 font-semibold text-right">Akcja</th>
                 </tr>
@@ -86,7 +155,10 @@ function HistoryContent() {
               <tbody className="divide-y divide-slate-100 text-slate-700 dark:divide-slate-800/60 dark:text-slate-300">
                 {reports.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-5 py-8 text-center text-slate-500">
+                    <td
+                      colSpan={currentUser?.role === "ADMIN" && activeScope === "organization" ? 8 : 7}
+                      className="px-5 py-8 text-center text-slate-500"
+                    >
                       Brak raportów spełniających kryteria.
                     </td>
                   </tr>
@@ -118,7 +190,23 @@ function HistoryContent() {
                             </span>
                           )}
                         </td>
-                        <td className="px-5 py-4 text-slate-500 dark:text-slate-400">{r.createdBy?.name || "Operator"}</td>
+                        {currentUser?.role === "ADMIN" && activeScope === "organization" && (
+                          <td className="px-5 py-4">
+                            <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1 font-mono text-[10px] font-semibold text-slate-700 dark:text-slate-300">
+                              {r.organization?.name || "Brak organizacji"}
+                            </span>
+                          </td>
+                        )}
+                        <td className="px-5 py-4 text-slate-500 dark:text-slate-400">
+                          <div className="space-y-0.5">
+                            <span className="font-medium text-slate-900 dark:text-white block">
+                              {r.createdBy?.name || "Operator"}
+                            </span>
+                            {r.createdBy?.email && (
+                              <span className="text-[10px] text-slate-400 block">{r.createdBy.email}</span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-5 py-4 text-slate-500 dark:text-slate-400">{new Date(r.createdAt).toLocaleDateString("pl-PL")}</td>
                         <td className="px-5 py-4 text-right">
                           <Link

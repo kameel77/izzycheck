@@ -1,22 +1,52 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, getFreshUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
+    const sessionUser = await getCurrentUser();
+    if (!sessionUser) {
       return NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 });
+    }
+
+    const freshUser = await getFreshUser(sessionUser.userId);
+    if (!freshUser || !freshUser.isActive) {
+      return NextResponse.json({ error: "Konto użytkownika jest nieaktywne lub nie istnieje." }, { status: 401 });
     }
 
     const { searchParams } = new URL(req.url);
     const searchVin = searchParams.get("vin")?.trim().toUpperCase();
+    const scope = searchParams.get("scope"); // "my" | "organization"
+    const filterOrgId = searchParams.get("organizationId");
 
-    // Strict RBAC: Operators see ONLY their own reports; Admin sees all
+    // Scoped RBAC access
     const whereClause: any = {};
 
-    if (user.role !== "ADMIN") {
-      whereClause.createdById = user.userId;
+    if (freshUser.role === "ADMIN") {
+      if (filterOrgId) {
+        whereClause.organizationId = filterOrgId;
+      }
+      if (scope === "my") {
+        whereClause.createdById = freshUser.id;
+      }
+    } else if (freshUser.role === "MANAGER") {
+      if (scope === "my") {
+        whereClause.createdById = freshUser.id;
+      } else {
+        // Manager views all reports in their organization
+        if (freshUser.organizationId) {
+          whereClause.organizationId = freshUser.organizationId;
+        } else {
+          whereClause.createdById = freshUser.id;
+        }
+      }
+    } else {
+      // USER / OPERATOR
+      if (freshUser.canViewOrgReports && scope === "organization" && freshUser.organizationId) {
+        whereClause.organizationId = freshUser.organizationId;
+      } else {
+        whereClause.createdById = freshUser.id;
+      }
     }
 
     if (searchVin) {
@@ -38,6 +68,8 @@ export async function GET(req: Request) {
         createdAt: true,
         updatedAt: true,
         createdById: true,
+        organizationId: true,
+        organization: { select: { id: true, name: true } },
         pdfGeneratedAt: true,
         pdfGeneratorVersion: true,
         createdBy: { select: { name: true, email: true } },

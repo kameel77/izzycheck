@@ -27,7 +27,10 @@ export async function POST(req: Request) {
     }
 
     // Query user strictly from Database
-    let user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    let user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      include: { organization: true },
+    });
 
     // Initial admin seeding from env if DB is empty and ENV credentials match
     if (!user && process.env.INITIAL_ADMIN_EMAIL && process.env.INITIAL_ADMIN_PASSWORD) {
@@ -41,12 +44,27 @@ export async function POST(req: Request) {
             passwordHash,
             role: "ADMIN",
           },
+          include: { organization: true },
         });
       }
     }
 
     if (!user) {
       return NextResponse.json({ error: "Nieprawidłowy e-mail lub hasło." }, { status: 401 });
+    }
+
+    if (!user.isActive) {
+      return NextResponse.json(
+        { error: "Twoje konto zostało zdeaktywowane. Skontaktuj się z administratorem systemu." },
+        { status: 403 }
+      );
+    }
+
+    if (user.role !== "ADMIN" && user.organization && !user.organization.isActive) {
+      return NextResponse.json(
+        { error: "Twoja organizacja została zablokowana. Skontaktuj się z administratorem systemu." },
+        { status: 403 }
+      );
     }
 
     const isValid = await comparePassword(password, user.passwordHash);
@@ -58,7 +76,8 @@ export async function POST(req: Request) {
       userId: user.id,
       email: user.email,
       name: user.name,
-      role: user.role as "OPERATOR" | "ADMIN",
+      role: user.role,
+      organizationId: user.organizationId || null,
     };
 
     const token = await createToken(tokenPayload);

@@ -1,6 +1,6 @@
 import React from "react";
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "../../../../../lib/auth.ts";
+import { getCurrentUser, getFreshUser } from "../../../../../lib/auth.ts";
 import { prisma } from "../../../../../lib/db.ts";
 import { buildReportPdfViewModel } from "../../../../../lib/pdf/report-pdf-view-model.ts";
 import pkg from "../../../../../package.json" with { type: "json" };
@@ -14,10 +14,13 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await getCurrentUser();
-    if (!user) {
+    const sessionUser = await getCurrentUser();
+    if (!sessionUser) {
       return NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 });
     }
+
+    const freshUser = await getFreshUser(sessionUser.userId).catch(() => null);
+    const effectiveUser = freshUser || sessionUser;
 
     const { id } = await params;
 
@@ -35,8 +38,17 @@ export async function GET(
       return NextResponse.json({ error: "Nie odnaleziono raportu w bazie danych." }, { status: 404 });
     }
 
-    // RBAC: ADMIN can view any report, OPERATOR only their own
-    if (user.role !== "ADMIN" && report.createdById !== user.userId) {
+    // Scoped RBAC: ADMIN, report owner, organization manager, or user with canViewOrgReports in same organization
+    const effectiveUserId = (effectiveUser as any).id || (effectiveUser as any).userId;
+    const isOwner = report.createdById === effectiveUserId;
+    const isAdmin = effectiveUser.role === "ADMIN";
+    const isOrgManager =
+      effectiveUser.role === "MANAGER" &&
+      Boolean(effectiveUser.organizationId && report.organizationId && effectiveUser.organizationId === report.organizationId);
+    const isOrgUserWithPerm =
+      Boolean((effectiveUser as any).canViewOrgReports && effectiveUser.organizationId && report.organizationId && effectiveUser.organizationId === report.organizationId);
+
+    if (!isOwner && !isAdmin && !isOrgManager && !isOrgUserWithPerm) {
       return NextResponse.json(
         { error: "Dostęp zabroniony. Nie posiadasz uprawnień do pobierania tego raportu." },
         { status: 403 }
@@ -77,8 +89,8 @@ export async function GET(
     // Record Audit Event (no raw XML or PDF content)
     await prisma.auditEvent.create({
       data: {
-        userId: user.userId,
-        userEmail: user.email,
+        userId: sessionUser.userId,
+        userEmail: sessionUser.email,
         action: "DOWNLOAD_REPORT_PDF",
         resource: `REPORT:${report.id}`,
         metadataJson: JSON.stringify({

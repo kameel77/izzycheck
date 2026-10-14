@@ -8,8 +8,10 @@ generator client {
 }
 
 enum Role {
-  OPERATOR
   ADMIN
+  MANAGER
+  USER
+  OPERATOR
 }
 
 enum ReportModuleId {
@@ -27,17 +29,43 @@ enum ModuleStatus {
   FAILED
 }
 
-model User {
-  id           String       @id @default(uuid())
-  email        String       @unique
+model Organization {
+  id           String    @id @default(uuid())
   name         String
-  passwordHash String
-  role         Role         @default(OPERATOR)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  nip          String    @unique
+  street       String
+  postalCode   String
+  city         String
+  country      String    @default("PL")
+  billingEmail String
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  users        User[]
   reports      Report[]
-  auditEvents  AuditEvent[]
 
+  @@map("organizations")
+}
+
+model User {
+  id                      String        @id @default(uuid())
+  email                   String        @unique
+  name                    String
+  passwordHash            String
+  role                    Role          @default(USER)
+  isActive                Boolean       @default(true)
+  organizationId          String?
+  organization            Organization? @relation(fields: [organizationId], references: [id])
+  canGenerateValuation    Boolean       @default(false)
+  canGenerateClaimCheck   Boolean       @default(false)
+  canGenerateClaimDetails Boolean       @default(false)
+  canViewOrgReports       Boolean       @default(false)
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+  reports                 Report[]
+  auditEvents             AuditEvent[]
+
+  @@index([organizationId])
   @@map("users")
 }
 
@@ -58,12 +86,15 @@ model Report {
   updatedAt             DateTime             @updatedAt
   createdById           String
   createdBy             User                 @relation(fields: [createdById], references: [id])
+  organizationId        String?
+  organization          Organization?        @relation(fields: [organizationId], references: [id])
   moduleResults         ReportModuleResult[]
   vehicleSnapshot       VehicleSnapshot?
   damageClaims          DamageClaim[]
 
   @@index([vin])
   @@index([createdById])
+  @@index([organizationId])
   @@unique([createdById, idempotencyKey])
   @@index([createdById, requestHash])
   @@map("reports")

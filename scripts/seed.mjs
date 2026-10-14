@@ -29,6 +29,32 @@ async function main() {
   });
 
   console.log(`Initial admin user successfully configured for: ${admin.email}`);
+
+  // Seed default Organization: Izzy Lease Sp. z o.o.
+  const defaultOrg = await prisma.organization.upsert({
+    where: { nip: "6871964402" },
+    update: {
+      name: "Izzy Lease Sp. z o.o.",
+      street: "ul. Domaniewska 37",
+      postalCode: "02-672",
+      city: "Warszawa",
+      country: "PL",
+      billingEmail: "kontakt@izzylease.pl",
+      isActive: true,
+    },
+    create: {
+      name: "Izzy Lease Sp. z o.o.",
+      nip: "6871964402",
+      street: "ul. Domaniewska 37",
+      postalCode: "02-672",
+      city: "Warszawa",
+      country: "PL",
+      billingEmail: "kontakt@izzylease.pl",
+      isActive: true,
+    },
+  });
+
+  console.log(`Default organization configured: ${defaultOrg.name} (NIP: ${defaultOrg.nip})`);
 }
 
 main()
