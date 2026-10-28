@@ -64,11 +64,26 @@ async function readJson(res: Response): Promise<PayuJson> {
   }
 }
 
+const REQUEST_TIMEOUT_MS = 15000;
+
 export function createPayuClient(config: PayuConfig, fetchImpl: typeof fetch = fetch) {
   let cachedToken: { value: string; expiresAt: number } | null = null;
 
+  /** fetch with a hard timeout; timeouts/aborts surface as PayuError. */
+  async function send(url: string, init: RequestInit): Promise<Response> {
+    try {
+      return await fetchImpl(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    } catch (err) {
+      const name = (err as { name?: string } | null)?.name;
+      if (name === "TimeoutError" || name === "AbortError") {
+        throw new PayuError("PayU nie odpowiedziało w czasie.");
+      }
+      throw err;
+    }
+  }
+
   async function requestToken(): Promise<string> {
-    const res = await fetchImpl(`${config.baseUrl}/pl/standard/user/oauth/authorize`, {
+    const res = await send(`${config.baseUrl}/pl/standard/user/oauth/authorize`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -93,16 +108,17 @@ export function createPayuClient(config: PayuConfig, fetchImpl: typeof fetch = f
 
   /** Authorized request; on 401 refreshes the token and retries exactly once. */
   async function authorized(url: string, init: RequestInit): Promise<Response> {
-    const send = async (forceRefresh: boolean) => {
+    const attempt = async (forceRefresh: boolean) => {
       const token = await getToken(forceRefresh);
-      return fetchImpl(url, {
+      return send(url, {
         ...init,
         headers: { ...(init.headers as Record<string, string>), Authorization: `Bearer ${token}` },
       });
     };
-    const first = await send(false);
+    const first = await attempt(false);
     if (first.status !== 401) return first;
-    return send(true);
+    await first.body?.cancel().catch(() => {});
+    return attempt(true);
   }
 
   function failure(res: Response, data: PayuJson, fallback: string): PayuError {
@@ -160,11 +176,21 @@ export function createPayuClient(config: PayuConfig, fetchImpl: typeof fetch = f
     if (!res.ok) throw failure(res, data, "PayU: nie udało się pobrać zamówienia");
     const order = Array.isArray(data?.orders) ? data.orders[0] : undefined;
     if (!order) throw new PayuError("PayU: brak zamówienia w odpowiedzi", { status: res.status });
+    const totalAmount = typeof order.totalAmount === "string" && order.totalAmount.trim() !== "" ? Number(order.totalAmount) : order.totalAmount;
+    if (
+      typeof totalAmount !== "number" ||
+      !Number.isFinite(totalAmount) ||
+      typeof order.status !== "string" ||
+      typeof order.currencyCode !== "string" ||
+      typeof order.extOrderId !== "string"
+    ) {
+      throw new PayuError("PayU: nieprawidłowa odpowiedź zamówienia", { status: res.status });
+    }
     return {
-      status: String(order.status),
-      totalAmount: Number(order.totalAmount),
-      currencyCode: String(order.currencyCode),
-      extOrderId: String(order.extOrderId ?? ""),
+      status: order.status,
+      totalAmount,
+      currencyCode: order.currencyCode,
+      extOrderId: order.extOrderId,
     };
   }
 
@@ -194,6 +220,7 @@ export function parsePayuSignatureHeader(
 
 /** Verifies OpenPayu-Signature: hex(hash(rawBody + secondKey)) in constant time. */
 export function verifyPayuSignature(rawBody: string, header: string | null, secondKey: string): boolean {
+  if (!secondKey) return false;
   const parsed = parsePayuSignatureHeader(header);
   if (!parsed) return false;
   const expected = createHash(parsed.algorithm === "MD5" ? "md5" : "sha256")

@@ -178,11 +178,11 @@ test("createOrder: 200 without SUCCESS is a PayuError", async () => {
   const { fetchImpl } = mockFetch((call) =>
     isTokenCall(call)
       ? json({ access_token: "tok-1", expires_in: 43199 })
-      : json({ status: { statusCode: "WARNING_CONTINUE_3_DS" }, orderId: "P", redirectUri: "u" }, 200),
+      : json({ status: { statusCode: "WARNING_CONTINUE_3DS" }, orderId: "P", redirectUri: "u" }, 200),
   );
   await assert.rejects(
     () => createPayuClient(config, fetchImpl).createOrder(orderInput),
-    (err: unknown) => err instanceof PayuError && err.payuStatusCode === "WARNING_CONTINUE_3_DS",
+    (err: unknown) => err instanceof PayuError && err.payuStatusCode === "WARNING_CONTINUE_3DS",
   );
 });
 
@@ -316,4 +316,72 @@ test("verifyPayuSignature rejects a missing header or unknown algorithm", () => 
   const sig = hash("md5", body + "second-key");
   assert.equal(verifyPayuSignature(body, null, "second-key"), false);
   assert.equal(verifyPayuSignature(body, `signature=${sig};algorithm=SHA-512`, "second-key"), false);
+});
+
+test("verifyPayuSignature rejects everything when secondKey is empty", () => {
+  const forged = hash("md5", body);
+  assert.equal(verifyPayuSignature(body, `signature=${forged};algorithm=MD5`, ""), false);
+});
+
+// --- hardening ---
+
+test("all PayU fetches carry a timeout signal", async () => {
+  const { calls, fetchImpl } = mockFetch((call) => {
+    if (isTokenCall(call)) return json({ access_token: "t", expires_in: 43199 });
+    return call.init.method === "GET"
+      ? json({ orders: [{ status: "NEW", totalAmount: "1", currencyCode: "PLN", extOrderId: "e" }] })
+      : json({ status: { statusCode: "SUCCESS" }, orderId: "P", redirectUri: "u" }, 302);
+  });
+  const client = createPayuClient(config, fetchImpl);
+  await client.createOrder(orderInput);
+  await client.getOrder("P");
+  assert.equal(calls.length, 3);
+  for (const call of calls) assert.ok(call.init.signal instanceof AbortSignal);
+});
+
+test("a timeout surfaces as PayuError", async () => {
+  for (const name of ["TimeoutError", "AbortError"]) {
+    const fetchImpl = (async () => {
+      throw new DOMException("timed out", name);
+    }) as typeof fetch;
+    await assert.rejects(
+      () => createPayuClient(config, fetchImpl).createOrder(orderInput),
+      (err: unknown) => err instanceof PayuError && err.message === "PayU nie odpowiedziało w czasie.",
+    );
+  }
+});
+
+test("401 retry consumes the first response body", async () => {
+  let orderCalls = 0;
+  let cancelled = false;
+  const { fetchImpl } = mockFetch((call) => {
+    if (isTokenCall(call)) return json({ access_token: "tok", expires_in: 43199 });
+    orderCalls += 1;
+    if (orderCalls > 1) return json({ status: { statusCode: "SUCCESS" }, orderId: "P", redirectUri: "u" }, 302);
+    const res = json({ status: { statusCode: "UNAUTHORIZED" } }, 401);
+    const originalCancel = res.body!.cancel.bind(res.body);
+    res.body!.cancel = (reason?: unknown) => {
+      cancelled = true;
+      return originalCancel(reason);
+    };
+    return res;
+  });
+  await createPayuClient(config, fetchImpl).createOrder(orderInput);
+  assert.equal(cancelled, true);
+});
+
+test("getOrder rejects malformed order payloads", async () => {
+  const bad: unknown[] = [
+    { orders: [{ status: "NEW", currencyCode: "PLN", extOrderId: "e" }] },
+    { orders: [{ status: "NEW", totalAmount: "abc", currencyCode: "PLN", extOrderId: "e" }] },
+    { orders: [{ totalAmount: "1", currencyCode: "PLN", extOrderId: "e" }] },
+    { orders: [{ status: "NEW", totalAmount: "1", extOrderId: "e" }] },
+    { orders: [{ status: "NEW", totalAmount: "1", currencyCode: "PLN" }] },
+  ];
+  for (const payload of bad) {
+    const { fetchImpl } = mockFetch((call) =>
+      isTokenCall(call) ? json({ access_token: "t", expires_in: 43199 }) : json(payload),
+    );
+    await assert.rejects(() => createPayuClient(config, fetchImpl).getOrder("P1"), PayuError);
+  }
 });
