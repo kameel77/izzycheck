@@ -583,6 +583,47 @@ describe("applyPayuStatus COMPLETED", () => {
   });
 });
 
+describe("applyPayuStatus ignores non-PayU orders", () => {
+  /** A proforma order: same lines and total as a PayU order, but paid by transfer (admin marks it paid). */
+  async function placeProforma(ctx: Ctx, status: "PENDING_PAYMENT" | "CANCELED" | "FAILED" = "PENDING_PAYMENT") {
+    const order = await placeOrder(ctx);
+    return testPrisma.order.update({
+      where: { id: order.id },
+      data: { paymentMethod: "PROFORMA", payuOrderId: null, status, proformaFakturowniaId: `PF-${randomUUID()}`, proformaNumber: "PRO/1/10/2026" },
+    });
+  }
+
+  test("a COMPLETED notification for a PROFORMA order with a matching amount changes nothing and books no credits", async () => {
+    const ctx = await setup();
+    for (const status of ["PENDING_PAYMENT", "CANCELED", "FAILED"] as const) {
+      const order = await placeProforma(ctx, status);
+
+      // ALREADY_PAID is the result for any COMPLETED notification that moved nothing.
+      assert.equal(await applyPayuStatus(testPrisma, completed(order, { payuOrderId: "PAYU-X" })), "ALREADY_PAID", status);
+
+      const after = await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } });
+      assert.equal(after.status, status, status);
+      assert.equal(after.paidAt, null, status);
+      assert.equal(after.payuOrderId, null, status);
+      assert.equal(after.invoiceStatus, "NOT_REQUIRED", status);
+      assert.equal(await testPrisma.creditLedgerEntry.count({ where: { orderId: order.id } }), 0, status);
+    }
+    assert.equal(await readBalance(ctx.org.id, "VALUATION"), 0);
+    assert.equal(await readBalance(ctx.org.id, "CLAIM_DETAILS"), 0);
+  });
+
+  test("CANCELED and REJECTED notifications leave a pending PROFORMA order alone", async () => {
+    const ctx = await setup();
+    const order = await placeProforma(ctx);
+
+    assert.equal(await applyPayuStatus(testPrisma, completed(order, { status: "CANCELED" })), "CANCELED");
+    assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PENDING_PAYMENT");
+
+    assert.equal(await applyPayuStatus(testPrisma, completed(order, { status: "REJECTED" })), "FAILED");
+    assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PENDING_PAYMENT");
+  });
+});
+
 describe("applyPayuStatus invoice outbox", () => {
   // Default behaviour must not depend on the host's INVOICE_SANDBOX_ORDERS; the opt-in test sets it itself.
   let previousSandboxFlag: string | undefined;

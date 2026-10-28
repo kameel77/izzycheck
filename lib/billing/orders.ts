@@ -308,8 +308,9 @@ export async function applyPayuStatus(
       const locked = await tx.$queryRaw<{ status: OrderStatus }[]>`SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE`;
       const previousStatus = locked[0]?.status;
       const now = new Date();
+      // PayU only: a proforma order is paid by the admin (markProformaPaid), never by a PayU notification.
       const { count } = await tx.order.updateMany({
-        where: { id: orderId, status: { in: PAYABLE_STATUSES } },
+        where: { id: orderId, paymentMethod: "PAYU", status: { in: PAYABLE_STATUSES } },
         data: {
           status: "PAID",
           paidAt: now,
@@ -338,7 +339,7 @@ export async function applyPayuStatus(
 
   if (status === "CANCELED") {
     await db.order.updateMany({
-      where: { id: orderId, status: "PENDING_PAYMENT" },
+      where: { id: orderId, paymentMethod: "PAYU", status: "PENDING_PAYMENT" },
       data: { status: "CANCELED" },
     });
     return "CANCELED";
@@ -346,7 +347,7 @@ export async function applyPayuStatus(
 
   if (status === "REJECTED") {
     await db.order.updateMany({
-      where: { id: orderId, status: "PENDING_PAYMENT" },
+      where: { id: orderId, paymentMethod: "PAYU", status: "PENDING_PAYMENT" },
       data: { status: "FAILED" },
     });
     return "FAILED";
