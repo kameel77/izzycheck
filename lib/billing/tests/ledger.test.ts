@@ -8,8 +8,10 @@ describe("buildLedgerWhere", () => {
   test("USER asking for org scope is treated as mine", () => {
     assert.deepEqual(buildLedgerWhere({ userId: "u1", role: "USER", organizationId: ORG }, "org"), {
       organizationId: ORG,
-      type: "USAGE",
-      userId: "u1",
+      OR: [
+        { type: "USAGE", userId: "u1" },
+        { type: "PURCHASE", userId: "u1" },
+      ],
     });
   });
 
@@ -19,11 +21,13 @@ describe("buildLedgerWhere", () => {
     });
   });
 
-  test("MANAGER with mine scope sees only own usage", () => {
+  test("MANAGER with mine scope sees only own usage and own purchases", () => {
     assert.deepEqual(buildLedgerWhere({ userId: "m1", role: "MANAGER", organizationId: ORG }, "mine"), {
       organizationId: ORG,
-      type: "USAGE",
-      userId: "m1",
+      OR: [
+        { type: "USAGE", userId: "m1" },
+        { type: "PURCHASE", userId: "m1" },
+      ],
     });
   });
 

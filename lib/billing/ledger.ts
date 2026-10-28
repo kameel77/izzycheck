@@ -11,14 +11,20 @@ export interface LedgerViewer {
 /**
  * Filter for the credit usage history. Always limited to the viewer's organization;
  * the organization-wide scope (usage and manual adjustments of everyone) is only for
- * MANAGER and ADMIN with an organization, everybody else gets their own usage.
+ * MANAGER and ADMIN with an organization, everybody else gets their own usage and purchases.
  */
 export function buildLedgerWhere(viewer: LedgerViewer, scope: LedgerScope): Prisma.CreditLedgerEntryWhereInput {
   const canSeeOrg = viewer.role === "MANAGER" || viewer.role === "ADMIN";
   if (scope === "org" && canSeeOrg) {
     return { organizationId: viewer.organizationId };
   }
-  return { organizationId: viewer.organizationId, type: "USAGE", userId: viewer.userId };
+  return {
+    organizationId: viewer.organizationId,
+    OR: [
+      { type: "USAGE", userId: viewer.userId },
+      { type: "PURCHASE", userId: viewer.userId },
+    ],
+  };
 }
 
 /** Shape of a ledger entry returned by the credit history endpoints. */
