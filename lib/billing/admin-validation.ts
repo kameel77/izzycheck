@@ -3,6 +3,7 @@ import type { CreditType } from "@prisma/client";
 const CREDIT_TYPES: readonly CreditType[] = ["VALUATION", "CLAIM_DETAILS"];
 const MAX_ADJUSTMENT = 100000;
 const MIN_NOTE_LENGTH = 3;
+const MAX_NOTE_LENGTH = 500;
 
 export type AdjustmentParseResult =
   | { ok: true; value: { creditType: CreditType; amount: number; note: string } }
@@ -25,6 +26,9 @@ export function parseAdjustment(body: unknown): AdjustmentParseResult {
   const note = typeof input.note === "string" ? input.note.trim() : "";
   if (note.length < MIN_NOTE_LENGTH) {
     return { ok: false, error: "Podaj powód korekty (min. 3 znaki)." };
+  }
+  if (note.length > MAX_NOTE_LENGTH) {
+    return { ok: false, error: "Powód korekty może mieć maks. 500 znaków." };
   }
 
   return { ok: true, value: { creditType, amount, note } };

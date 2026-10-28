@@ -100,15 +100,21 @@ export async function POST(
       throw err;
     }
 
-    await prisma.auditEvent.create({
-      data: {
-        userId: admin.id,
-        userEmail: admin.email,
-        action: "ADJUST_CREDITS",
-        resource: `Organization:${id}`,
-        metadataJson: JSON.stringify({ organizationId: id, creditType, amount, note }),
-      },
-    });
+    // The adjustment is already committed (and recorded in the ledger); a failed audit write
+    // must not turn it into a 500, otherwise a retry would apply the adjustment twice.
+    try {
+      await prisma.auditEvent.create({
+        data: {
+          userId: admin.id,
+          userEmail: admin.email,
+          action: "ADJUST_CREDITS",
+          resource: `Organization:${id}`,
+          metadataJson: JSON.stringify({ organizationId: id, creditType, amount, note }),
+        },
+      });
+    } catch (auditErr) {
+      console.error("[ADMIN_CREDITS_AUDIT_ERROR]", auditErr);
+    }
 
     return NextResponse.json({ success: true, balance });
   } catch (err: any) {

@@ -40,6 +40,18 @@ describe("parseAdjustment", () => {
     });
   });
 
+  test("note of 500 characters is accepted, 501 is rejected", () => {
+    assert.equal(parseAdjustment({ creditType: "VALUATION", amount: 1, note: "a".repeat(500) }).ok, true);
+    assert.deepEqual(parseAdjustment({ creditType: "VALUATION", amount: 1, note: "a".repeat(501) }), {
+      ok: false,
+      error: "Powód korekty może mieć maks. 500 znaków.",
+    });
+  });
+
+  test("the 500 character cap applies after trim", () => {
+    assert.equal(parseAdjustment({ creditType: "VALUATION", amount: 1, note: `  ${"a".repeat(500)}  ` }).ok, true);
+  });
+
   test("missing or non-string note is rejected", () => {
     assert.equal(parseAdjustment({ creditType: "VALUATION", amount: 1 }).ok, false);
     assert.equal(parseAdjustment({ creditType: "VALUATION", amount: 1, note: 123 }).ok, false);
