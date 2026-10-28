@@ -20,7 +20,7 @@ export type Clock = () => Date;
 const systemClock: Clock = () => new Date();
 
 /** An ISSUING claim older than this is considered abandoned (the worker died) and may be taken over. */
-const CLAIM_TIMEOUT_MS = 10 * 60_000;
+export const CLAIM_TIMEOUT_MS = 10 * 60_000;
 const RETRY_BASE_MS = 5 * 60_000;
 const RETRY_MAX_MS = 24 * 60 * 60_000;
 const MAX_ATTEMPTS = 10;
@@ -142,6 +142,7 @@ export async function processInvoice(
     if (saved.count === 0) {
       console.error("[INVOICE_CLAIM_LOST]", { orderId, createdInvoiceId: created.id, createdNumber: created.number });
       await parkCreatedInvoice(db, orderId, created.number);
+      await noteExtraInvoice(db, orderId, created.id, created.number);
       return "NEEDS_ATTENTION";
     }
   } catch (error) {
@@ -171,6 +172,28 @@ async function parkCreatedInvoice(db: PrismaClient, orderId: string, invoiceNumb
       invoiceClaimedAt: null,
     },
   });
+}
+
+/**
+ * The success write lost the claim and the row was ISSUED by another worker: this worker's invoice is an extra
+ * one in Fakturownia. Only a note is appended to invoiceLastError (compare-and-set on the text read, only while
+ * the row is still ISSUED); no other field is touched.
+ */
+async function noteExtraInvoice(db: PrismaClient, orderId: string, createdInvoiceId: string, createdNumber: string): Promise<void> {
+  try {
+    const row = await db.order.findUnique({
+      where: { id: orderId },
+      select: { invoiceStatus: true, fakturowniaInvoiceId: true, invoiceLastError: true },
+    });
+    if (!row || row.invoiceStatus !== "ISSUED" || row.fakturowniaInvoiceId === createdInvoiceId) return;
+    const note = `Wykryto dodatkową fakturę ${createdNumber} — sprawdź w Fakturowni.`;
+    await db.order.updateMany({
+      where: { id: orderId, invoiceStatus: "ISSUED", invoiceLastError: row.invoiceLastError },
+      data: { invoiceLastError: row.invoiceLastError ? `${row.invoiceLastError} ${note}` : note },
+    });
+  } catch (error) {
+    console.error("[INVOICE_ISSUE_ERROR]", { orderId, message: describeError(error), createdInvoiceId, createdNumber });
+  }
 }
 
 async function recordIssueFailure(
@@ -331,9 +354,9 @@ export type BillingCronResult = {
 };
 
 /**
- * One billing cron pass. Each step is independent and skipped when its client is not configured:
- * (a) issue/retry due invoices, (b) refresh KSeF statuses and retry invoice e-mails, (c) poll PayU for lost
- * payments (an order paid here gets its invoice on the next pass). No new unit of work starts after 45 s.
+ * One billing cron pass. Each step is independent and skipped when its client is not configured. Order:
+ * (c) poll PayU for lost payments, (a) issue/retry due invoices (so an order paid by the poll is invoiced in
+ * the same pass), (b) refresh KSeF statuses and retry invoice e-mails. No new unit of work starts after 45 s.
  */
 export async function runBillingCron(
   db: PrismaClient,
@@ -355,7 +378,34 @@ export async function runBillingCron(
     return result.budgetExhausted;
   };
 
-  if (invoiceClient) {
+  if (payuClient) {
+    const listedAt = clock();
+    const lost = await db.order.findMany({
+      where: {
+        status: "PENDING_PAYMENT",
+        payuOrderId: { not: null },
+        createdAt: { lt: new Date(listedAt.getTime() - CRON_RECHECK_MS), gt: new Date(listedAt.getTime() - PAYU_SYNC_MAX_AGE_MS) },
+        updatedAt: { lt: new Date(listedAt.getTime() - CRON_RECHECK_MS) },
+      },
+      select: { id: true },
+      orderBy: { updatedAt: "asc" },
+      take: CRON_BATCH_SIZE,
+    });
+    for (const { id } of lost) {
+      if (outOfBudget()) break;
+      try {
+        // Unpaid orders stay PENDING_PAYMENT and would be polled on every pass (starving newer ones): touching
+        // updatedAt first both rotates the batch and enforces the 15 min pause between polls of one order.
+        await db.order.updateMany({ where: { id, status: "PENDING_PAYMENT" }, data: { updatedAt: clock() } });
+        const sync = await syncOrderWithPayu(db, id, payuClient);
+        if (sync.synced) result.ordersSynced += 1;
+      } catch (error) {
+        console.error("[BILLING_CRON]", { step: "payu-sync", orderId: id, message: describeError(error) });
+      }
+    }
+  }
+
+  if (invoiceClient && !outOfBudget()) {
     const due = await db.order.findMany({
       where: dueWhere(clock()),
       select: { id: true },
@@ -423,33 +473,6 @@ export async function runBillingCron(
         }
       } catch (error) {
         console.error("[BILLING_CRON]", { step: "ksef", orderId: order.id, message: describeError(error) });
-      }
-    }
-  }
-
-  if (payuClient && !outOfBudget()) {
-    const listedAt = clock();
-    const lost = await db.order.findMany({
-      where: {
-        status: "PENDING_PAYMENT",
-        payuOrderId: { not: null },
-        createdAt: { lt: new Date(listedAt.getTime() - CRON_RECHECK_MS), gt: new Date(listedAt.getTime() - PAYU_SYNC_MAX_AGE_MS) },
-        updatedAt: { lt: new Date(listedAt.getTime() - CRON_RECHECK_MS) },
-      },
-      select: { id: true },
-      orderBy: { updatedAt: "asc" },
-      take: CRON_BATCH_SIZE,
-    });
-    for (const { id } of lost) {
-      if (outOfBudget()) break;
-      try {
-        // Unpaid orders stay PENDING_PAYMENT and would be polled on every pass (starving newer ones): touching
-        // updatedAt first both rotates the batch and enforces the 15 min pause between polls of one order.
-        await db.order.updateMany({ where: { id, status: "PENDING_PAYMENT" }, data: { updatedAt: clock() } });
-        const sync = await syncOrderWithPayu(db, id, payuClient);
-        if (sync.synced) result.ordersSynced += 1;
-      } catch (error) {
-        console.error("[BILLING_CRON]", { step: "payu-sync", orderId: id, message: describeError(error) });
       }
     }
   }

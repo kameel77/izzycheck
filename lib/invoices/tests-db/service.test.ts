@@ -734,6 +734,38 @@ describe("runBillingCron", () => {
     assert.equal((await read(waiting.id)).status, "PENDING_PAYMENT");
   });
 
+  test("runs the PayU sync first, so an order paid by it is invoiced in the same pass", async () => {
+    const ctx = await seed();
+    const lost = await createOrder(ctx, {
+      status: "PENDING_PAYMENT",
+      invoiceStatus: "NOT_REQUIRED",
+      payuOrderId: `PAYU-${randomUUID()}`,
+      extra: { createdAt: new Date(Date.now() - 60 * MIN), updatedAt: new Date(Date.now() - 60 * MIN) },
+    });
+    const steps: string[] = [];
+    const payu = stubPayu(async () => {
+      steps.push("payu");
+      return { status: "COMPLETED", totalAmount: 2460, currencyCode: "PLN", extOrderId: lost.id };
+    });
+    const { client } = stubClient({
+      createInvoice: async () => {
+        steps.push("invoice");
+        return { id: `INV-${randomUUID()}`, number: "FV/1", token: "t" };
+      },
+      getInvoiceKsef: async () => {
+        steps.push("ksef");
+        return { govStatus: "ok", govId: null, verificationLink: null, errors: [] };
+      },
+    });
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: payu }));
+    assert.deepEqual(steps.slice(0, 2), ["payu", "invoice"]);
+    assert.equal(result.ordersSynced, 1);
+    assert.equal(result.invoicesProcessed, 1);
+    const row = await read(lost.id);
+    assert.equal(row.status, "PAID");
+    assert.equal(row.invoiceStatus, "ISSUED");
+  });
+
   test("PayU sync still runs when Fakturownia is not configured", async () => {
     const ctx = await seed();
     const lost = await createOrder(ctx, {
@@ -875,6 +907,9 @@ describe("claim ownership", () => {
       assert.equal(row.fakturowniaInvoiceId, "INV-B");
       assert.equal(row.invoiceNumber, "FV/B");
       assert.equal(row.invoiceToken, "tok-b");
+      // only a note about the extra invoice is appended; nothing else changes
+      assert.equal(row.invoiceLastError, "Wykryto dodatkową fakturę FV/A — sprawdź w Fakturowni.");
+      assert.equal(row.invoiceAttempts, 2);
       assert.deepEqual(s.emailsA, []);
     } finally {
       s.restore();
