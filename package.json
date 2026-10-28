@@ -9,7 +9,7 @@
     "lint": "tsc --noEmit",
     "db:push": "prisma db push",
     "db:seed": "node scripts/seed.mjs",
-    "test": "node --import tsx/esm --test lib/audatex/tests/*.test.ts lib/billing/tests/*.test.ts lib/damage/tests/*.test.ts lib/payments/tests/*.test.ts lib/pdf/tests/*.test.ts lib/reports/tests/*.test.ts lib/test-db/tests/*.test.ts lib/validators/tests/*.test.ts",
+    "test": "node --import tsx/esm --test lib/api-clients/tests/*.test.ts lib/audatex/tests/*.test.ts lib/billing/tests/*.test.ts lib/damage/tests/*.test.ts lib/integrations/mamygo/tests/*.test.ts lib/payments/tests/*.test.ts lib/pdf/tests/*.test.ts lib/reports/tests/*.test.ts lib/test-db/tests/*.test.ts lib/validators/tests/*.test.ts",
     "test:db": "sh scripts/test-db.sh"
   },
   "dependencies": {
