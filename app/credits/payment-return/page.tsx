@@ -8,7 +8,7 @@ import { CheckCircle2, Clock, Loader2, XCircle } from "lucide-react";
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 60_000;
 
-type ReturnState = "pending" | "paid" | "failed" | "timeout" | "notFound";
+type ReturnState = "pending" | "paid" | "failed" | "timeout" | "notFound" | "unauthorized";
 
 function PaymentReturn() {
   const orderId = useSearchParams().get("orderId");
@@ -26,7 +26,9 @@ function PaymentReturn() {
       try {
         const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}`);
         if (cancelled) return;
-        if (res.status === 404) {
+        if (res.status === 401) {
+          next = "unauthorized";
+        } else if (res.status === 404) {
           next = "notFound";
         } else if (res.ok) {
           const order = await res.json();
@@ -93,6 +95,21 @@ function PaymentReturn() {
               kredytów.
             </p>
             {backLink}
+          </>
+        )}
+        {state === "unauthorized" && (
+          <>
+            <Clock className="mx-auto h-8 w-8 text-amber-500" />
+            <p className="mt-4 text-sm text-slate-700 dark:text-slate-300">
+              Sesja wygasła. Zaloguj się ponownie, aby sprawdzić status płatności. Kredyty zostaną dodane automatycznie
+              po potwierdzeniu płatności.
+            </p>
+            <Link
+              href="/login"
+              className="mt-5 inline-flex items-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-500 transition-colors"
+            >
+              Zaloguj się
+            </Link>
           </>
         )}
         {state === "notFound" && (

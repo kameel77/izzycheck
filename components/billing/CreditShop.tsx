@@ -142,7 +142,13 @@ export default function CreditShop() {
     );
   }
 
-  if (packages.length === 0) return null;
+  if (packages.length === 0) {
+    return (
+      <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 text-sm text-blue-800 dark:text-blue-200">
+        Brak dostępnych pakietów. Skontaktuj się z opiekunem Izzy Lease.
+      </div>
+    );
+  }
 
   const paymentsEnabled = data.paymentsEnabled;
   const cartError = cart && "error" in cart ? cart.error : null;
@@ -216,7 +222,7 @@ export default function CreditShop() {
                         type="button"
                         aria-label={`Zmniejsz ilość: ${pkg.name}`}
                         onClick={() => setQuantity(pkg.id, quantity - 1)}
-                        disabled={quantity <= 0 || submitting}
+                        disabled={quantity <= 0 || submitting || !paymentsEnabled}
                         className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-40 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700 transition-colors"
                       >
                         <Minus className="h-4 w-4" />
@@ -228,7 +234,7 @@ export default function CreditShop() {
                         max={MAX_LINE_QUANTITY}
                         aria-label={`Ilość: ${pkg.name}`}
                         value={quantity}
-                        disabled={submitting}
+                        disabled={submitting || !paymentsEnabled}
                         onChange={(e) => setQuantity(pkg.id, e.target.valueAsNumber)}
                         className="h-9 w-16 rounded-xl border border-slate-200 bg-white text-center text-sm font-semibold text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                       />
@@ -236,7 +242,7 @@ export default function CreditShop() {
                         type="button"
                         aria-label={`Zwiększ ilość: ${pkg.name}`}
                         onClick={() => setQuantity(pkg.id, quantity + 1)}
-                        disabled={quantity >= MAX_LINE_QUANTITY || submitting}
+                        disabled={quantity >= MAX_LINE_QUANTITY || submitting || !paymentsEnabled}
                         className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-40 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700 transition-colors"
                       >
                         <Plus className="h-4 w-4" />
@@ -250,7 +256,7 @@ export default function CreditShop() {
         );
       })}
 
-      {(pricedCart || cartError) && (
+      {paymentsEnabled && (pricedCart || cartError) && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Podsumowanie
