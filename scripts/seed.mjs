@@ -58,6 +58,7 @@ async function main() {
       country: "PL",
       billingEmail: "kontakt@izzylease.pl",
       isActive: true,
+      billingMode: "UNLIMITED",
     },
   });
 

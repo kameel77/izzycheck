@@ -10,7 +10,13 @@ For the longer research rationale and task-level detail, also read:
 
 `../../.hermes/plans/2026-08-06_134839-izzycheck-szkody-wizualizacja-pdf-prd.md`
 
-Implement **only** its approved scope: Audatex damage normalisation, two SVG damage views, category legend, controlled server-side PDF download and tests.
+Current work: prepaid report credits per organization. Read the credits spec and the implementation plan (alongside the PRD below):
+
+`../../business/product/SPEC-kredyty-platnosci-2026-10-28.md`
+
+`../docs/PLAN-kredyty-faza-1-2026-10-28.md`
+
+For the PRD above, implement **only** its approved scope: Audatex damage normalisation, two SVG damage views, category legend, controlled server-side PDF download and tests.
 
 ## Non-negotiable constraints
 
@@ -23,4 +29,4 @@ Implement **only** its approved scope: Audatex damage normalisation, two SVG dam
 
 ## Required verification
 
-Run `npm test` and `npm run build`; render a fixture PDF to images and visually inspect markers, legend, pagination and Polish diacritics before declaring the task complete.
+Run `npm test`, `npm run test:db` (real Postgres via Docker, needed for credit logic) and `npm run build`; render a fixture PDF to images and visually inspect markers, legend, pagination and Polish diacritics before declaring the task complete.
