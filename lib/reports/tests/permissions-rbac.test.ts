@@ -74,7 +74,9 @@ describe("RBAC & Fine-Grained Permissions for Module Execution", () => {
         updateMany: async () => ({ count: 1 }),
         update: async () => ({ id: "m-check", moduleId: "CLAIM_CHECK", status: "SUCCEEDED" }),
       },
+      damageClaim: { deleteMany: async () => ({ count: 0 }) },
       auditEvent: { create: async () => ({ id: "audit-1" }) },
+      $transaction: async (fn: any) => fn(mockPrisma),
     };
 
     const mockHistAdapter = {
@@ -102,7 +104,9 @@ describe("RBAC & Fine-Grained Permissions for Module Execution", () => {
         updateMany: async () => ({ count: 1 }),
         update: async () => ({ id: "m-check", moduleId: "CLAIM_CHECK", status: "SUCCEEDED" }),
       },
+      damageClaim: { deleteMany: async () => ({ count: 0 }) },
       auditEvent: { create: async () => ({ id: "audit-1" }) },
+      $transaction: async (fn: any) => fn(mockPrisma),
     };
 
     const mockHistAdapter = {

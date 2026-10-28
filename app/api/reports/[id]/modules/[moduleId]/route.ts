@@ -79,6 +79,8 @@ export async function POST(
         {
           error: err.message,
           isNonRetryable: err.isNonRetryable,
+          ...(err.code ? { code: err.code } : {}),
+          ...(err.creditType ? { creditType: err.creditType } : {}),
         },
         { status: err.statusCode }
       );

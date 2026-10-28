@@ -29,6 +29,27 @@ enum ModuleStatus {
   FAILED
 }
 
+enum BillingMode {
+  PREPAID
+  UNLIMITED
+}
+
+enum CreditType {
+  VALUATION
+  CLAIM_DETAILS
+}
+
+enum CreditLedgerType {
+  USAGE
+  MANUAL_ADJUSTMENT
+}
+
+enum CreditHoldStatus {
+  HELD
+  CAPTURED
+  RELEASED
+}
+
 model Organization {
   id           String    @id @default(uuid())
   name         String
@@ -39,10 +60,14 @@ model Organization {
   country      String    @default("PL")
   billingEmail String
   isActive     Boolean   @default(true)
+  billingMode  BillingMode @default(PREPAID)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   users        User[]
   reports      Report[]
+  creditBalances CreditBalance[]
+  creditHolds    CreditHold[]
+  ledgerEntries  CreditLedgerEntry[]
 
   @@map("organizations")
 }
@@ -64,6 +89,7 @@ model User {
   updatedAt               DateTime      @updatedAt
   reports                 Report[]
   auditEvents             AuditEvent[]
+  ledgerEntries           CreditLedgerEntry[]
 
   @@index([organizationId])
   @@map("users")
@@ -91,6 +117,8 @@ model Report {
   moduleResults         ReportModuleResult[]
   vehicleSnapshot       VehicleSnapshot?
   damageClaims          DamageClaim[]
+  creditHolds           CreditHold[]
+  ledgerEntries         CreditLedgerEntry[]
 
   @@index([vin])
   @@index([createdById])
@@ -183,4 +211,54 @@ model ReportReferenceSequence {
   currentVal Int    @default(0)
 
   @@map("report_reference_sequences")
+}
+
+model CreditBalance {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  creditType     CreditType
+  balance        Int          @default(0)
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, creditType])
+  @@map("credit_balances")
+}
+
+model CreditHold {
+  id             String           @id @default(uuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  reportId       String
+  report         Report           @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  moduleId       ReportModuleId
+  creditType     CreditType
+  status         CreditHoldStatus
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([reportId, moduleId])
+  @@index([organizationId, status, updatedAt])
+  @@map("credit_holds")
+}
+
+model CreditLedgerEntry {
+  id             String           @id @default(uuid())
+  organizationId String?
+  organization   Organization?    @relation(fields: [organizationId], references: [id])
+  creditType     CreditType
+  amount         Int              // -1 usage, 0 usage bez opłaty, +/-N korekta
+  type           CreditLedgerType
+  idempotencyKey String           @unique // "usage:{reportId}:{moduleId}" | "manual:{uuid}"
+  reportId       String?
+  report         Report?          @relation(fields: [reportId], references: [id])
+  moduleId       ReportModuleId?
+  userId         String?          // USAGE: report.createdById; MANUAL_ADJUSTMENT: admin
+  user           User?            @relation(fields: [userId], references: [id])
+  note           String?
+  createdAt      DateTime         @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([userId, createdAt])
+  @@map("credit_ledger_entries")
 }

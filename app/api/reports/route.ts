@@ -8,6 +8,9 @@ import { computeRequestHash } from "@/lib/audatex/hash";
 import { Prisma } from "@prisma/client";
 import { generateMonotonicReference } from "@/lib/reports/reference";
 import { finalizeReport } from "@/lib/reports/finalize";
+import { getBalances, isPrepaid, releaseStaleHolds } from "@/lib/billing/credits";
+import { STALE_LOCK_MS } from "@/lib/reports/module-executor";
+import { checkCreditsForNewReport } from "@/lib/billing/report-guard";
 
 const valuationAdapter = new AudatexValuationAdapter();
 const historyAdapter = new AudatexHistoryAdapter();
@@ -107,7 +110,8 @@ export async function POST(req: Request) {
       if (includeClaimDetails && !freshUser.canGenerateClaimDetails) {
         return NextResponse.json({ error: "Brak uprawnień do generowania szczegółów szkód." }, { status: 403 });
       }
-      if (includeClaimCheck && !includeValuation && !freshUser.canGenerateClaimCheck) {
+      // Claim details need CLAIM_CHECK to run first, so without valuation the user must be allowed to run it.
+      if ((includeClaimCheck || includeClaimDetails) && !includeValuation && !freshUser.canGenerateClaimCheck) {
         return NextResponse.json({ error: "Brak uprawnień do weryfikacji historii szkód." }, { status: 403 });
       }
     }
@@ -168,6 +172,27 @@ export async function POST(req: Request) {
           isDuplicateDeduplicated: true,
           requestHashMatched: true,
         });
+      }
+    }
+
+    // 4b. Credit gate: a PREPAID organization needs credits for every requested paid module
+    if (freshUser.organization) {
+      const prepaid = isPrepaid(freshUser.organization);
+      // A stale hold would otherwise show a false 402; give its credit back before reading the balance.
+      if (prepaid) {
+        await releaseStaleHolds(prisma, freshUser.organization.id, new Date(Date.now() - STALE_LOCK_MS));
+      }
+      const creditCheck = checkCreditsForNewReport({
+        prepaid,
+        balances: prepaid ? await getBalances(prisma, freshUser.organization.id) : null,
+        includeValuation: Boolean(includeValuation),
+        includeClaimDetails: Boolean(includeClaimDetails),
+      });
+      if (!creditCheck.ok) {
+        return NextResponse.json(
+          { error: creditCheck.message, code: "NO_CREDITS", creditType: creditCheck.creditType },
+          { status: 402 }
+        );
       }
     }
 

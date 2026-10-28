@@ -95,6 +95,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
       reportModuleResult: {
         updateMany: async () => ({ count: 0 }), // Lock failed
       },
+      $transaction: async (fn: any) => fn(mockPrisma),
     };
 
     await assert.rejects(
@@ -203,6 +204,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
           return { count: 1 };
         },
       },
+      $transaction: async (fn: any) => fn(mockPrisma),
     };
 
     const mockHistAdapter = {
@@ -224,7 +226,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
   });
   describe("Report ownership check (IDOR)", () => {
     function buildOwnershipPrisma(calls: { updateMany: number; update: number }) {
-      return {
+      const mockPrisma = {
         report: {
           findUnique: async () => ({
             id: "rep-own-1",
@@ -252,7 +254,9 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
           },
         },
         vehicleSnapshot: { upsert: async () => ({}) },
+        $transaction: async (fn: any) => fn(mockPrisma),
       };
+      return mockPrisma;
     }
 
     const mockValAdapter = {
@@ -318,7 +322,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
         role: "ADMIN",
       });
       assert.strictEqual(res.success, true);
-      assert.strictEqual(calls.updateMany, 1);
+      assert.strictEqual(calls.updateMany, 2, "lock + guarded final write");
     });
 
     test("Owner OPERATOR proceeds", async () => {
@@ -330,7 +334,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
         role: "OPERATOR",
       });
       assert.strictEqual(res.success, true);
-      assert.strictEqual(calls.updateMany, 1);
+      assert.strictEqual(calls.updateMany, 2, "lock + guarded final write");
     });
   });
 

@@ -4,7 +4,16 @@ import { AudatexHistoryAdapter } from "../audatex/history.ts";
 import { NonRetryableError } from "../audatex/types.ts";
 import { finalizeReport } from "./finalize.ts";
 import { isRateLimited } from "../rate-limit.ts";
-import { ReportModuleId } from "@prisma/client";
+import { ReportModuleId, type CreditType } from "@prisma/client";
+import {
+  NoCreditsError,
+  captureCredit,
+  creditTypeForModule,
+  isPrepaid,
+  recordUnlimitedUsage,
+  releaseCredit,
+  reserveCredit,
+} from "../billing/credits.ts";
 
 const valuationAdapter = new AudatexValuationAdapter();
 const historyAdapter = new AudatexHistoryAdapter();
@@ -12,13 +21,34 @@ const historyAdapter = new AudatexHistoryAdapter();
 export class ModuleExecutionError extends Error {
   statusCode: number;
   isNonRetryable: boolean;
+  code?: "NO_CREDITS";
+  creditType?: CreditType;
 
-  constructor(message: string, statusCode = 400, isNonRetryable = false) {
+  constructor(
+    message: string,
+    statusCode = 400,
+    isNonRetryable = false,
+    extra?: { code?: "NO_CREDITS"; creditType?: CreditType }
+  ) {
     super(message);
     this.name = "ModuleExecutionError";
     this.statusCode = statusCode;
     this.isNonRetryable = isNonRetryable;
+    this.code = extra?.code;
+    this.creditType = extra?.creditType;
   }
+}
+
+/** Internal sentinel: the final status write matched no RUNNING row, so another execution owns or finished the module. */
+class ModuleTakenOverError extends Error {
+  constructor() {
+    super("Moduł został przejęty przez inne żądanie.");
+    this.name = "ModuleTakenOverError";
+  }
+}
+
+function takenOverError(): ModuleExecutionError {
+  return new ModuleExecutionError("Moduł został przejęty przez inne żądanie.", 409);
 }
 
 // Same env parsing/defaults as the Audatex adapters (cleanEnv + parseInt).
@@ -99,6 +129,7 @@ export async function executeReportModule(
       moduleResults: true,
       vehicleSnapshot: true,
       damageClaims: true,
+      organization: { select: { id: true, billingMode: true } },
     },
   });
 
@@ -204,28 +235,97 @@ export async function executeReportModule(
     }
   }
 
-  // 5. Atomic Lock Transition with Stale-Lock Recovery (>120s)
+  // 5. Atomic Lock Transition with Stale-Lock Recovery (>120s) and credit reservation.
+  // Lock and reservation share one transaction: a missing credit rolls the lock back (status and retryCount untouched).
+  const creditType = creditTypeForModule(moduleId);
+  const organization: { id: string; billingMode: "PREPAID" | "UNLIMITED" } | null = report.organization ?? null;
   const staleThreshold = new Date(Date.now() - STALE_LOCK_MS);
-  const lockResult = await db.reportModuleResult.updateMany({
-    where: {
-      id: targetModule.id,
-      OR: [
-        { status: { in: ["PENDING", "FAILED"] } },
-        { status: "RUNNING", updatedAt: { lt: staleThreshold } },
-      ],
-    },
-    data: {
-      status: "RUNNING",
-      ...(isRetry ? { retryCount: { increment: 1 } } : {}),
-    },
-  });
+  let lockCount: number;
+  try {
+    lockCount = await db.$transaction(async (tx: any) => {
+      const lockResult = await tx.reportModuleResult.updateMany({
+        where: {
+          id: targetModule.id,
+          OR: [
+            { status: { in: ["PENDING", "FAILED"] } },
+            { status: "RUNNING", updatedAt: { lt: staleThreshold } },
+          ],
+        },
+        data: {
+          status: "RUNNING",
+          ...(isRetry ? { retryCount: { increment: 1 } } : {}),
+        },
+      });
 
-  if (lockResult.count === 0) {
+      if (lockResult.count === 1 && creditType && isPrepaid(organization)) {
+        await reserveCredit(tx, {
+          organizationId: organization!.id,
+          reportId,
+          moduleId,
+          creditType,
+          staleBefore: new Date(Date.now() - STALE_LOCK_MS),
+        });
+      }
+      return lockResult.count as number;
+    });
+  } catch (err: any) {
+    if (err instanceof NoCreditsError) {
+      const what = err.creditType === "VALUATION" ? "wycenę pojazdu" : "szczegóły szkód";
+      throw new ModuleExecutionError(
+        `Brak dostępnych kredytów na ${what}. Dokup kredyty, aby kontynuować.`,
+        402,
+        false,
+        { code: "NO_CREDITS", creditType: err.creditType }
+      );
+    }
+    throw err;
+  }
+
+  if (lockCount === 0) {
     throw new ModuleExecutionError(
       "Moduł jest obecnie przetwarzany przez inne żądanie.",
       409
     );
   }
+
+  // Credit settlement for the final result update of a paid module (runs inside the same transaction as that update).
+  // chargeable = the module produced a billable result; otherwise a PREPAID reservation is released.
+  const settleCredit = async (tx: any, chargeable: boolean) => {
+    if (!creditType || !organization) return;
+    const args = {
+      organizationId: organization.id,
+      reportId,
+      moduleId,
+      creditType,
+      userId: report.createdById,
+    };
+    if (isPrepaid(organization)) {
+      if (chargeable) await captureCredit(tx, args);
+      else await releaseCredit(tx, { reportId, moduleId });
+    } else if (chargeable) {
+      await recordUnlimitedUsage(tx, args);
+    }
+  };
+  const hasCreditOps = Boolean(creditType && organization);
+
+  // Final status write + credit settlement in one transaction. The write is conditional on status RUNNING: a
+  // stale execution whose lock was taken over (and possibly finished) by another request must not overwrite the
+  // result or settle credit. count === 0 rolls the whole transaction back via the sentinel.
+  const settleModule = async (
+    data: Record<string, unknown>,
+    chargeable: boolean,
+    extra?: (tx: any) => Promise<void>
+  ) => {
+    await db.$transaction(async (tx: any) => {
+      const { count } = await tx.reportModuleResult.updateMany({
+        where: { id: targetModule.id, status: "RUNNING" },
+        data,
+      });
+      if (count === 0) throw new ModuleTakenOverError();
+      if (extra) await extra(tx);
+      if (hasCreditOps) await settleCredit(tx, chargeable);
+    });
+  };
 
   // 6. Execute Specific Module Logic
   let executionSuccess = false;
@@ -241,84 +341,65 @@ export async function executeReportModule(
         valuationDate: report.valuationDate,
       });
 
-      // Upsert VehicleSnapshot
-      await db.vehicleSnapshot.upsert({
-        where: { reportId: report.id },
-        create: {
-          reportId: report.id,
-          ibsCode: valRes.ibsCode,
-          make: valRes.make,
-          model: valRes.model,
-          variant: valRes.variant,
-          newPriceCv: valRes.newPriceCv,
-          marketPriceCob: valRes.marketPriceCob,
-          technicalValueTh: valRes.technicalValueTh,
-          mileageUsed: valRes.mileageUsed,
-          isAverageMileageUsed: valRes.isAverageMileageUsed,
-          standardEquipment: JSON.stringify(valRes.standardEquipment),
-          optionalEquipment: JSON.stringify(valRes.optionalEquipment),
-          technicalSpecJson: valRes.technicalSpec ? JSON.stringify(valRes.technicalSpec) : null,
-        },
-        update: {
-          ibsCode: valRes.ibsCode,
-          make: valRes.make,
-          model: valRes.model,
-          variant: valRes.variant,
-          newPriceCv: valRes.newPriceCv,
-          marketPriceCob: valRes.marketPriceCob,
-          technicalValueTh: valRes.technicalValueTh,
-          mileageUsed: valRes.mileageUsed,
-          isAverageMileageUsed: valRes.isAverageMileageUsed,
-          standardEquipment: JSON.stringify(valRes.standardEquipment),
-          optionalEquipment: JSON.stringify(valRes.optionalEquipment),
-          technicalSpecJson: valRes.technicalSpec ? JSON.stringify(valRes.technicalSpec) : null,
-        },
-      });
-
-      executedStatus = "SUCCEEDED";
-      executionSuccess = true;
-
-      await db.reportModuleResult.update({
-        where: { id: targetModule.id },
-        data: {
+      await settleModule(
+        {
           status: "SUCCEEDED",
           isNonRetryable: false,
           errorMessage: null,
           responseMetadata: JSON.stringify({ ibsCode: valRes.ibsCode, make: valRes.make, model: valRes.model }),
         },
-      });
+        true,
+        async (tx: any) => {
+          // Upsert VehicleSnapshot (only if this execution still owns the module)
+          await tx.vehicleSnapshot.upsert({
+            where: { reportId: report.id },
+            create: {
+              reportId: report.id,
+              ibsCode: valRes.ibsCode,
+              make: valRes.make,
+              model: valRes.model,
+              variant: valRes.variant,
+              newPriceCv: valRes.newPriceCv,
+              marketPriceCob: valRes.marketPriceCob,
+              technicalValueTh: valRes.technicalValueTh,
+              mileageUsed: valRes.mileageUsed,
+              isAverageMileageUsed: valRes.isAverageMileageUsed,
+              standardEquipment: JSON.stringify(valRes.standardEquipment),
+              optionalEquipment: JSON.stringify(valRes.optionalEquipment),
+              technicalSpecJson: valRes.technicalSpec ? JSON.stringify(valRes.technicalSpec) : null,
+            },
+            update: {
+              ibsCode: valRes.ibsCode,
+              make: valRes.make,
+              model: valRes.model,
+              variant: valRes.variant,
+              newPriceCv: valRes.newPriceCv,
+              marketPriceCob: valRes.marketPriceCob,
+              technicalValueTh: valRes.technicalValueTh,
+              mileageUsed: valRes.mileageUsed,
+              isAverageMileageUsed: valRes.isAverageMileageUsed,
+              standardEquipment: JSON.stringify(valRes.standardEquipment),
+              optionalEquipment: JSON.stringify(valRes.optionalEquipment),
+              technicalSpecJson: valRes.technicalSpec ? JSON.stringify(valRes.technicalSpec) : null,
+            },
+          });
+        }
+      );
+      executedStatus = "SUCCEEDED";
+      executionSuccess = true;
     } else if (moduleId === "CLAIM_CHECK") {
       const checkRes = await histAdapter.checkClaimHistory({
         vin: report.vin,
         firstRegistration: report.firstRegistrationDate,
       });
 
-      executedStatus = checkRes.hasHistory ? "SUCCEEDED" : "NO_DATA";
-      executionSuccess = true;
-
-      // Cascade Invalidation on CLAIM_CHECK execution/retry (D-6):
-      // Clean up previous damage claims if any exist
-      await db.damageClaim.deleteMany({ where: { reportId: report.id } });
-
-      // Update or reset dependent CLAIM_DETAILS module
+      const checkStatus = checkRes.hasHistory ? "SUCCEEDED" : "NO_DATA";
       const detailsModule = report.moduleResults.find((m: any) => m.moduleId === "CLAIM_DETAILS");
-      if (detailsModule && detailsModule.status !== "NOT_REQUESTED") {
-        await db.reportModuleResult.update({
-          where: { id: detailsModule.id },
-          data: {
-            status: checkRes.hasHistory ? "PENDING" : "NO_DATA",
-            errorMessage: null,
-            responseMetadata: checkRes.hasHistory
-              ? null
-              : JSON.stringify({ message: "Brak historii szkód w CLAIM_CHECK (getDetails pominięty)" }),
-          },
-        });
-      }
 
-      await db.reportModuleResult.update({
-        where: { id: targetModule.id },
-        data: {
-          status: executedStatus,
+      // Guarded status write first; the cascade below only runs if this execution still owns the module.
+      await settleModule(
+        {
+          status: checkStatus,
           isNonRetryable: false,
           errorMessage: null,
           responseMetadata: JSON.stringify({
@@ -327,63 +408,93 @@ export async function executeReportModule(
             advice: checkRes.advice,
           }),
         },
-      });
+        false,
+        async (tx: any) => {
+          // Cascade Invalidation on CLAIM_CHECK execution/retry (D-6):
+          // Clean up previous damage claims if any exist
+          await tx.damageClaim.deleteMany({ where: { reportId: report.id } });
+
+          // Update or reset dependent CLAIM_DETAILS module
+          if (detailsModule && detailsModule.status !== "NOT_REQUESTED") {
+            await tx.reportModuleResult.update({
+              where: { id: detailsModule.id },
+              data: {
+                status: checkRes.hasHistory ? "PENDING" : "NO_DATA",
+                errorMessage: null,
+                responseMetadata: checkRes.hasHistory
+                  ? null
+                  : JSON.stringify({ message: "Brak historii szkód w CLAIM_CHECK (getDetails pominięty)" }),
+              },
+            });
+          }
+        }
+      );
+      executedStatus = checkStatus;
+      executionSuccess = true;
     } else if (moduleId === "CLAIM_DETAILS") {
       const detailsRes = await histAdapter.getClaimDetails({
         vin: report.vin,
         firstRegistration: report.firstRegistrationDate,
       });
 
-      // Clear existing claims to avoid duplication on retry
-      await db.damageClaim.deleteMany({ where: { reportId: report.id } });
-
-      for (const claim of detailsRes.claims) {
-        await db.damageClaim.create({
-          data: {
-            reportId: report.id,
-            claimId: claim.claimId,
-            accidentDate: claim.accidentDate,
-            claimDate: claim.creationDate,
-            country: claim.country,
-            makeModel: claim.makeModel,
-            mileage: claim.mileage,
-            damageValue: claim.damageValue,
-            currency: claim.currency,
-            isTotalLoss: claim.isTotalLoss,
-            mandateCode: claim.mandateCode,
-            mandateDescription: claim.mandateDescription,
-            damageZones: JSON.stringify(claim.affectedZones),
-            significantParts: JSON.stringify(claim.significantParts),
-            damageAssessmentJson: claim.damageAssessment ? JSON.stringify(claim.damageAssessment) : null,
-          },
-        });
-      }
-
-      executedStatus = "SUCCEEDED";
-      executionSuccess = true;
-
-      await db.reportModuleResult.update({
-        where: { id: targetModule.id },
-        data: {
+      // Zero claims is a free result: the reservation is released instead of captured.
+      await settleModule(
+        {
           status: "SUCCEEDED",
           isNonRetryable: false,
           errorMessage: null,
           responseMetadata: JSON.stringify({ claimsCount: detailsRes.claims.length }),
         },
-      });
+        detailsRes.claims.length > 0,
+        async (tx: any) => {
+          // Clear existing claims to avoid duplication on retry
+          await tx.damageClaim.deleteMany({ where: { reportId: report.id } });
+
+          if (detailsRes.claims.length > 0) {
+            await tx.damageClaim.createMany({
+              data: detailsRes.claims.map((claim: any) => ({
+                reportId: report.id,
+                claimId: claim.claimId,
+                accidentDate: claim.accidentDate,
+                claimDate: claim.creationDate,
+                country: claim.country,
+                makeModel: claim.makeModel,
+                mileage: claim.mileage,
+                damageValue: claim.damageValue,
+                currency: claim.currency,
+                isTotalLoss: claim.isTotalLoss,
+                mandateCode: claim.mandateCode,
+                mandateDescription: claim.mandateDescription,
+                damageZones: JSON.stringify(claim.affectedZones),
+                significantParts: JSON.stringify(claim.significantParts),
+                damageAssessmentJson: claim.damageAssessment ? JSON.stringify(claim.damageAssessment) : null,
+              })),
+            });
+          }
+        }
+      );
+      executedStatus = "SUCCEEDED";
+      executionSuccess = true;
     }
   } catch (err: any) {
+    if (err instanceof ModuleTakenOverError) throw takenOverError();
+
     executionError = err;
     const isNonRetryable = err instanceof NonRetryableError || Boolean(err.isNonRetryable);
 
-    await db.reportModuleResult.update({
-      where: { id: targetModule.id },
-      data: {
-        status: "FAILED",
-        isNonRetryable,
-        errorMessage: err.message || "Błąd wykonania modułu Audatex.",
-      },
-    });
+    try {
+      await settleModule(
+        {
+          status: "FAILED",
+          isNonRetryable,
+          errorMessage: err.message || "Błąd wykonania modułu Audatex.",
+        },
+        false
+      );
+    } catch (settleErr: any) {
+      if (settleErr instanceof ModuleTakenOverError) throw takenOverError();
+      throw settleErr;
+    }
   }
 
   // 7. Invariant D-6: Unfreeze PDF on successful module retry
@@ -421,7 +532,7 @@ export async function executeReportModule(
  * determines the final report status (COMPLETED / PARTIALLY_FAILED / FAILED)
  * and executes finalizeReport.
  */
-async function checkAndFinalizeReportIfDone(reportId: string, db: any) {
+export async function checkAndFinalizeReportIfDone(reportId: string, db: any) {
   const currentReport = await db.report.findUnique({
     where: { id: reportId },
     include: { moduleResults: true },

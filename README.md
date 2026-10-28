@@ -34,6 +34,29 @@ Ze względu na to, że repozytorium zawiera pliki źródłowe oraz `Dockerfile` 
 
 ---
 
+## 💳 Kredyty (rozliczenia raportów)
+
+Każda organizacja ma jeden z dwóch trybów rozliczeń:
+
+- **Prepaid (kredyty)** — moduły raportu zużywają kredyty z salda organizacji.
+- **Bez limitu** — moduły nie zużywają kredytów (zachowanie sprzed wprowadzenia kredytów).
+
+Kredyty są prowadzone per organizacja w dwóch typach: **Wycena** (moduł `VALUATION`) i **Szczegóły szkód** (moduł `CLAIM_DETAILS`). Sprawdzenie szkód (`CLAIM_CHECK`) jest bezpłatne.
+
+Zasady naliczania:
+- Kredyt jest rezerwowany przy starcie modułu i pobierany dopiero za dostarczony wynik.
+- Błąd, brak danych lub 0 szkód = brak opłaty (rezerwacja jest zwracana).
+
+**Faza 1:** doładowanie salda wyłącznie ręcznie przez admina (panel: Organizacje → Kredyty). Zakup online (PayU) i faktury (Fakturownia) pojawią się w kolejnych fazach.
+
+### Lista kontrolna wdrożenia
+
+1. Po deployu wszystkie istniejące organizacje mają tryb „Bez limitu”.
+2. Przed przełączeniem pierwszej organizacji na Prepaid admin przypisuje konta bez organizacji (OPERATOR, konta sprzed B2B) do firm.
+3. Zasil saldo klienta w panelu admina przed przełączeniem trybu.
+
+---
+
 ## 💻 Uruchomienie Lokalnie i Testy
 
 ```bash
@@ -46,8 +69,13 @@ npx prisma generate
 # 3. Uruchom testy jednostkowe parsera SOAP Audatex
 npm test
 
+# 3a. Uruchom testy z bazą danych (Docker, baza `izzycheck_test`)
+npm run test:db
+
 # 4. Uruchom serwer deweloperski
 npm run dev
 ```
 
 Po uruchomieniu przejdź pod `http://localhost:3000`.
+
+`npm run test:db` uruchamia testy na prawdziwym Postgresie (`docker-compose.test.yml`, domyślnie `localhost:54329`). Nazwa bazy testowej (także w `TEST_DATABASE_URL`) musi kończyć się na `_test` — inaczej testy odmówią uruchomienia.

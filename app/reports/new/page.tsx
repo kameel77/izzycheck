@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Car, Calendar, Gauge, CheckSquare, AlertCircle, ArrowRight, Loader2, Info, ShieldAlert, Lock } from "lucide-react";
 
 interface CurrentUser {
@@ -19,6 +20,31 @@ interface CurrentUser {
   } | null;
 }
 
+interface CreditsInfo {
+  billingMode: "PREPAID" | "UNLIMITED";
+  balances: { VALUATION: number; CLAIM_DETAILS: number } | null;
+}
+
+function CreditsBadge({ balance }: { balance: number }) {
+  if (balance < 1) {
+    return (
+      <>
+        <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-400 border border-red-500/20">
+          Brak kredytów
+        </span>
+        <Link href="/credits" className="text-[11px] font-semibold text-blue-600 hover:underline dark:text-blue-400">
+          Dokup kredyty
+        </Link>
+      </>
+    );
+  }
+  return (
+    <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+      Dostępne kredyty: {balance}
+    </span>
+  );
+}
+
 export default function NewReportPage() {
   const router = useRouter();
 
@@ -34,8 +60,47 @@ export default function NewReportPage() {
   const [includeClaimCheck, setIncludeClaimCheck] = useState(false);
   const [includeClaimDetails, setIncludeClaimDetails] = useState(false);
 
+  const [credits, setCredits] = useState<CreditsInfo | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Prepaid organizations cannot order a paid module without credits (the server enforces this too).
+  const prepaidBalances = credits?.billingMode === "PREPAID" ? credits.balances : null;
+  const valuationNoCredits = prepaidBalances !== null && prepaidBalances.VALUATION < 1;
+  const claimDetailsNoCredits = prepaidBalances !== null && prepaidBalances.CLAIM_DETAILS < 1;
+
+  const loadCredits = () => {
+    // A failed balance fetch must not block the form; the server still enforces credits.
+    return fetch("/api/credits/balance")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && (data.billingMode === "PREPAID" || data.billingMode === "UNLIMITED")) {
+          setCredits(data);
+        }
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadCredits();
+  }, []);
+
+  // Keep the visible selection equal to what gets submitted: modules without credits are cleared.
+  // Depends on currentUser too, because the /api/auth/me defaults may arrive after the balance.
+  useEffect(() => {
+    if (!currentUser) return;
+    if (valuationNoCredits) {
+      setIncludeValuation(false);
+      // Claim check was only implied by valuation; drop it when the user may not order it alone.
+      // Claim details need the claim check to run, so they go with it.
+      if (!currentUser.canGenerateClaimCheck) {
+        setIncludeClaimCheck(false);
+        setIncludeClaimDetails(false);
+      }
+    }
+    if (claimDetailsNoCredits) setIncludeClaimDetails(false);
+  }, [currentUser, valuationNoCredits, claimDetailsNoCredits]);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -157,6 +222,7 @@ export default function NewReportPage() {
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Nie udało się wygenerować raportu.");
+        if (res.status === 402) await loadCredits();
       } else {
         router.push(`/reports/${data.reportId}`);
       }
@@ -282,14 +348,14 @@ export default function NewReportPage() {
             {/* Module 1 */}
             <label
               className={`flex items-start gap-4 rounded-xl border p-4 transition-colors ${
-                canValuation
+                canValuation && !valuationNoCredits
                   ? "border-slate-200 bg-slate-50/70 cursor-pointer hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:hover:border-slate-700"
                   : "border-slate-100 bg-slate-50/30 opacity-60 cursor-not-allowed dark:border-slate-850 dark:bg-slate-950/30"
               }`}
             >
               <input
                 type="checkbox"
-                disabled={!canValuation}
+                disabled={!canValuation || valuationNoCredits}
                 checked={includeValuation}
                 onChange={(e) => handleValuationToggle(e.target.checked)}
                 className="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 disabled:opacity-40"
@@ -302,6 +368,7 @@ export default function NewReportPage() {
                       <Lock className="h-2.5 w-2.5" /> Brak uprawnienia
                     </span>
                   )}
+                  {prepaidBalances !== null && canValuation && <CreditsBadge balance={prepaidBalances.VALUATION} />}
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Szacunkowa wartość rynkowa, cena nowego pojazdu, wartość techniczna, parametry techniczne oraz lista wyposażenia standardowego i dodatkowego.
@@ -348,14 +415,14 @@ export default function NewReportPage() {
             {/* Module 3 */}
             <label
               className={`flex items-start gap-4 rounded-xl border p-4 transition-colors ${
-                includeClaimCheck && canClaimDetails
+                includeClaimCheck && canClaimDetails && !claimDetailsNoCredits
                   ? "border-slate-200 bg-slate-50/70 cursor-pointer hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:hover:border-slate-700"
                   : "border-slate-100 bg-slate-50/30 opacity-60 cursor-not-allowed dark:border-slate-850 dark:bg-slate-950/30"
               }`}
             >
               <input
                 type="checkbox"
-                disabled={!includeClaimCheck || !canClaimDetails}
+                disabled={!includeClaimCheck || !canClaimDetails || claimDetailsNoCredits}
                 checked={includeClaimDetails}
                 onChange={(e) => setIncludeClaimDetails(e.target.checked)}
                 className="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 disabled:opacity-40"
@@ -372,6 +439,7 @@ export default function NewReportPage() {
                       Pobierane w przypadku wykrycia szkód
                     </span>
                   )}
+                  {prepaidBalances !== null && canClaimDetails && <CreditsBadge balance={prepaidBalances.CLAIM_DETAILS} />}
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Chronologiczna lista szkód z datami zdarzeń, szacunkową wartością napraw, kwalifikacją szkody oraz wizualizacją uszkodzonych stref pojazdu.
