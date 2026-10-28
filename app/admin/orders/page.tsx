@@ -18,6 +18,7 @@ interface Attention {
   needsAttention: number;
   failedManualOnly: number;
   ksefProblems: number;
+  emailOverdue: number;
   lastCronRunAt: string | null;
 }
 
@@ -99,7 +100,7 @@ export default function AdminOrdersPage() {
 
   const setFilter = (patch: Partial<Filters>) => setFilters((prev) => ({ ...prev, ...patch }));
 
-  const attentionTotal = attention ? attention.needsAttention + attention.failedManualOnly + attention.ksefProblems : 0;
+  const attentionTotal = attention ? attention.needsAttention + attention.failedManualOnly + attention.ksefProblems + attention.emailOverdue : 0;
   const cronAge = attention ? describeCronAge(attention.lastCronRunAt, Date.now()) : null;
 
   return (
@@ -129,7 +130,7 @@ export default function AdminOrdersPage() {
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs font-semibold">
           <span
             className={attentionTotal > 0 ? "text-red-600 dark:text-red-400" : "text-slate-600 dark:text-slate-300"}
-            title={`Wymaga sprawdzenia: ${attention.needsAttention}, błąd tylko ręcznie: ${attention.failedManualOnly}, problemy KSeF: ${attention.ksefProblems}`}
+            title={`Wymaga sprawdzenia: ${attention.needsAttention}, błąd tylko ręcznie: ${attention.failedManualOnly}, problemy KSeF: ${attention.ksefProblems}, niewysłane e-maile z fakturą: ${attention.emailOverdue}`}
           >
             Wymaga uwagi: {attentionTotal}
           </span>

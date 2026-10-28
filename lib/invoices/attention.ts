@@ -5,7 +5,7 @@
  */
 import type { PrismaClient } from "@prisma/client";
 import { ksefProblemWhere } from "./ksef.ts";
-import type { BillingCronResult } from "./service.ts";
+import { EMAIL_RETRY_WINDOW_MS, type BillingCronResult } from "./service.ts";
 
 export const BILLING_CRON_JOB = "billing-cron";
 
@@ -16,17 +16,33 @@ export type OrdersAttention = {
   failedManualOnly: number;
   /** ISSUED invoices with a KSeF problem (error status or no confirmation after 6 h). */
   ksefProblems: number;
+  /** ISSUED invoices still not e-mailed after the whole e-mail retry window: the cron gave up, send them by hand. */
+  emailOverdue: number;
   lastCronRunAt: string | null;
 };
 
 export async function getOrdersAttention(db: PrismaClient, now: Date): Promise<OrdersAttention> {
-  const [needsAttention, failedManualOnly, ksefProblems, heartbeat] = await Promise.all([
+  const [needsAttention, failedManualOnly, ksefProblems, emailOverdue, heartbeat] = await Promise.all([
     db.order.count({ where: { invoiceStatus: "NEEDS_ATTENTION" } }),
     db.order.count({ where: { invoiceStatus: "FAILED", invoiceNextAttemptAt: null } }),
     db.order.count({ where: ksefProblemWhere(now) }),
+    db.order.count({
+      where: {
+        invoiceStatus: "ISSUED",
+        fakturowniaInvoiceId: { not: null },
+        invoiceEmailedAt: null,
+        invoiceIssuedAt: { lt: new Date(now.getTime() - EMAIL_RETRY_WINDOW_MS) },
+      },
+    }),
     db.jobHeartbeat.findUnique({ where: { name: BILLING_CRON_JOB }, select: { lastRunAt: true } }),
   ]);
-  return { needsAttention, failedManualOnly, ksefProblems, lastCronRunAt: heartbeat ? heartbeat.lastRunAt.toISOString() : null };
+  return {
+    needsAttention,
+    failedManualOnly,
+    ksefProblems,
+    emailOverdue,
+    lastCronRunAt: heartbeat ? heartbeat.lastRunAt.toISOString() : null,
+  };
 }
 
 /** Remembers that the billing cron just ran (and what it did). A failure here never fails the run. */

@@ -103,6 +103,8 @@ describe("getOrdersAttention and the cron heartbeat", () => {
       // The FAILED order with a stale ksefStatus from seedKsefCases also has no next attempt.
       failedManualOnly: 2,
       ksefProblems: 5,
+      // ok, demoOk, offline and duplicate were issued 100 h ago and never e-mailed.
+      emailOverdue: 4,
       lastCronRunAt: null,
     });
 
@@ -120,7 +122,21 @@ describe("getOrdersAttention and the cron heartbeat", () => {
       needsAttention: 0,
       failedManualOnly: 0,
       ksefProblems: 0,
+      emailOverdue: 0,
       lastCronRunAt: null,
     });
+  });
+
+  test("emailOverdue counts issued invoices not e-mailed 3 days after issuing", async () => {
+    const MINUTE = 60_000;
+    const threeDaysAgo = (offsetMinutes: number) => new Date(now.getTime() - 3 * 24 * HOUR - offsetMinutes * MINUTE);
+    const base = { ksefStatus: "ok" };
+    await issued({ ...base, invoiceIssuedAt: threeDaysAgo(1) }); // 3 days + 1 min: counted
+    await issued({ ...base, invoiceIssuedAt: threeDaysAgo(-1) }); // 3 days - 1 min: not yet
+    await issued({ ...base, invoiceIssuedAt: threeDaysAgo(1), invoiceEmailedAt: hoursAgo(1) }); // already sent
+    await createOrder("ISSUED", { ...base, invoiceIssuedAt: threeDaysAgo(1), invoiceNumber: "FV/ręczna" }); // manual: no Fakturownia id
+    await createOrder("FAILED", { fakturowniaInvoiceId: "INV-x", invoiceIssuedAt: threeDaysAgo(1), invoiceNextAttemptAt: hoursAgo(-1) });
+
+    assert.equal((await getOrdersAttention(testPrisma, now)).emailOverdue, 1);
   });
 });
