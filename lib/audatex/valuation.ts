@@ -1,7 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { createHash } from "crypto";
 import { escapeXml } from "./xml.ts";
-import { VinValuationInput, ValuationResult, EquipmentItem, NonRetryableError } from "./types.ts";
+import { VinValuationInput, ValuationResult, EquipmentItem, NonRetryableError, VinNotFoundError, VehicleIdentificationRaw } from "./types.ts";
 import {
   AUDAVIN_GET_CAR_BY_VIN_RESPONSE,
   AUDAVALUATION_EVALUATE_CAR_RESPONSE,
@@ -11,6 +11,16 @@ import {
 function cleanEnv(val: string | undefined, defaultVal = ""): string {
   if (!val) return defaultVal;
   return val.trim().replace(/^["']|["']$/g, "");
+}
+
+/**
+ * Stała data techniczna dla identyfikacji po samym VIN: Audatex wymaga daty pierwszej rejestracji,
+ * ale (spike) nie zmienia ona wyniku. Ta sama data idzie jako ManufacturedMonth/Year do klasyfikacji.
+ */
+const IDENTIFY_FIXED_FIRST_REG = "2012-01-01";
+
+function isVinNotFoundFault(errText: string): boolean {
+  return errText.includes("brak dopasowania") || errText.includes("wyszukiwania według numeru VIN");
 }
 
 const xmlParser = new XMLParser({
@@ -65,7 +75,47 @@ export class AudatexValuationAdapter {
     };
   }
 
-  private async getCarByVinWs(input: VinValuationInput, marketCode: string, language: string) {
+  /**
+   * Identyfikacja pojazdu po samym VIN (bez wyceny): GetCarByVinWs -> GetClassificationByIBSCode.
+   * Zwraca surowe XML-e, żeby dało się je cache'ować; mapowanie na kontrakt robi lib/integrations/mamygo.
+   */
+  async identifyVehicle(vin: string): Promise<VehicleIdentificationRaw> {
+    if (this.isMockMode) {
+      const car = this.readCarByVinResult(AUDAVIN_GET_CAR_BY_VIN_RESPONSE);
+      return {
+        ibsCode: car!.ibsCode,
+        fittedEquipmentCodes: car!.equipments,
+        vinXml: AUDAVIN_GET_CAR_BY_VIN_RESPONSE,
+        classificationXml: VEHICLE_DATA_CLASSIFICATION_RESPONSE,
+      };
+    }
+
+    const marketCode = cleanEnv(process.env.AUDATEX_MARKET_CODE, "PL");
+    const language = cleanEnv(process.env.AUDATEX_LANGUAGE, "PL");
+
+    let vinXml: string;
+    try {
+      vinXml = await this.fetchCarByVinXml(vin, IDENTIFY_FIXED_FIRST_REG, marketCode, language);
+    } catch (err) {
+      if (err instanceof NonRetryableError && err.isVinNotFoundFault) throw new VinNotFoundError();
+      throw err;
+    }
+
+    const car = this.readCarByVinResult(vinXml);
+    if (!car) throw new VinNotFoundError();
+
+    const classificationXml = await this.fetchClassificationXml(car.ibsCode, IDENTIFY_FIXED_FIRST_REG, marketCode, language);
+
+    return {
+      ibsCode: car.ibsCode,
+      fittedEquipmentCodes: car.equipments,
+      vinXml,
+      classificationXml,
+    };
+  }
+
+  /** Wspólne wywołanie GetCarByVinWs: zwraca surowy XML odpowiedzi. */
+  private async fetchCarByVinXml(vin: string, dateOfFirstReg: string, marketCode: string, language: string): Promise<string> {
     const endpoint = cleanEnv(process.env.AUDATEX_VALUATION_ENDPOINT, "https://te5adxwseu.taxexpert.cz/TE5_AUDAVIN_Service.asmx");
     const certHash = cleanEnv(process.env.AUDATEX_CERTIFICATE_HASH);
     const licenceNumber = cleanEnv(process.env.AUDATEX_LICENCE_NUMBER);
@@ -75,10 +125,10 @@ export class AudatexValuationAdapter {
         <soapenv:Header/>
         <soapenv:Body>
           <te5:GetCarByVinWs>
-            <te5:vin>${escapeXml(String(input.vin).trim())}</te5:vin>
+            <te5:vin>${escapeXml(String(vin).trim())}</te5:vin>
             <te5:language>${escapeXml(language)}</te5:language>
             <te5:marketCode>${escapeXml(marketCode)}</te5:marketCode>
-            <te5:dateOfFirstReg>${escapeXml(String(input.dateOfFirstReg).trim())}</te5:dateOfFirstReg>
+            <te5:dateOfFirstReg>${escapeXml(String(dateOfFirstReg).trim())}</te5:dateOfFirstReg>
             <te5:certificateHash>${escapeXml(certHash)}</te5:certificateHash>
             <te5:licenceNumber>${escapeXml(licenceNumber)}</te5:licenceNumber>
           </te5:GetCarByVinWs>
@@ -86,12 +136,16 @@ export class AudatexValuationAdapter {
       </soapenv:Envelope>
     `;
 
-    const responseText = await this.postSoapWithRetry(endpoint, body, "http://TE5.ibs-expert.cz/GetCarByVinWs");
+    return this.postSoapWithRetry(endpoint, body, "http://TE5.ibs-expert.cz/GetCarByVinWs");
+  }
+
+  /** Czyta wynik GetCarByVinWs; null, gdy odpowiedź nie zawiera IbsCode. */
+  private readCarByVinResult(responseText: string) {
     const parsed = xmlParser.parse(responseText);
     const resultNode = parsed["soap:Envelope"]?.["soap:Body"]?.["GetCarByVinWsResponse"]?.["GetCarByVinWsResult"];
 
     if (!resultNode || !resultNode["IbsCode"]) {
-      throw new NonRetryableError("AUDATEX_VALUATION_ERROR: Identyfikacja AUDAVIN nie zwróciła IBSCode dla podanego VIN.");
+      return null;
     }
 
     const eqCodes = this.extractStringArray(resultNode["AdditionalEquipmentsCodes"]);
@@ -102,6 +156,17 @@ export class AudatexValuationAdapter {
       equipments: eqCodes,
       packets: packetCodes,
     };
+  }
+
+  private async getCarByVinWs(input: VinValuationInput, marketCode: string, language: string) {
+    const responseText = await this.fetchCarByVinXml(input.vin, input.dateOfFirstReg, marketCode, language);
+    const result = this.readCarByVinResult(responseText);
+
+    if (!result) {
+      throw new NonRetryableError("AUDATEX_VALUATION_ERROR: Identyfikacja AUDAVIN nie zwróciła IBSCode dla podanego VIN.");
+    }
+
+    return result;
   }
 
   private async evaluateCarFull(input: VinValuationInput, ibsCode: string, equipments: string[], packets: string[], language: string) {
@@ -156,14 +221,14 @@ export class AudatexValuationAdapter {
     };
   }
 
-  private async getClassificationByIBSCode(input: VinValuationInput, ibsCode: string, marketCode: string, language: string) {
+  /** Wspólne wywołanie GetClassificationByIBSCode: zwraca surowy XML odpowiedzi. */
+  private async fetchClassificationXml(ibsCode: string, dateSource: string | undefined, marketCode: string, language: string): Promise<string> {
     const endpoint = cleanEnv(process.env.AUDATEX_VEHICLE_DATA_ENDPOINT, "https://te5wseu.taxexpert.cz/TE5_VehicleData.asmx");
     const certHash = cleanEnv(process.env.AUDATEX_CERTIFICATE_HASH);
     const licenceNumber = cleanEnv(process.env.AUDATEX_LICENCE_NUMBER);
 
     let monthXml = "";
     let yearXml = "";
-    const dateSource = input.manufactureDate || input.dateOfFirstReg;
     if (dateSource && /^\d{4}-\d{2}/.test(String(dateSource).trim())) {
       const [y, m] = String(dateSource).trim().split("-");
       monthXml = `<ManufacturedMonth>${escapeXml(m)}</ManufacturedMonth>`;
@@ -187,7 +252,11 @@ export class AudatexValuationAdapter {
       </SOAP-ENV:Envelope>
     `;
 
-    const responseText = await this.postSoapWithRetry(endpoint, body, "http://TE5.ibs-expert.cz/GetClassificationByIBSCode");
+    return this.postSoapWithRetry(endpoint, body, "http://TE5.ibs-expert.cz/GetClassificationByIBSCode");
+  }
+
+  private async getClassificationByIBSCode(input: VinValuationInput, ibsCode: string, marketCode: string, language: string) {
+    const responseText = await this.fetchClassificationXml(ibsCode, input.manufactureDate || input.dateOfFirstReg, marketCode, language);
     return this.parseClassificationXml(responseText);
   }
 
@@ -396,6 +465,7 @@ export class AudatexValuationAdapter {
             ? "AUDATEX_VALUATION_ERROR: Pojazd nie może zostać sklasyfikowany w katalogu wycen dla podanego numeru VIN i daty pierwszej rejestracji."
             : `AUDATEX_VALUATION_ERROR: Błąd komunikacji z serwisem wycen Audatex (HTTP ${res.status}).`;
           const nonRetryable = new NonRetryableError(sanitizedMessage);
+          nonRetryable.isVinNotFoundFault = isVinNotFoundFault(errText);
 
           if (res.status < 502 || res.status > 504) {
             throw nonRetryable;

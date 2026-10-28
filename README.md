@@ -83,6 +83,62 @@ Zasady naliczania:
 
 ---
 
+## API dla partnerów (mamygo)
+
+`POST /api/v1/vehicles/vin-identification` zwraca dane pojazdu po samym numerze VIN (Audatex AUDAVIN `GetCarByVinWs` + `GetClassificationByIBSCode`, bez wyceny i bez kredytów). Wynik jest cache'owany 30 dni (surowe XML-e Audatex w tabeli `vin_identification_cache`).
+
+### Autoryzacja
+
+Nagłówek `Authorization: Bearer <token>`. Tokeny (`izc_` + 32 losowe bajty base64url) tworzy admin w panelu **API** (`/admin/api`): klient jest przypisany do organizacji, token jest pokazywany tylko raz, a w bazie zostaje wyłącznie jego hash (sha256) i prefiks. Klienta można wyłączyć przełącznikiem; nieaktywny klient lub nieaktywna organizacja dostają 401.
+
+### Żądanie
+
+```json
+{ "vin": "XXXXXXXXXXXXXXXXX", "country": "PL", "language": "pl" }
+```
+
+- `vin`: wymagany, po `trim().toUpperCase()` dokładnie 17 znaków `[A-HJ-NPR-Z0-9]`.
+- `country`: opcjonalny (domyślnie `PL`), inna wartość niż `PL` daje 400.
+- `language`: opcjonalny (domyślnie `pl`), inna wartość niż `pl` daje 400.
+
+### Odpowiedź 200
+
+Obiekt z polami: `vin`, `make`, `model`, `manufacturerName`, `constructionTime`, `constructionYear`, `body`, `subModelName`, `doorsCount`, `cubicCapacity`, `powerKw`, `powerHp`, `drive`, `transmission`, `gearsCount`, `fuelType`, `tankVolume`, `originalTireSizeAxle1`, `batteryCapacityKWh`, `minimumTrunkCapacityL`, `productType`, `maxLoadKg`, `speedMax`, `consumptionInTown`, `consumptionOutOfTown`, `co2Emission`, `length`, `width`, `height`, `axlesCount`, `wheelBase`, `airbagsCount`, `seatsCount`, `carFeaturesBasicWithId`, `carFeaturesAdditionalWithId`.
+
+- Wartości skalarne są stringami albo `null` (liczby jako stringi, ułamki z kropką, np. `"5.2"`).
+- `body`, `drive`, `transmission`, `fuelType`, `productType` są normalizowane do wartości słownikowych DAT/Vincario; nieznana wartość daje `null`. `constructionTime` i `airbagsCount` są zawsze `null`.
+- `constructionYear` pochodzi ze znaku roku modelowego VIN (pozycja 10) i jest zwracany tylko, gdy mieści się między `productionBeginYear` a bieżącym rokiem + 1.
+- Wyposażenie nie jest mapowane: `carFeaturesBasicWithId` to pozycje seryjne z Audatex, `carFeaturesAdditionalWithId` to kody z VIN (`AdditionalEquipmentsCodes`), każda jako `{ "label": <nazwa Audatex PL>, "id": <kod Audatex> }`. Mapowanie na własne cechy robi mamygo po swojej stronie.
+
+### Kody błędów
+
+Odpowiedź błędu: `{ "error": "<KOD>", "message": "<opis PL>" }`.
+
+| Status | Kod | Kiedy |
+|---|---|---|
+| 400 | `INVALID_REQUEST` | zły JSON, zły VIN, nieobsługiwany country/language |
+| 401 | `UNAUTHORIZED` | brak, nieznany lub nieaktywny token |
+| 404 | `VIN_NOT_FOUND` | Audatex nie rozpoznał VIN |
+| 429 | `RATE_LIMITED` | więcej niż 60 żądań na minutę na klienta API (nagłówek `Retry-After`) |
+| 502 | `UPSTREAM_ERROR` | błąd lub timeout Audatex |
+| 500 | `INTERNAL_ERROR` | inny błąd |
+
+### Rozliczenia
+
+Każde żądanie po poprawnym tokenie zostawia wpis w `api_usage` (VIN, status HTTP, wynik, czy płatne, czy z cache, czas odpowiedzi Audatex). **Płatna** jest każda odpowiedź 200, także z cache; 400, 401, 404, 429, 502 i 500 nie są płatne. 401 nie jest zapisywane (nie wiadomo czyj to klient). Rozliczenie miesięczne (czas `Europe/Warsaw`, od 1. dnia 00:00 do 1. dnia następnego miesiąca 00:00) pokazuje panel **API**: liczba płatnych raportów, liczba wszystkich wywołań i rozbicie po wyniku. Przycisk **Pobierz CSV** daje plik `api-usage-<nip>-<RRRR-MM>.csv` (UTF-8 z BOM, separator `;`, kolumny `data;vin;wynik;status_http;platny;z_cache`).
+
+VIN trafia do bazy (`api_usage`, cache), ale nie do logów aplikacji.
+
+### Ręczny test na realnym Audatex
+
+```bash
+npx tsx scripts/identify-vin.ts <VIN>
+```
+
+Skrypt czyta `.env`, wypisuje JSON z mappera i nie zapisuje nic do bazy.
+
+---
+
 ## 💻 Uruchomienie Lokalnie i Testy
 
 ```bash
