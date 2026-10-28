@@ -22,6 +22,7 @@ const ORDER_SELECT = {
   invoiceStatus: true,
   invoiceNumber: true,
   invoiceToken: true,
+  fakturowniaInvoiceId: true,
   ksefStatus: true,
   invoiceEmailedAt: true,
   items: {
@@ -68,6 +69,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         invoiceStatus: order.invoiceStatus,
         invoiceNumber: order.invoiceNumber,
         invoiceToken: order.invoiceToken,
+        fakturowniaInvoiceId: order.fakturowniaInvoiceId,
         ksefStatus: order.ksefStatus,
         invoiceEmailedAt: order.invoiceEmailedAt,
       },

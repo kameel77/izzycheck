@@ -23,6 +23,7 @@ type InvoiceFields = {
   invoiceStatus: InvoiceStatus;
   invoiceNumber: string | null;
   invoiceToken: string | null;
+  fakturowniaInvoiceId: string | null;
   ksefStatus: string | null;
   invoiceEmailedAt: Date | null;
 };
@@ -34,9 +35,13 @@ export type WithCustomerInvoice<T extends InvoiceFields> = Omit<T, keyof Invoice
 };
 
 export function withCustomerInvoice<T extends InvoiceFields>(row: T, buildPdfUrl: PdfUrlBuilder): WithCustomerInvoice<T> {
-  const { invoiceStatus, invoiceNumber, invoiceToken, ksefStatus, invoiceEmailedAt, ...rest } = row;
+  const { invoiceStatus, invoiceNumber, invoiceToken, fakturowniaInvoiceId, ksefStatus, invoiceEmailedAt, ...rest } = row;
   if (invoiceStatus === "NOT_REQUIRED") {
     return { ...rest, invoiceStatus: "NOT_REQUIRED", invoiceNumber: null, invoicePdfUrl: null };
+  }
+  // Issued by hand (no Fakturownia id): the admin sends the document himself, the customer sees the number only.
+  if (invoiceStatus === "ISSUED" && fakturowniaInvoiceId === null) {
+    return { ...rest, invoiceStatus: "ISSUED", invoiceNumber, invoicePdfUrl: null };
   }
   // The PDF of an invoice that KSeF rejected or has not confirmed yet could be a document that gets corrected
   // or replaced: it is shown only with a token and once KSeF is OK and final, or after it was e-mailed.

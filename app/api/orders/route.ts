@@ -19,6 +19,7 @@ const ORDER_LIST_SELECT = {
   invoiceStatus: true,
   invoiceNumber: true,
   invoiceToken: true,
+  fakturowniaInvoiceId: true,
   ksefStatus: true,
   invoiceEmailedAt: true,
   user: { select: { name: true } },

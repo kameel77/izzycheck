@@ -64,6 +64,7 @@ const customerSelect = {
   invoiceStatus: true,
   invoiceNumber: true,
   invoiceToken: true,
+  fakturowniaInvoiceId: true,
   ksefStatus: true,
   invoiceEmailedAt: true,
 } as const;
@@ -178,13 +179,13 @@ describe("markInvoiceManual", () => {
     }
   });
 
-  test("a customer sees a manual invoice (no token, no KSeF tracking) as 'being prepared'", async () => {
+  test("a customer sees a manual invoice's number without a link", async () => {
     const order = await createOrder("NEEDS_ATTENTION");
     await markInvoiceManual(testPrisma, order.id, "FV/ręczna/7", new Date());
     const row = await testPrisma.order.findUniqueOrThrow({ where: { id: order.id }, select: customerSelect });
     const view = withCustomerInvoice(row, buildUrl);
-    assert.equal(view.invoiceStatus, "PENDING");
-    assert.equal(view.invoiceNumber, null);
+    assert.equal(view.invoiceStatus, "ISSUED");
+    assert.equal(view.invoiceNumber, "FV/ręczna/7");
     assert.equal(view.invoicePdfUrl, null);
   });
 

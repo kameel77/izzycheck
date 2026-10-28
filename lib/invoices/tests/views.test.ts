@@ -7,7 +7,11 @@ const buildUrl = (token: string) => `https://shop.fakturownia.pl/invoice/${token
 
 function row(
   invoiceStatus: InvoiceStatus,
-  extra: { invoiceNumber?: string | null; invoiceToken?: string | null; ksefStatus?: string | null; invoiceEmailedAt?: Date | null } = {},
+  extra: {
+    invoiceNumber?: string | null;
+    invoiceToken?: string | null;
+    fakturowniaInvoiceId?: string | null;
+    ksefStatus?: string | null; invoiceEmailedAt?: Date | null } = {},
 ) {
   return {
     id: "order-1",
@@ -15,6 +19,7 @@ function row(
     invoiceStatus,
     invoiceNumber: extra.invoiceNumber === undefined ? "FV/1/10/2026" : extra.invoiceNumber,
     invoiceToken: extra.invoiceToken === undefined ? "secret-token" : extra.invoiceToken,
+    fakturowniaInvoiceId: extra.fakturowniaInvoiceId === undefined ? "INV-1" : extra.fakturowniaInvoiceId,
     ksefStatus: extra.ksefStatus === undefined ? "ok" : extra.ksefStatus,
     invoiceEmailedAt: extra.invoiceEmailedAt === undefined ? null : extra.invoiceEmailedAt,
   };
@@ -33,7 +38,19 @@ describe("withCustomerInvoice", () => {
     assert.ok(!("invoiceToken" in view) && !("ksefStatus" in view) && !("invoiceEmailedAt" in view));
   });
 
-  test("ISSUED without a token (issued by hand) is 'being prepared': no number, no link", () => {
+  test("ISSUED by hand (no Fakturownia id, no token) shows the number without a link, whatever KSeF says", () => {
+    for (const ksefStatus of [null, "send_error"]) {
+      const view = withCustomerInvoice(
+        row("ISSUED", { fakturowniaInvoiceId: null, invoiceToken: null, ksefStatus, invoiceNumber: "FV/ręczna/7" }),
+        buildUrl,
+      );
+      assert.equal(view.invoiceStatus, "ISSUED", String(ksefStatus));
+      assert.equal(view.invoiceNumber, "FV/ręczna/7", String(ksefStatus));
+      assert.equal(view.invoicePdfUrl, null, String(ksefStatus));
+    }
+  });
+
+  test("an automatic invoice without a token never shows anything", () => {
     const view = withCustomerInvoice(row("ISSUED", { invoiceToken: null }), buildUrl);
     assert.equal(view.invoiceStatus, "PENDING");
     assert.equal(view.invoiceNumber, null);
