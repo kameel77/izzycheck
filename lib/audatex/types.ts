@@ -1,9 +1,27 @@
 export class NonRetryableError extends Error {
   public isNonRetryable = true;
+  /** Ustawiane przez postSoapWithRetry, gdy fault Audatex oznacza brak dopasowania VIN (GetCarByVinWs). */
+  public isVinNotFoundFault = false;
   constructor(message: string) {
     super(message);
     this.name = "NonRetryableError";
   }
+}
+
+/** Audatex nie rozpoznał VIN (fault "brak dopasowania" albo odpowiedź bez IbsCode). Komunikat nie zawiera VIN. */
+export class VinNotFoundError extends NonRetryableError {
+  constructor() {
+    super("AUDATEX_VIN_NOT_FOUND: Audatex nie rozpoznał podanego numeru VIN.");
+    this.name = "VinNotFoundError";
+  }
+}
+
+/** Surowy wynik identyfikacji po VIN (bez wyceny): XML-e nadają się do cache'owania i późniejszego mapowania. */
+export interface VehicleIdentificationRaw {
+  ibsCode: string;
+  fittedEquipmentCodes: string[];
+  vinXml: string;
+  classificationXml: string;
 }
 
 export interface VinValuationInput {
