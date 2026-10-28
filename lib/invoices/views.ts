@@ -6,6 +6,7 @@
  */
 import type { InvoiceStatus } from "@prisma/client";
 import { getSharedFakturowniaClient } from "./fakturownia.ts";
+import { dbDateToYmd } from "../billing/proforma-dates.ts";
 import { isInvoiceVisibleToCustomer } from "./ksef.ts";
 
 /** Builds the public PDF link for an invoice token; null when Fakturownia is not configured. */
@@ -51,11 +52,47 @@ export function withCustomerInvoice<T extends InvoiceFields>(row: T, buildPdfUrl
   return { ...rest, invoiceStatus: "ISSUED", invoiceNumber, invoicePdfUrl: buildPdfUrl(invoiceToken) };
 }
 
-/** Admin: same as the stored row, but the raw token is replaced by the ready PDF link. */
-export function withAdminInvoice<T extends { invoiceToken: string | null }>(
+type ProformaFields = {
+  proformaNumber: string | null;
+  proformaToken: string | null;
+  proformaFakturowniaId: string | null;
+  proformaDueDate: Date | string | null;
+  proformaEmailedAt: Date | null;
+  proformaLastError: string | null;
+};
+
+export type WithCustomerProforma<T extends ProformaFields> = Omit<T, keyof ProformaFields> & {
+  proformaNumber: string | null;
+  proformaPdfUrl: string | null;
+  /** YYYY-MM-DD */
+  proformaDueDate: string | null;
+};
+
+/** Customer: the proforma's number, PDF link and due date only; never the token, the Fakturownia id, errors or e-mail state. */
+export function withCustomerProforma<T extends ProformaFields>(row: T, buildPdfUrl: PdfUrlBuilder): WithCustomerProforma<T> {
+  const { proformaNumber, proformaToken, proformaDueDate, proformaFakturowniaId, proformaEmailedAt, proformaLastError, ...rest } = row;
+  return {
+    ...rest,
+    proformaNumber,
+    proformaPdfUrl: proformaToken ? buildPdfUrl(proformaToken) : null,
+    proformaDueDate:
+      proformaDueDate === null
+        ? null
+        : typeof proformaDueDate === "string"
+          ? proformaDueDate.slice(0, 10)
+          : dbDateToYmd(proformaDueDate),
+  };
+}
+
+/** Admin: same as the stored row, but the raw invoice and proforma tokens are replaced by the ready PDF links. */
+export function withAdminInvoice<T extends { invoiceToken: string | null; proformaToken: string | null }>(
   row: T,
   buildPdfUrl: PdfUrlBuilder,
-): Omit<T, "invoiceToken"> & { invoicePdfUrl: string | null } {
-  const { invoiceToken, ...rest } = row;
-  return { ...rest, invoicePdfUrl: invoiceToken ? buildPdfUrl(invoiceToken) : null };
+): Omit<T, "invoiceToken" | "proformaToken"> & { invoicePdfUrl: string | null; proformaPdfUrl: string | null } {
+  const { invoiceToken, proformaToken, ...rest } = row;
+  return {
+    ...rest,
+    invoicePdfUrl: invoiceToken ? buildPdfUrl(invoiceToken) : null,
+    proformaPdfUrl: proformaToken ? buildPdfUrl(proformaToken) : null,
+  };
 }

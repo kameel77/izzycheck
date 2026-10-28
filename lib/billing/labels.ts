@@ -1,5 +1,6 @@
 // Type-only Prisma imports: safe to use from client components (nothing from @prisma/client reaches the bundle).
-import type { CreditLedgerType, CreditType, InvoiceStatus, OrderStatus } from "@prisma/client";
+import type { CreditLedgerType, CreditType, InvoiceStatus, OrderStatus, PaymentMethod } from "@prisma/client";
+import { isProformaExpired } from "./proforma-dates.ts";
 
 export const LEDGER_TYPE_LABELS: Record<CreditLedgerType, string> = {
   USAGE: "Zużycie",
@@ -23,6 +24,31 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   CANCELED: "Anulowane",
   FAILED: "Nieudane",
 };
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  PAYU: "PayU",
+  PROFORMA: "Proforma",
+};
+
+/**
+ * Status shown for an order: a proforma waiting for the transfer reads "Oczekuje na przelew", and "Wygasło"
+ * once its due date has passed; everything else uses ORDER_STATUS_LABELS.
+ */
+export function orderStatusLabel(
+  order: { status: OrderStatus; paymentMethod: PaymentMethod; proformaDueDate: string | Date | null },
+  now: Date,
+): string {
+  if (order.paymentMethod === "PROFORMA" && order.status === "PENDING_PAYMENT") {
+    return isProformaExpired(order, now) ? "Wygasło" : "Oczekuje na przelew";
+  }
+  return ORDER_STATUS_LABELS[order.status];
+}
+
+/** "2026-11-03" (or a serialized date column "2026-11-03T00:00:00.000Z") as "03.11.2026". */
+export function formatYmdPl(ymd: string): string {
+  const [year, month, day] = ymd.slice(0, 10).split("-");
+  return `${day}.${month}.${year}`;
+}
 
 /** Admin view of an order's invoice status (customers only see "Pobierz PDF" or "W przygotowaniu"). */
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {

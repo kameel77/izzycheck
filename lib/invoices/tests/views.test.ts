@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { InvoiceStatus } from "@prisma/client";
-import { withAdminInvoice, withCustomerInvoice } from "../views.ts";
+import { withAdminInvoice, withCustomerInvoice, withCustomerProforma } from "../views.ts";
 
 const buildUrl = (token: string) => `https://shop.fakturownia.pl/invoice/${token}.pdf`;
 
@@ -22,6 +22,27 @@ function row(
     fakturowniaInvoiceId: extra.fakturowniaInvoiceId === undefined ? "INV-1" : extra.fakturowniaInvoiceId,
     ksefStatus: extra.ksefStatus === undefined ? "ok" : extra.ksefStatus,
     invoiceEmailedAt: extra.invoiceEmailedAt === undefined ? null : extra.invoiceEmailedAt,
+  };
+}
+
+function proformaRow(extra: Partial<{
+  proformaNumber: string | null;
+  proformaToken: string | null;
+  proformaFakturowniaId: string | null;
+  proformaDueDate: Date | string | null;
+  proformaEmailedAt: Date | null;
+  proformaLastError: string | null;
+}> = {}) {
+  return {
+    id: "order-2",
+    paymentMethod: "PROFORMA" as const,
+    proformaNumber: "PRO/7/10/2026",
+    proformaToken: "proforma-secret",
+    proformaFakturowniaId: "PF-1",
+    proformaDueDate: new Date("2026-11-13T00:00:00.000Z") as Date | string | null,
+    proformaEmailedAt: null as Date | null,
+    proformaLastError: null as string | null,
+    ...extra,
   };
 }
 
@@ -102,9 +123,60 @@ describe("withCustomerInvoice", () => {
   });
 });
 
+describe("withCustomerProforma", () => {
+  test("exposes the number, the PDF link and the due date, never the token or internals", () => {
+    const view = withCustomerProforma(
+      proformaRow({ proformaEmailedAt: new Date("2026-10-30T10:00:00Z"), proformaLastError: "smtp down" }),
+      buildUrl,
+    );
+    assert.deepEqual(view, {
+      id: "order-2",
+      paymentMethod: "PROFORMA",
+      proformaNumber: "PRO/7/10/2026",
+      proformaPdfUrl: "https://shop.fakturownia.pl/invoice/proforma-secret.pdf",
+      proformaDueDate: "2026-11-13",
+    });
+    // The token only ever appears inside the ready PDF link.
+    assert.ok(!JSON.stringify({ ...view, proformaPdfUrl: null }).includes("proforma-secret"));
+    assert.ok(!("proformaToken" in view) && !("proformaFakturowniaId" in view));
+    assert.ok(!("proformaLastError" in view) && !("proformaEmailedAt" in view));
+  });
+
+  test("a due date that is already a YYYY-MM-DD string is kept", () => {
+    assert.equal(withCustomerProforma(proformaRow({ proformaDueDate: "2026-11-13" }), buildUrl).proformaDueDate, "2026-11-13");
+  });
+
+  test("a PayU order has no proforma: all three fields are null", () => {
+    const view = withCustomerProforma(
+      proformaRow({
+        proformaNumber: null,
+        proformaToken: null,
+        proformaFakturowniaId: null,
+        proformaDueDate: null,
+      }),
+      buildUrl,
+    );
+    assert.equal(view.proformaNumber, null);
+    assert.equal(view.proformaPdfUrl, null);
+    assert.equal(view.proformaDueDate, null);
+  });
+
+  test("no PDF link when the PDF builder has none (Fakturownia not configured)", () => {
+    assert.equal(withCustomerProforma(proformaRow(), () => null).proformaPdfUrl, null);
+  });
+});
+
 describe("withAdminInvoice", () => {
+  test("replaces the proforma token by the PDF link too", () => {
+    const view = withAdminInvoice({ ...row("ISSUED"), proformaToken: "proforma-secret" }, buildUrl);
+    assert.ok(!("proformaToken" in view));
+    assert.equal(view.proformaPdfUrl, "https://shop.fakturownia.pl/invoice/proforma-secret.pdf");
+    assert.ok(!JSON.stringify({ ...view, proformaPdfUrl: null }).includes("proforma-secret"));
+    assert.equal(withAdminInvoice({ ...row("ISSUED"), proformaToken: null }, buildUrl).proformaPdfUrl, null);
+  });
+
   test("replaces the token by the PDF link and keeps the other fields", () => {
-    const view = withAdminInvoice({ ...row("FAILED"), invoiceLastError: "boom" }, buildUrl);
+    const view = withAdminInvoice({ ...row("FAILED"), proformaToken: null, invoiceLastError: "boom" }, buildUrl);
     assert.ok(!("invoiceToken" in view));
     assert.equal(view.invoicePdfUrl, "https://shop.fakturownia.pl/invoice/secret-token.pdf");
     assert.equal(view.invoiceLastError, "boom");
@@ -112,6 +184,6 @@ describe("withAdminInvoice", () => {
   });
 
   test("no token, no link", () => {
-    assert.equal(withAdminInvoice(row("ISSUED", { invoiceToken: null }), buildUrl).invoicePdfUrl, null);
+    assert.equal(withAdminInvoice({ ...row("ISSUED", { invoiceToken: null }), proformaToken: null }, buildUrl).invoicePdfUrl, null);
   });
 });

@@ -6,7 +6,7 @@ import { createProformaOrder } from "@/lib/billing/proforma";
 import { getFakturowniaConfig, getSharedFakturowniaClient } from "@/lib/invoices/fakturownia";
 import { getPayuConfig, getSharedPayuClient } from "@/lib/payments/payu";
 import { isRateLimited } from "@/lib/rate-limit";
-import { sharedPdfUrlBuilder, withCustomerInvoice } from "@/lib/invoices/views";
+import { sharedPdfUrlBuilder, withCustomerInvoice, withCustomerProforma } from "@/lib/invoices/views";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +24,13 @@ const ORDER_LIST_SELECT = {
   fakturowniaInvoiceId: true,
   ksefStatus: true,
   invoiceEmailedAt: true,
+  paymentMethod: true,
+  proformaFakturowniaId: true,
+  proformaNumber: true,
+  proformaToken: true,
+  proformaDueDate: true,
+  proformaEmailedAt: true,
+  proformaLastError: true,
   user: { select: { name: true } },
   items: {
     select: { packageName: true, creditType: true, creditsPerPackage: true, quantity: true, lineGrossGrosze: true },
@@ -198,7 +205,7 @@ export async function GET(request: Request) {
     const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
     const buildPdfUrl = sharedPdfUrlBuilder();
     return NextResponse.json({
-      orders: page.map((row) => withCustomerInvoice(row, buildPdfUrl)),
+      orders: page.map((row) => withCustomerProforma(withCustomerInvoice(row, buildPdfUrl), buildPdfUrl)),
       nextCursor: hasMore ? page[page.length - 1].id : null,
     });
   } catch (error) {

@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2, Receipt, RefreshCw } from "lucide-react";
 import AdminOrdersTable, { type AdminOrderRow } from "@/components/billing/AdminOrdersTable";
-import { INVOICE_STATUS_LABELS, ORDER_STATUS_LABELS, describeCronAge } from "@/lib/billing/labels";
+import { INVOICE_STATUS_LABELS, ORDER_STATUS_LABELS, PAYMENT_METHOD_LABELS, describeCronAge } from "@/lib/billing/labels";
 
 interface Filters {
   status: string;
   invoiceStatus: string;
+  paymentMethod: string;
   organizationId: string;
   /** "true" shows only invoices with a KSeF problem. */
   ksefProblem: string;
@@ -20,7 +21,7 @@ interface Attention {
   lastCronRunAt: string | null;
 }
 
-const NO_FILTERS: Filters = { status: "", invoiceStatus: "", organizationId: "", ksefProblem: "" };
+const NO_FILTERS: Filters = { status: "", invoiceStatus: "", paymentMethod: "", organizationId: "", ksefProblem: "" };
 
 const selectClass =
   "rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white";
@@ -44,6 +45,7 @@ export default function AdminOrdersPage() {
     const params = new URLSearchParams();
     if (activeFilters.status) params.set("status", activeFilters.status);
     if (activeFilters.invoiceStatus) params.set("invoiceStatus", activeFilters.invoiceStatus);
+    if (activeFilters.paymentMethod) params.set("paymentMethod", activeFilters.paymentMethod);
     if (activeFilters.organizationId) params.set("organizationId", activeFilters.organizationId);
     if (activeFilters.ksefProblem) params.set("ksefProblem", activeFilters.ksefProblem);
     if (cursor) params.set("cursor", cursor);
@@ -170,6 +172,17 @@ export default function AdminOrdersPage() {
           <select value={filters.status} onChange={(e) => setFilter({ status: e.target.value })} className={selectClass}>
             <option value="">Wszystkie</option>
             {Object.entries(ORDER_STATUS_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className={labelClass}>Metoda płatności</span>
+          <select value={filters.paymentMethod} onChange={(e) => setFilter({ paymentMethod: e.target.value })} className={selectClass}>
+            <option value="">Wszystkie</option>
+            {Object.entries(PAYMENT_METHOD_LABELS).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
               </option>

@@ -1,6 +1,6 @@
-import type { InvoiceStatus, OrderStatus, Prisma } from "@prisma/client";
+import type { InvoiceStatus, OrderStatus, PaymentMethod, Prisma } from "@prisma/client";
 import { ksefProblemWhere } from "../invoices/ksef.ts";
-import { INVOICE_STATUS_LABELS, ORDER_STATUS_LABELS } from "./labels.ts";
+import { INVOICE_STATUS_LABELS, ORDER_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "./labels.ts";
 
 export const ADMIN_ORDERS_PAGE_SIZE = 50;
 
@@ -11,6 +11,15 @@ export const ADMIN_ORDER_SELECT = {
   createdAt: true,
   paidAt: true,
   payuSandbox: true,
+  paymentMethod: true,
+  paymentNote: true,
+  proformaFakturowniaId: true,
+  proformaNumber: true,
+  proformaToken: true,
+  proformaIssuedAt: true,
+  proformaDueDate: true,
+  proformaEmailedAt: true,
+  proformaLastError: true,
   organization: { select: { id: true, name: true } },
   user: { select: { name: true, email: true } },
   items: {
@@ -34,6 +43,7 @@ export const ADMIN_ORDER_SELECT = {
 export type AdminOrderFilters = {
   status?: OrderStatus;
   invoiceStatus?: InvoiceStatus;
+  paymentMethod?: PaymentMethod;
   organizationId?: string;
   /** Only ISSUED invoices with a KSeF problem (see ksefProblem). */
   ksefProblem?: boolean;
@@ -49,6 +59,10 @@ export function parseAdminOrderFilters(params: URLSearchParams): AdminOrderFilte
   const invoiceStatus = params.get("invoiceStatus");
   if (invoiceStatus !== null && Object.prototype.hasOwnProperty.call(INVOICE_STATUS_LABELS, invoiceStatus)) {
     filters.invoiceStatus = invoiceStatus as InvoiceStatus;
+  }
+  const paymentMethod = params.get("paymentMethod");
+  if (paymentMethod !== null && Object.prototype.hasOwnProperty.call(PAYMENT_METHOD_LABELS, paymentMethod)) {
+    filters.paymentMethod = paymentMethod as PaymentMethod;
   }
   const organizationId = params.get("organizationId")?.trim();
   if (organizationId) filters.organizationId = organizationId;

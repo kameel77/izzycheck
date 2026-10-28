@@ -6,7 +6,7 @@ import { canResumePayment, canViewOrder } from "@/lib/billing/order-access";
 import { issueInvoiceAfterResponse } from "@/lib/invoices/background";
 import { getSharedPayuClient } from "@/lib/payments/payu";
 import { isRateLimited } from "@/lib/rate-limit";
-import { sharedPdfUrlBuilder, withCustomerInvoice } from "@/lib/invoices/views";
+import { sharedPdfUrlBuilder, withCustomerInvoice, withCustomerProforma } from "@/lib/invoices/views";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +25,13 @@ const ORDER_SELECT = {
   fakturowniaInvoiceId: true,
   ksefStatus: true,
   invoiceEmailedAt: true,
+  paymentMethod: true,
+  proformaFakturowniaId: true,
+  proformaNumber: true,
+  proformaToken: true,
+  proformaDueDate: true,
+  proformaEmailedAt: true,
+  proformaLastError: true,
   items: {
     select: { packageName: true, creditType: true, creditsPerPackage: true, quantity: true, lineGrossGrosze: true },
   },
@@ -75,6 +82,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       },
       sharedPdfUrlBuilder(),
     );
+    const proforma = withCustomerProforma(
+      {
+        proformaNumber: order.proformaNumber,
+        proformaToken: order.proformaToken,
+        proformaFakturowniaId: order.proformaFakturowniaId,
+        proformaDueDate: order.proformaDueDate,
+        proformaEmailedAt: order.proformaEmailedAt,
+        proformaLastError: order.proformaLastError,
+      },
+      sharedPdfUrlBuilder(),
+    );
     return NextResponse.json({
       id: order.id,
       status: order.status,
@@ -85,6 +103,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       invoiceStatus: invoice.invoiceStatus,
       invoiceNumber: invoice.invoiceNumber,
       invoicePdfUrl: invoice.invoicePdfUrl,
+      paymentMethod: order.paymentMethod,
+      proformaNumber: proforma.proformaNumber,
+      proformaPdfUrl: proforma.proformaPdfUrl,
+      proformaDueDate: proforma.proformaDueDate,
       synced,
       ...(canResumePayment(freshUser.id, order) ? { payuRedirectUri: order.payuRedirectUri } : {}),
     });
