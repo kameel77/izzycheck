@@ -93,7 +93,11 @@ export default function NewReportPage() {
     if (valuationNoCredits) {
       setIncludeValuation(false);
       // Claim check was only implied by valuation; drop it when the user may not order it alone.
-      if (!currentUser.canGenerateClaimCheck) setIncludeClaimCheck(false);
+      // Claim details need the claim check to run, so they go with it.
+      if (!currentUser.canGenerateClaimCheck) {
+        setIncludeClaimCheck(false);
+        setIncludeClaimDetails(false);
+      }
     }
     if (claimDetailsNoCredits) setIncludeClaimDetails(false);
   }, [currentUser, valuationNoCredits, claimDetailsNoCredits]);

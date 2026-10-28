@@ -109,7 +109,8 @@ export async function POST(req: Request) {
       if (includeClaimDetails && !freshUser.canGenerateClaimDetails) {
         return NextResponse.json({ error: "Brak uprawnień do generowania szczegółów szkód." }, { status: 403 });
       }
-      if (includeClaimCheck && !includeValuation && !freshUser.canGenerateClaimCheck) {
+      // Claim details need CLAIM_CHECK to run first, so without valuation the user must be allowed to run it.
+      if ((includeClaimCheck || includeClaimDetails) && !includeValuation && !freshUser.canGenerateClaimCheck) {
         return NextResponse.json({ error: "Brak uprawnień do weryfikacji historii szkód." }, { status: 403 });
       }
     }
