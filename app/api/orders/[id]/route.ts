@@ -42,11 +42,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     let order = await prisma.order.findUnique({ where: { id }, select: ORDER_SELECT });
     if (!order || !canViewOrder(viewer, order)) return notFound();
 
+    // True only when PayU was really polled; false when the order needed no sync or the poll was throttled.
+    let synced = false;
     if (order.status === "PENDING_PAYMENT") {
       const payu = getSharedPayuClient();
       // At most one PayU poll per order per 10 s, however often the page asks; otherwise return DB state.
       if (payu && !isRateLimited("orders_sync", order.id, 1, 10_000).limited) {
-        await syncOrderWithPayu(prisma, order.id, payu);
+        synced = await syncOrderWithPayu(prisma, order.id, payu);
         order = await prisma.order.findUnique({ where: { id }, select: ORDER_SELECT });
         if (!order) return notFound();
       }
@@ -59,6 +61,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       createdAt: order.createdAt,
       paidAt: order.paidAt,
       items: order.items,
+      synced,
       ...(canResumePayment(freshUser.id, order) ? { payuRedirectUri: order.payuRedirectUri } : {}),
     });
   } catch (error) {

@@ -964,7 +964,7 @@ describe("syncOrderWithPayu", () => {
         return { status: "COMPLETED", totalAmount: order.totalGrossGrosze, currencyCode: "PLN", extOrderId: order.id };
       },
     });
-    await syncOrderWithPayu(testPrisma, order.id, payu);
+    assert.equal(await syncOrderWithPayu(testPrisma, order.id, payu), true);
     assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PAID");
     assert.equal(await readBalance(ctx.org.id, "VALUATION"), 25);
     assert.equal(await readBalance(ctx.org.id, "CLAIM_DETAILS"), 10);
@@ -980,7 +980,7 @@ describe("syncOrderWithPayu", () => {
         return { status: "COMPLETED", totalAmount: order.totalGrossGrosze, currencyCode: "PLN", extOrderId: order.id };
       },
     });
-    await syncOrderWithPayu(testPrisma, order.id, payu);
+    assert.equal(await syncOrderWithPayu(testPrisma, order.id, payu), false);
     assert.equal(calls, 0);
     assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PENDING_PAYMENT");
   });

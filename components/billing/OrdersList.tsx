@@ -159,7 +159,7 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
           ...prev,
           [orderId]: {
             checking: false,
-            message: "Status sprawdzony.",
+            message: json.synced === true ? "Status sprawdzony." : "Sprawdzono niedawno — spróbuj ponownie za kilka sekund.",
             payuRedirectUri:
               json.status === "PENDING_PAYMENT" && typeof json.payuRedirectUri === "string" ? json.payuRedirectUri : undefined,
           },

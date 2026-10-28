@@ -112,7 +112,12 @@ export default function CreditShop() {
       const res = await fetch("/api/credit-packages");
       if (!res.ok) return;
       const json = await res.json();
-      if (Array.isArray(json?.packages)) setData(json);
+      if (Array.isArray(json?.packages)) {
+        setData(json);
+        // Drop cart lines for packages that are no longer on sale; otherwise the next order keeps failing.
+        const available = new Set((json.packages as ShopPackage[]).map((p) => p.id));
+        setQuantities((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => available.has(id))));
+      }
     } catch {
       // The old price list stays; the next order attempt reports any difference again.
     }

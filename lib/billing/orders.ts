@@ -355,21 +355,21 @@ export async function handlePayuNotification(
 /**
  * Pull-based fallback for a missed notification: asks PayU for the order state and applies it. Only for
  * PENDING_PAYMENT orders with a PayU id, older than 10 s. Errors are logged and swallowed (a status read
- * must not fail because PayU is slow).
+ * must not fail because PayU is slow). Returns true only when PayU's state was fetched and applied.
  */
-export async function syncOrderWithPayu(db: PrismaClient, orderId: string, payu: PayuClientLike): Promise<void> {
+export async function syncOrderWithPayu(db: PrismaClient, orderId: string, payu: PayuClientLike): Promise<boolean> {
   try {
     const order = await db.order.findUnique({
       where: { id: orderId },
       select: { status: true, payuOrderId: true, createdAt: true },
     });
-    if (!order || order.status !== "PENDING_PAYMENT" || !order.payuOrderId) return;
-    if (Date.now() - order.createdAt.getTime() < SYNC_MIN_AGE_MS) return;
+    if (!order || order.status !== "PENDING_PAYMENT" || !order.payuOrderId) return false;
+    if (Date.now() - order.createdAt.getTime() < SYNC_MIN_AGE_MS) return false;
 
     const info = await payu.getOrder(order.payuOrderId);
     if (info.extOrderId !== orderId) {
       console.error("[PAYU_SYNC_MISMATCH]", { orderId, payuOrderId: order.payuOrderId, receivedExtOrderId: info.extOrderId });
-      return;
+      return false;
     }
     await applyPayuStatus(db, {
       orderId,
@@ -378,7 +378,9 @@ export async function syncOrderWithPayu(db: PrismaClient, orderId: string, payu:
       totalAmount: info.totalAmount,
       currencyCode: info.currencyCode,
     });
+    return true;
   } catch (error) {
     console.error("[PAYU_SYNC_ERROR]", orderId, error);
+    return false;
   }
 }
