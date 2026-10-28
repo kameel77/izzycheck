@@ -47,7 +47,25 @@ Zasady naliczania:
 - Kredyt jest rezerwowany przy starcie modułu i pobierany dopiero za dostarczony wynik.
 - Błąd, brak danych lub 0 szkód = brak opłaty (rezerwacja jest zwracana).
 
-**Faza 1:** doładowanie salda wyłącznie ręcznie przez admina (panel: Organizacje → Kredyty). Zakup online (PayU) i faktury (Fakturownia) pojawią się w kolejnych fazach.
+**Doładowanie ręczne:** admin może zasilić saldo organizacji w panelu (Organizacje → Kredyty). Faktury (Fakturownia) pojawią się w fazie 3.
+
+### Zakup online (PayU)
+
+- **Kto kupuje:** każdy użytkownik organizacji w trybie Prepaid (rola bez znaczenia). Organizacje „Bez limitu” i konta bez organizacji nie widzą sklepu.
+- **Koszyk i cennik:** sklep na stronie kredytów działa na koszyku (1–20 linii, ilość 1–100 na linię). Pakiety i ceny (netto, VAT liczony na sztukę) zarządza admin w panelu **Cennik kredytów**. Ceny zawsze pochodzą z bazy, nie od klienta.
+- **Zmienne środowiskowe:** `PAYU_BASE_URL`, `PAYU_POS_ID`, `PAYU_CLIENT_ID`, `PAYU_CLIENT_SECRET`, `PAYU_SECOND_KEY`, `APP_URL` (zob. `.env.example` i `docker-compose.yml`). Wartości pobierz z panelu PayU (punkt płatności).
+- **Adres powiadomień:** w panelu PayU ustaw URL powiadomień na `{APP_URL}/api/payments/payu/notify`.
+- **Sandbox vs produkcja:** domyślne `PAYU_BASE_URL` to sandbox PayU (`https://secure.snd.payu.com`). Na produkcji ustaw `https://secure.payu.com` wraz z danymi produkcyjnego punktu płatności.
+- **Brak konfiguracji:** gdy brakuje którejkolwiek zmiennej, płatności online są wyłączone. Sklep pokazuje „Płatności online są chwilowo niedostępne…”, a API zwraca 503.
+- **Auto-odbiór:** punkt płatności (POS) w PayU musi mieć włączony automatyczny odbiór płatności (auto-odbiór). Inaczej płatności zostają w statusie `WAITING_FOR_CONFIRMATION` i kredyty nie są dodawane.
+- **`APP_URL`:** musi być publicznym adresem https aplikacji.
+- **Adres IP klienta:** brany z pierwszego wpisu nagłówka `X-Forwarded-For`, więc Traefik/Cloudflare muszą go ustawiać.
+- **Logi do obserwowania:**
+  - `[PAYU_PAID_AFTER_CANCEL]` — klient zapłacił po anulowaniu zamówienia (płatność podwójna), sprawdź zwrot środków.
+  - `[PAYU_UNKNOWN_ORDER]` — powiadomienie dla nieznanego zamówienia.
+  - `[PAYU_AMOUNT_MISMATCH]` — kwota lub waluta z powiadomienia różni się od zamówienia.
+  - `[PAYU_SYNC_MISMATCH]` — niezgodność przy synchronizacji statusu z PayU.
+- **Faktury** (Fakturownia) pojawią się w fazie 3.
 
 ### Lista kontrolna wdrożenia
 

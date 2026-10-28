@@ -25,6 +25,12 @@ services:
       - AUDATEX_LICENCE_NUMBER=${AUDATEX_LICENCE_NUMBER}
       - AUDATEX_MARKET_CODE=${AUDATEX_MARKET_CODE:-PL}
       - AUDATEX_LANGUAGE=${AUDATEX_LANGUAGE:-PL}
+      - PAYU_BASE_URL=${PAYU_BASE_URL:-https://secure.snd.payu.com}
+      - PAYU_POS_ID=${PAYU_POS_ID}
+      - PAYU_CLIENT_ID=${PAYU_CLIENT_ID}
+      - PAYU_CLIENT_SECRET=${PAYU_CLIENT_SECRET}
+      - PAYU_SECOND_KEY=${PAYU_SECOND_KEY}
+      - APP_URL=${APP_URL}
     depends_on:
       postgres:
         condition: service_healthy
