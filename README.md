@@ -53,14 +53,22 @@ Zasady naliczania:
 
 - **Kto kupuje:** każdy użytkownik organizacji w trybie Prepaid (rola bez znaczenia). Organizacje „Bez limitu” i konta bez organizacji nie widzą sklepu.
 - **Koszyk i cennik:** sklep na stronie kredytów działa na koszyku (1–20 linii, ilość 1–100 na linię). Pakiety i ceny (netto, VAT liczony na sztukę) zarządza admin w panelu **Cennik kredytów**. Ceny zawsze pochodzą z bazy, nie od klienta.
-- **Zmienne środowiskowe:** `PAYU_BASE_URL`, `PAYU_POS_ID`, `PAYU_CLIENT_ID`, `PAYU_CLIENT_SECRET`, `PAYU_SECOND_KEY`, `APP_URL` (zob. `.env.example` i `docker-compose.yml`). Wartości pobierz z panelu PayU (punkt płatności).
+- **Zmienne środowiskowe:** `PAYU_BASE_URL`, `PAYU_POS_ID`, `PAYU_CLIENT_ID`, `PAYU_CLIENT_SECRET`, `PAYU_SECOND_KEY`, `APP_URL`, opcjonalnie `PAYU_ALLOW_SANDBOX` (zob. `.env.example` i `docker-compose.yml`). Wartości pobierz z panelu PayU (punkt płatności).
 - **Adres powiadomień:** w panelu PayU ustaw URL powiadomień na `{APP_URL}/api/payments/payu/notify`.
-- **Sandbox vs produkcja:** domyślne `PAYU_BASE_URL` to sandbox PayU (`https://secure.snd.payu.com`). Na produkcji ustaw `https://secure.payu.com` wraz z danymi produkcyjnego punktu płatności.
+- **Sandbox vs produkcja:** `PAYU_BASE_URL` nie ma wartości domyślnej w `docker-compose.yml` (brak = płatności wyłączone). Sandbox PayU to `https://secure.snd.payu.com`, produkcja to `https://secure.payu.com` wraz z danymi produkcyjnego punktu płatności. Sandbox w środowisku produkcyjnym (`NODE_ENV=production`) jest odrzucany, bo płatności testowe dodawałyby prawdziwe kredyty. Płatności zostają wtedy wyłączone, dopóki nie ustawisz `PAYU_ALLOW_SANDBOX=true` (tylko do świadomego testu; domyślnie `false`). Zamówienia utworzone na sandboxie mają w bazie `orders.payuSandbox = true`.
 - **Brak konfiguracji:** gdy brakuje którejkolwiek zmiennej, płatności online są wyłączone. Sklep pokazuje „Płatności online są chwilowo niedostępne…”, a API zwraca 503.
 - **Auto-odbiór:** punkt płatności (POS) w PayU musi mieć włączony automatyczny odbiór płatności (auto-odbiór). Inaczej płatności zostają w statusie `WAITING_FOR_CONFIRMATION` i kredyty nie są dodawane.
 - **`APP_URL`:** musi być publicznym adresem https aplikacji.
 - **Adres IP klienta:** brany z pierwszego wpisu nagłówka `X-Forwarded-For`, więc Traefik/Cloudflare muszą go ustawiać.
+- **Akcje w historii zamówień:** przy zamówieniu „Oczekuje na płatność” przycisk **Sprawdź status** odpytuje PayU o aktualny stan (nie częściej niż raz na 10 s na zamówienie), co pozwala odzyskać zgubione powiadomienie. Po sprawdzeniu twórca zamówienia widzi też link **Dokończ płatność** (adres płatności PayU jest dostępny tylko dla twórcy i tylko dopóki zamówienie czeka na płatność).
+- **Produkcja bez PayU do czasu faktur (faza 3):** na produkcji nie ustawiaj zmiennych PayU, dopóki faktury (faza 3) nie działają. Bez nich sklep pokazuje „Płatności online są chwilowo niedostępne”, a kredyty doładowuje ręcznie admin.
+- **Dane firmy:** zakup wymaga kompletnych danych organizacji (NIP, adres, e-mail do faktur); inaczej API zwraca 409 z prośbą o uzupełnienie.
 - **Logi do obserwowania:**
+  - `[PAYU_INVALID_SIGNATURE]` — powiadomienie z nieprawidłowym podpisem (loguje tylko `hasHeader`, `algorithm`, `bodyLength`). Sprawdź `PAYU_SECOND_KEY` oraz `APP_URL` i adres powiadomień w panelu PayU.
+  - `[PAYU_SANDBOX_IN_PRODUCTION]` — sandbox PayU na produkcji, płatności wyłączone (zob. `PAYU_ALLOW_SANDBOX`).
+  - `[PAYU_NOTIFY_ERROR]` — błąd przetwarzania powiadomienia (odpowiedź 500, PayU ponowi próbę).
+  - `[PAYU_SYNC_ERROR]` — błąd odpytania PayU o status zamówienia (`Sprawdź status` / strona powrotu).
+  - `[PAYU_CREATE_ORDER_ERROR]` — PayU odrzuciło utworzenie zamówienia; zamówienie dostaje status `FAILED`.
   - `[PAYU_PAID_AFTER_CANCEL]` — klient zapłacił po anulowaniu zamówienia (płatność podwójna), sprawdź zwrot środków.
   - `[PAYU_UNKNOWN_ORDER]` — powiadomienie dla nieznanego zamówienia.
   - `[PAYU_AMOUNT_MISMATCH]` — kwota lub waluta z powiadomienia różni się od zamówienia.
