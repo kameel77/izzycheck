@@ -71,6 +71,14 @@ enum CreditHoldStatus {
   RELEASED
 }
 
+enum ApiUsageOutcome {
+  IDENTIFIED
+  NOT_FOUND
+  UPSTREAM_ERROR
+  REJECTED
+  INTERNAL_ERROR
+}
+
 model Organization {
   id           String    @id @default(uuid())
   name         String
@@ -90,6 +98,8 @@ model Organization {
   creditHolds    CreditHold[]
   ledgerEntries  CreditLedgerEntry[]
   orders         Order[]
+  apiClients     ApiClient[]
+  apiUsage       ApiUsage[]
 
   @@map("organizations")
 }
@@ -113,6 +123,7 @@ model User {
   auditEvents             AuditEvent[]
   ledgerEntries           CreditLedgerEntry[]
   orders                  Order[]
+  apiClientsCreated       ApiClient[]
 
   @@index([organizationId])
   @@map("users")
@@ -376,4 +387,52 @@ model OrderItem {
 
   @@index([orderId])
   @@map("order_items")
+}
+
+model ApiClient {
+  id             String       @id @default(uuid())
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  tokenHash      String       @unique // sha256 hex tokenu; sam token nie jest przechowywany
+  tokenPrefix    String       // pierwsze 8 znaków tokenu, do identyfikacji w panelu
+  isActive       Boolean      @default(true)
+  lastUsedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  createdById    String?
+  createdBy      User?        @relation(fields: [createdById], references: [id])
+  usage          ApiUsage[]
+
+  @@map("api_clients")
+}
+
+model ApiUsage {
+  id             String          @id @default(uuid())
+  apiClientId    String
+  apiClient      ApiClient       @relation(fields: [apiClientId], references: [id])
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  endpoint       String
+  vin            String?         // przy 400 może być niepoprawny; obcięty do 32 znaków
+  httpStatus     Int
+  outcome        ApiUsageOutcome
+  billable       Boolean
+  cacheHit       Boolean
+  upstreamMs     Int?
+  createdAt      DateTime        @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([apiClientId, createdAt])
+  @@map("api_usage")
+}
+
+model VinIdentificationCache {
+  vin                  String   @id
+  ibsCode              String
+  fittedEquipmentCodes String   @db.Text // JSON: string[]
+  vinXml               String   @db.Text
+  classificationXml    String   @db.Text
+  fetchedAt            DateTime
+
+  @@map("vin_identification_cache")
 }

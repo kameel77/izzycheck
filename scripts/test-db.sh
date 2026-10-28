@@ -14,7 +14,7 @@ export DATABASE_URL="${TEST_DATABASE_URL:-postgresql://izzy:izzy@localhost:54329
 
 npx prisma migrate deploy
 
-FILES=$(find lib/test-db lib/billing/tests-db lib/invoices/tests-db lib/reports/tests-db -name '*.test.ts' 2>/dev/null | sort)
+FILES=$(find lib/test-db lib/api-clients/tests-db lib/billing/tests-db lib/integrations/mamygo/tests-db lib/invoices/tests-db lib/reports/tests-db -name '*.test.ts' 2>/dev/null | sort)
 if [ -z "$FILES" ]; then
   echo "No DB test files found" >&2
   exit 1
