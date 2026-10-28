@@ -76,7 +76,7 @@ export async function PATCH(
     }
 
     const body = await req.json();
-    const { name, nip, street, postalCode, city, country, billingEmail, isActive } = body;
+    const { name, nip, street, postalCode, city, country, billingEmail, isActive, billingMode } = body;
 
     const dataToUpdate: any = {};
 
@@ -122,6 +122,17 @@ export async function PATCH(
       dataToUpdate.isActive = isActive;
     }
 
+    let billingModeChange: { from: string; to: string } | null = null;
+    if (billingMode !== undefined) {
+      if (billingMode !== "PREPAID" && billingMode !== "UNLIMITED") {
+        return NextResponse.json({ error: "Nieprawidłowy tryb rozliczeń." }, { status: 400 });
+      }
+      if (billingMode !== existingOrg.billingMode) {
+        dataToUpdate.billingMode = billingMode;
+        billingModeChange = { from: existingOrg.billingMode, to: billingMode };
+      }
+    }
+
     const updated = await prisma.organization.update({
       where: { id },
       data: dataToUpdate,
@@ -140,6 +151,18 @@ export async function PATCH(
         }),
       },
     });
+
+    if (billingModeChange) {
+      await prisma.auditEvent.create({
+        data: {
+          userId: freshUser.id,
+          userEmail: freshUser.email,
+          action: "UPDATE_BILLING_MODE",
+          resource: `Organization:${updated.id}`,
+          metadataJson: JSON.stringify({ organizationId: updated.id, ...billingModeChange }),
+        },
+      });
+    }
 
     return NextResponse.json({ success: true, organization: updated });
   } catch (err: any) {

@@ -20,3 +20,15 @@ export function buildLedgerWhere(viewer: LedgerViewer, scope: LedgerScope): Pris
   }
   return { organizationId: viewer.organizationId, type: "USAGE", userId: viewer.userId };
 }
+
+/** Shape of a ledger entry returned by the credit history endpoints. */
+export const LEDGER_ENTRY_SELECT = {
+  id: true,
+  createdAt: true,
+  type: true,
+  creditType: true,
+  amount: true,
+  note: true,
+  report: { select: { id: true, publicReference: true } },
+  user: { select: { name: true } },
+} satisfies Prisma.CreditLedgerEntrySelect;

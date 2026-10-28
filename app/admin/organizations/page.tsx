@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+import OrgCreditsPanel from "@/components/billing/OrgCreditsPanel";
 
 interface Organization {
   id: string;
@@ -485,6 +486,7 @@ export default function AdminOrganizationsPage() {
                 {/* Expanded Users Panel */}
                 {isExpanded && (
                   <div className="border-t border-slate-100 bg-slate-50/50 p-5 dark:border-slate-800/60 dark:bg-slate-950/40 space-y-4">
+                    <OrgCreditsPanel organizationId={org.id} />
                     <div className="flex items-center justify-between">
                       <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                         Pracownicy & Uprawnienia ({org.name})

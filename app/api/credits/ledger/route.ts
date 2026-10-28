@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser, getFreshUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { buildLedgerWhere } from "@/lib/billing/ledger";
+import { buildLedgerWhere, LEDGER_ENTRY_SELECT } from "@/lib/billing/ledger";
 
 const PAGE_SIZE = 50;
 
@@ -31,16 +31,7 @@ export async function GET(request: Request) {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: PAGE_SIZE + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      select: {
-        id: true,
-        createdAt: true,
-        type: true,
-        creditType: true,
-        amount: true,
-        note: true,
-        report: { select: { id: true, publicReference: true } },
-        user: { select: { name: true } },
-      },
+      select: LEDGER_ENTRY_SELECT,
     });
 
     const hasMore = rows.length > PAGE_SIZE;
