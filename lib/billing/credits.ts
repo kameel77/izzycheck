@@ -1,13 +1,16 @@
 /**
  * Prepaid report credits (per organization, per credit type).
  *
- * Money-critical rules: a balance only ever decreases through a conditional updateMany (`balance >= n`),
- * and a hold changes status only through a conditional updateMany on its current status, acting only when
- * `count === 1`. All functions taking `tx` also work with a client outside a transaction.
+ * Money-critical rules: a balance only ever decreases through a conditional updateMany (`balance >= n`).
+ * Every operation on one (reportId, moduleId) is serialized with a row lock on its credit_holds row
+ * (SELECT ... FOR UPDATE; lock order: own hold -> other holds via SKIP LOCKED -> balance), so status
+ * transitions are decided on the locked, current status. Functions taking `db` accept either a
+ * transaction client or a full client (then they open their own transaction).
  */
 import { randomUUID } from "node:crypto";
 import type {
   BillingMode,
+  CreditHoldStatus,
   CreditType,
   PrismaClient,
   Prisma,
@@ -78,26 +81,83 @@ export async function getBalances(db: Db, organizationId: string): Promise<Recor
   return result;
 }
 
-export async function releaseStaleHolds(tx: Db, organizationId: string, staleBefore: Date): Promise<number> {
-  const stale = await tx.creditHold.findMany({
-    where: { organizationId, status: "HELD", updatedAt: { lt: staleBefore } },
-  });
-  let released = 0;
-  for (const hold of stale) {
-    const { count } = await tx.creditHold.updateMany({
-      where: { id: hold.id, status: "HELD" },
-      data: { status: "RELEASED" },
+/** Runs fn in its own transaction for a full client, or directly when already inside one. */
+async function runInTx<T>(db: Db | PrismaClient, fn: (tx: Db) => Promise<T>): Promise<T> {
+  if (typeof (db as PrismaClient).$transaction === "function") {
+    return (db as PrismaClient).$transaction((tx) => fn(tx));
+  }
+  return fn(db as Db);
+}
+
+interface LockedHold {
+  id: string;
+  status: CreditHoldStatus;
+  organizationId: string;
+  creditType: CreditType;
+  updatedAt: Date;
+}
+
+/**
+ * Serializes everything touching one (reportId, moduleId) with a row lock. With createIfMissing a RELEASED
+ * placeholder row is inserted first (ON CONFLICT DO NOTHING), so there is always a row to lock.
+ * Lock order everywhere: own hold row -> other holds (SKIP LOCKED) -> balance row.
+ */
+async function lockHold(
+  tx: Db,
+  args: {
+    reportId: string;
+    moduleId: ReportModuleId;
+    organizationId?: string;
+    creditType?: CreditType;
+    createIfMissing: boolean;
+  },
+): Promise<LockedHold | null> {
+  const { reportId, moduleId, organizationId, creditType, createIfMissing } = args;
+  if (createIfMissing && organizationId && creditType) {
+    await tx.creditHold.createMany({
+      data: [{ organizationId, reportId, moduleId, creditType, status: "RELEASED" }],
+      skipDuplicates: true,
     });
-    if (count === 1) {
+  }
+  const rows = await tx.$queryRaw<LockedHold[]>`
+    SELECT id, status, "organizationId", "creditType", "updatedAt"
+    FROM credit_holds
+    WHERE "reportId" = ${reportId} AND "moduleId" = ${moduleId}::"ReportModuleId"
+    FOR UPDATE`;
+  return rows[0] ?? null;
+}
+
+export async function releaseStaleHolds(
+  db: Db | PrismaClient,
+  organizationId: string,
+  staleBefore: Date,
+): Promise<number> {
+  return runInTx(db, async (tx) => {
+    const candidates = await tx.creditHold.findMany({
+      where: { organizationId, status: "HELD", updatedAt: { lt: staleBefore } },
+      orderBy: { id: "asc" },
+      select: { id: true },
+    });
+    let released = 0;
+    for (const { id } of candidates) {
+      // SKIP LOCKED: a hold being captured/released/reserved right now is not stale for our purposes.
+      const rows = await tx.$queryRaw<{ id: string; organizationId: string; creditType: CreditType }[]>`
+        SELECT id, "organizationId", "creditType"
+        FROM credit_holds
+        WHERE id = ${id} AND status = 'HELD' AND "updatedAt" < ${staleBefore}
+        FOR UPDATE SKIP LOCKED`;
+      const hold = rows[0];
+      if (!hold) continue;
+      await tx.creditHold.update({ where: { id }, data: { status: "RELEASED" } });
       await incrementBalance(tx, hold.organizationId, hold.creditType, 1);
       released += 1;
     }
-  }
-  return released;
+    return released;
+  });
 }
 
 export async function reserveCredit(
-  tx: Db,
+  db: Db | PrismaClient,
   args: {
     organizationId: string;
     reportId: string;
@@ -107,30 +167,35 @@ export async function reserveCredit(
   },
 ): Promise<{ reused: boolean }> {
   const { organizationId, reportId, moduleId, creditType, staleBefore } = args;
+  return runInTx(db, async (tx) => {
+    const locked = await lockHold(tx, { reportId, moduleId, organizationId, creditType, createIfMissing: true });
+    if (!locked) throw new Error("Nie udało się zablokować rezerwacji kredytu.");
 
-  await releaseStaleHolds(tx, organizationId, staleBefore);
+    await releaseStaleHolds(tx, organizationId, staleBefore);
 
-  // Existing live hold: refresh updatedAt so it is not treated as stale, charge nothing again.
-  const refreshed = await tx.creditHold.updateMany({
-    where: { reportId, moduleId, status: "HELD" },
-    data: { updatedAt: new Date() },
+    // Re-read: the sweep runs in this transaction and may have released our own (stale) hold.
+    const hold = await tx.creditHold.findUniqueOrThrow({ where: { id: locked.id } });
+
+    if (hold.status === "HELD") {
+      await tx.creditHold.update({ where: { id: hold.id }, data: { updatedAt: new Date() } });
+      return { reused: true };
+    }
+    if (hold.status === "CAPTURED") return { reused: true };
+
+    if (!(await tryDecrementBalance(tx, organizationId, creditType))) {
+      // Rolls back a freshly inserted placeholder row together with the transaction.
+      throw new NoCreditsError(creditType);
+    }
+    await tx.creditHold.update({
+      where: { id: hold.id },
+      data: { status: "HELD", organizationId, creditType },
+    });
+    return { reused: false };
   });
-  if (refreshed.count === 1) return { reused: true };
-
-  if (!(await tryDecrementBalance(tx, organizationId, creditType))) {
-    throw new NoCreditsError(creditType);
-  }
-
-  await tx.creditHold.upsert({
-    where: { reportId_moduleId: { reportId, moduleId } },
-    update: { organizationId, creditType, status: "HELD" },
-    create: { organizationId, reportId, moduleId, creditType, status: "HELD" },
-  });
-  return { reused: false };
 }
 
 export async function captureCredit(
-  tx: Db,
+  db: Db | PrismaClient,
   args: {
     organizationId: string;
     reportId: string;
@@ -142,62 +207,56 @@ export async function captureCredit(
   const { organizationId, reportId, moduleId, creditType, userId } = args;
   const idempotencyKey = usageKey(reportId, moduleId);
 
-  const { count } = await tx.creditHold.updateMany({
-    where: { reportId, moduleId, status: "HELD" },
-    data: { status: "CAPTURED" },
-  });
-  if (count === 1) {
-    await tx.creditLedgerEntry.create({
-      data: { organizationId, creditType, amount: -1, type: "USAGE", idempotencyKey, reportId, moduleId, userId },
-    });
-    return "CAPTURED";
-  }
+  return runInTx(db, async (tx) => {
+    const hold = await lockHold(tx, { reportId, moduleId, organizationId, creditType, createIfMissing: true });
+    if (!hold) throw new Error("Nie udało się zablokować rezerwacji kredytu.");
 
-  const existing = await tx.creditLedgerEntry.findUnique({ where: { idempotencyKey } });
-  if (existing) return "ALREADY_CAPTURED";
+    if (hold.status === "CAPTURED") return "ALREADY_CAPTURED";
 
-  // The hold was released as stale before the module finished: charge now if the balance allows.
-  const charged = await tryDecrementBalance(tx, organizationId, creditType);
-  await tx.creditLedgerEntry.create({
-    data: {
-      organizationId,
-      creditType,
-      amount: charged ? -1 : 0,
-      type: "USAGE",
-      idempotencyKey,
-      reportId,
-      moduleId,
-      userId,
-      note: charged
+    const writeUsage = (amount: number, note?: string) =>
+      tx.creditLedgerEntry.createMany({
+        data: [
+          { organizationId, creditType, amount, type: "USAGE", idempotencyKey, reportId, moduleId, userId, note },
+        ],
+        skipDuplicates: true,
+      });
+
+    if (hold.status === "HELD") {
+      await tx.creditHold.update({ where: { id: hold.id }, data: { status: "CAPTURED" } });
+      await writeUsage(-1);
+      return "CAPTURED";
+    }
+
+    // RELEASED: the hold was released as stale before the module finished; charge now if the balance allows.
+    const charged = await tryDecrementBalance(tx, organizationId, creditType);
+    await writeUsage(
+      charged ? -1 : 0,
+      charged
         ? "Pobrano po zwolnieniu przeterminowanej rezerwacji"
         : "Nie pobrano: brak salda po przeterminowanej rezerwacji",
-    },
+    );
+    await tx.creditHold.update({ where: { id: hold.id }, data: { status: "CAPTURED" } });
+    return charged ? "CAPTURED_LATE" : "FREE_LATE";
   });
-  await tx.creditHold.upsert({
-    where: { reportId_moduleId: { reportId, moduleId } },
-    update: { status: "CAPTURED" },
-    create: { organizationId, reportId, moduleId, creditType, status: "CAPTURED" },
-  });
-  return charged ? "CAPTURED_LATE" : "FREE_LATE";
 }
 
-export async function releaseCredit(tx: Db, args: { reportId: string; moduleId: ReportModuleId }): Promise<boolean> {
+export async function releaseCredit(
+  db: Db | PrismaClient,
+  args: { reportId: string; moduleId: ReportModuleId },
+): Promise<boolean> {
   const { reportId, moduleId } = args;
-  const hold = await tx.creditHold.findUnique({ where: { reportId_moduleId: { reportId, moduleId } } });
-  if (!hold) return false;
+  return runInTx(db, async (tx) => {
+    const hold = await lockHold(tx, { reportId, moduleId, createIfMissing: false });
+    if (!hold || hold.status !== "HELD") return false;
 
-  const { count } = await tx.creditHold.updateMany({
-    where: { id: hold.id, status: "HELD" },
-    data: { status: "RELEASED" },
+    await tx.creditHold.update({ where: { id: hold.id }, data: { status: "RELEASED" } });
+    await incrementBalance(tx, hold.organizationId, hold.creditType, 1);
+    return true;
   });
-  if (count !== 1) return false;
-
-  await incrementBalance(tx, hold.organizationId, hold.creditType, 1);
-  return true;
 }
 
 export async function recordUnlimitedUsage(
-  tx: Db,
+  db: Db | PrismaClient,
   args: {
     organizationId: string;
     reportId: string;
@@ -207,21 +266,23 @@ export async function recordUnlimitedUsage(
   },
 ): Promise<void> {
   const { organizationId, reportId, moduleId, creditType, userId } = args;
-  // skipDuplicates = ON CONFLICT DO NOTHING: an existing entry is ignored without aborting a surrounding transaction.
-  await tx.creditLedgerEntry.createMany({
-    data: [
-      {
-        organizationId,
-        creditType,
-        amount: 0,
-        type: "USAGE",
-        idempotencyKey: usageKey(reportId, moduleId),
-        reportId,
-        moduleId,
-        userId,
-      },
-    ],
-    skipDuplicates: true,
+  await runInTx(db, async (tx) => {
+    // skipDuplicates = ON CONFLICT DO NOTHING: an existing entry is ignored without aborting a surrounding transaction.
+    await tx.creditLedgerEntry.createMany({
+      data: [
+        {
+          organizationId,
+          creditType,
+          amount: 0,
+          type: "USAGE",
+          idempotencyKey: usageKey(reportId, moduleId),
+          reportId,
+          moduleId,
+          userId,
+        },
+      ],
+      skipDuplicates: true,
+    });
   });
 }
 
