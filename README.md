@@ -47,7 +47,7 @@ Zasady naliczania:
 - Kredyt jest rezerwowany przy starcie modułu i pobierany dopiero za dostarczony wynik.
 - Błąd, brak danych lub 0 szkód = brak opłaty (rezerwacja jest zwracana).
 
-**Doładowanie ręczne:** admin może zasilić saldo organizacji w panelu (Organizacje → Kredyty). Faktury (Fakturownia) pojawią się w fazie 3.
+**Doładowanie ręczne:** admin może zasilić saldo organizacji w panelu (Organizacje → Kredyty). Faktury za zakupy online wystawia Fakturownia (zob. „Faktury (Fakturownia)” poniżej).
 
 ### Zakup online (PayU)
 
@@ -61,7 +61,7 @@ Zasady naliczania:
 - **`APP_URL`:** musi być publicznym adresem https aplikacji.
 - **Adres IP klienta:** brany z pierwszego wpisu nagłówka `X-Forwarded-For`, więc Traefik/Cloudflare muszą go ustawiać.
 - **Akcje w historii zamówień:** przy zamówieniu „Oczekuje na płatność” przycisk **Sprawdź status** odpytuje PayU o aktualny stan (nie częściej niż raz na 10 s na zamówienie), co pozwala odzyskać zgubione powiadomienie. Po sprawdzeniu twórca zamówienia widzi też link **Dokończ płatność** (adres płatności PayU jest dostępny tylko dla twórcy i tylko dopóki zamówienie czeka na płatność).
-- **Produkcja bez PayU do czasu faktur (faza 3):** na produkcji nie ustawiaj zmiennych PayU, dopóki faktury (faza 3) nie działają. Bez nich sklep pokazuje „Płatności online są chwilowo niedostępne”, a kredyty doładowuje ręcznie admin.
+- **Produkcja bez PayU do czasu uruchomienia faktur:** na produkcji nie ustawiaj zmiennych PayU, dopóki Fakturownia i zadanie cykliczne nie działają (kolejność w sekcji „Faktury (Fakturownia)”). Bez nich sklep pokazuje „Płatności online są chwilowo niedostępne”, a kredyty doładowuje ręcznie admin.
 - **Dane firmy:** zakup wymaga kompletnych danych organizacji (NIP, adres, e-mail do faktur); inaczej API zwraca 409 z prośbą o uzupełnienie.
 - **Logi do obserwowania:**
   - `[PAYU_INVALID_SIGNATURE]` — powiadomienie z nieprawidłowym podpisem (loguje tylko `hasHeader`, `algorithm`, `bodyLength`). Sprawdź `PAYU_SECOND_KEY` oraz `APP_URL` i adres powiadomień w panelu PayU.
@@ -73,7 +73,53 @@ Zasady naliczania:
   - `[PAYU_UNKNOWN_ORDER]` — powiadomienie dla nieznanego zamówienia.
   - `[PAYU_AMOUNT_MISMATCH]` — kwota lub waluta z powiadomienia różni się od zamówienia.
   - `[PAYU_SYNC_MISMATCH]` — niezgodność przy synchronizacji statusu z PayU.
-- **Faktury** (Fakturownia) pojawią się w fazie 3.
+- **Faktury:** zob. sekcja „Faktury (Fakturownia)” poniżej.
+
+### Faktury (Fakturownia)
+
+**Zmienne środowiskowe:** `FAKTUROWNIA_DOMAIN` (subdomena konta, bez `.fakturownia.pl`), `FAKTUROWNIA_API_TOKEN`, opcjonalnie `FAKTUROWNIA_DEPARTMENT_ID` (id działu sprzedawcy), `BILLING_CRON_SECRET` (długi losowy ciąg, np. `openssl rand -hex 32`) i opcjonalnie `INVOICE_SANDBOX_ORDERS` (zob. `.env.example` i `docker-compose.yml`). Brak domeny lub tokenu (albo błędna domena / id działu) = Fakturownia jest wyłączona: faktury czekają w statusie „Do wystawienia”, nic się nie psuje, a panel admina pokazuje ostrzeżenie. Po skonfigurowaniu wystawi je następny przebieg zadania cyklicznego.
+
+**Kiedy powstaje faktura:** po tym, jak PayU potwierdzi płatność i kredyty zostaną zaksięgowane. Fakturę wystawia aplikacja zaraz po odpowiedzi na powiadomienie PayU (albo przy wejściu klienta na stronę zamówienia); jeśli się nie uda, zadanie cykliczne ponawia. Zamówienia z sandboxu PayU (`orders.payuSandbox = true`) nie są fakturowane, chyba że ustawisz `INVOICE_SANDBOX_ORDERS=true` (tylko test na stagingu, z testowym działem Fakturowni).
+
+**Co zawiera faktura:** faktura VAT, oznaczona jako zapłacona, forma płatności PayU, waluta PLN, język polski. Nabywca to organizacja z zamówienia (nazwa, NIP, adres, e-mail do faktur). Pozycje odpowiadają pozycjom zamówienia (jedna pozycja na pakiet: nazwa pakietu, ilość, stawka VAT), a suma brutto jest równa kwocie pobranej od klienta. Numer zamówienia trafia do pola `oid` (Fakturownia odrzuca drugą fakturę z tym samym `oid`, co chroni przed duplikatem). Data sprzedaży to dzień płatności (strefa Europe/Warsaw).
+
+**E-mail i link do PDF:** faktura jest wysyłana z Fakturowni na e-mail do faktur organizacji, a osoba, która złożyła zamówienie, dostaje kopię (gdy jej adres jest inny). Numer faktury i link do PDF widzi klient w historii zamówień. Dopóki faktura nie jest wystawiona, klient widzi tylko, że jest przygotowywana (błędy są widoczne wyłącznie dla admina).
+
+**KSeF:** w ustawieniach konta Fakturowni włącz automatyczne wysyłanie faktur do KSeF. Fakturownia wysyła e-mail dopiero po nadaniu numeru KSeF, więc pierwsza próba zaraz po wystawieniu może się nie udać (log `[INVOICE_EMAIL_ERROR]`) i jest to normalne: zadanie cykliczne ponawia wysyłkę nie częściej niż co 15 minut, przez 3 dni od wystawienia. Status KSeF jest odpytywany przez 30 dni od wystawienia (do statusu końcowego) i widoczny w panelu **/admin/orders** (przycisk „Odśwież KSeF” wymusza sprawdzenie). Statusy błędu KSeF są dodatkowo logowane.
+
+**Ponawianie i statusy w /admin/orders:**
+- Nieudane wystawienie ponawiane jest z rosnącym odstępem: 5 minut, potem każdy kolejny dwa razy dłuższy (maks. 24 godziny), do 10 prób. Po 10. nieudanej próbie status to „Błąd (ponowienie)” bez dalszych prób automatycznych; wtedy trzeba kliknąć **Ponów fakturę** (zeruje licznik prób).
+- **„Wymaga sprawdzenia”** (`NEEDS_ATTENTION`) oznacza, że aplikacja nie ma pewności, czy faktura istnieje, i nic nie ponawia sama (żeby nie wystawić drugiej): Fakturownia odpowiedziała, że faktura z tym `oid` już jest, albo faktura powstała, ale nie udało się jej zapisać. Procedura: w Fakturowni wyszukaj fakturę z numerem zamówienia (`oid`, to id zamówienia z panelu admina). Jeśli istnieje, kliknij **Oznacz jako wystawioną ręcznie** i wpisz jej numer. Jeśli nie istnieje, kliknij **Ponów fakturę**. Faktura oznaczona ręcznie nie ma linku do PDF u klienta (tylko numer) i nie jest wysyłana e-mailem przez aplikację.
+- Obie akcje działają tylko, gdy nikt akurat nie wystawia faktury (inaczej panel zwraca konflikt: spróbuj za kilka minut).
+
+**Zadanie cykliczne (Coolify):** dodaj Scheduled Task uruchamiane co 5 minut:
+
+```bash
+curl -fsS -X POST -H "Authorization: Bearer $BILLING_CRON_SECRET" "$APP_URL/api/internal/billing-cron"
+```
+
+Bez `BILLING_CRON_SECRET` endpoint zwraca 503, z błędnym sekretem 401. Jeden przebieg robi po kolei:
+1. odpytuje PayU o zgubione płatności (zamówienia czekające na płatność dłużej niż 15 minut; krok ma własne 15 s budżetu, żeby nie zagłodzić reszty),
+2. wystawia i ponawia należne faktury (zamówienie opłacone w kroku 1 jest fakturowane w tym samym przebiegu),
+3. odświeża statusy KSeF i ponawia wysyłkę e-mail.
+
+Przebieg ma łączny budżet 45 s: po jego wyczerpaniu nie startuje nowych jednostek pracy, a reszta czeka na następny przebieg. Odpowiedź zawiera same liczniki: `invoicesProcessed`, `ksefRefreshed`, `emailsSent`, `ordersSynced` i `budgetExhausted`. Każdy krok jest pomijany, gdy jego klient (PayU albo Fakturownia) nie jest skonfigurowany.
+
+**Logi do obserwowania:**
+  - `[INVOICE_ISSUE_ERROR]` — nieudane wystawienie faktury (kod i komunikat, bez danych wrażliwych), albo faktura powstała w Fakturowni, ale nie udało się jej zapisać (w logu `createdInvoiceId` i `createdNumber` do ręcznego uzgodnienia; zamówienie trafia do „Wymaga sprawdzenia”).
+  - `[INVOICE_EMAIL_ERROR]` — nieudana wysyłka faktury e-mailem (do czasu nadania numeru KSeF oczekiwana, zob. KSeF); ponawiana przez 3 dni.
+  - `[INVOICE_DUPLICATE_OID]` — Fakturownia ma już fakturę z tym numerem zamówienia; zamówienie trafia do „Wymaga sprawdzenia” (procedura wyżej).
+  - `[INVOICE_CLAIM_LOST]` — proces stracił przejęcie zamówienia (np. po przekroczeniu 10 minut przejął je inny proces). Jeśli w logu jest `createdInvoiceId`, w Fakturowni może być faktura nadmiarowa: sprawdź (zamówienie dostaje wtedy notatkę „Wykryto dodatkową fakturę…”).
+  - `[INVOICE_KSEF_ERROR]` — błąd odpytania KSeF albo status błędu KSeF (`send_error`, `blocked_403_error`, `not_connected`, `offline_error`); sprawdź połączenie z KSeF w Fakturowni.
+  - `[BILLING_CRON]` — z obiektem liczników: podsumowanie przebiegu (poziom info); z polem `step` (`payu-sync`, `invoice`, `ksef`): wyjątek w pojedynczym zamówieniu.
+  - `[BILLING_CRON_ERROR]` — cały przebieg zadania cyklicznego zakończył się błędem (odpowiedź 500).
+  - `[FAKTUROWNIA_CONFIG_INVALID]` — błędna konfiguracja: `FAKTUROWNIA_DOMAIN` nie jest samą subdomeną albo `FAKTUROWNIA_DEPARTMENT_ID` nie jest dodatnią liczbą (w logu tylko nazwa pola). Fakturownia jest wtedy wyłączona.
+
+**Kolejność uruchomienia na produkcji:**
+1. Ustaw `FAKTUROWNIA_DOMAIN`, `FAKTUROWNIA_API_TOKEN` (i opcjonalnie `FAKTUROWNIA_DEPARTMENT_ID`) oraz włącz automatyczne wysyłanie do KSeF w ustawieniach konta Fakturowni.
+2. Ustaw `BILLING_CRON_SECRET` i dodaj zadanie cykliczne w Coolify (co 5 minut).
+3. Na stagingu sprawdź cały obieg: sandbox PayU, `INVOICE_SANDBOX_ORDERS=true` i testowy dział Fakturowni (`FAKTUROWNIA_DEPARTMENT_ID`). Zamówienie testowe ma skończyć jako „Wystawiona” z mailem i linkiem do PDF.
+4. Dopiero potem ustaw produkcyjne zmienne PayU.
 
 ### Lista kontrolna wdrożenia
 
