@@ -441,6 +441,7 @@ test("isSandboxUrl: matches snd.payu.com and its subdomains exactly", () => {
   assert.equal(isSandboxUrl("https://secure.snd.payu.com"), true);
   assert.equal(isSandboxUrl("https://secure.snd.payu.com/"), true);
   assert.equal(isSandboxUrl("https://SECURE.SND.PAYU.COM"), true);
+  assert.equal(isSandboxUrl("https://secure.snd.payu.com."), true);
 });
 
 test("isSandboxUrl: production and look-alike hosts are not sandbox", () => {

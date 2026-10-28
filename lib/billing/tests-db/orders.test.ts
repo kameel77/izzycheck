@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { after, beforeEach, describe, mock, test } from "node:test";
+import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 import type { CreditType, PrismaClient } from "@prisma/client";
 import {
   applyPayuStatus,
@@ -584,6 +584,17 @@ describe("applyPayuStatus COMPLETED", () => {
 });
 
 describe("applyPayuStatus invoice outbox", () => {
+  // Default behaviour must not depend on the host's INVOICE_SANDBOX_ORDERS; the opt-in test sets it itself.
+  let previousSandboxFlag: string | undefined;
+  beforeEach(() => {
+    previousSandboxFlag = process.env.INVOICE_SANDBOX_ORDERS;
+    delete process.env.INVOICE_SANDBOX_ORDERS;
+  });
+  afterEach(() => {
+    if (previousSandboxFlag === undefined) delete process.env.INVOICE_SANDBOX_ORDERS;
+    else process.env.INVOICE_SANDBOX_ORDERS = previousSandboxFlag;
+  });
+
   async function placeSandboxOrder(ctx: Ctx) {
     const { orderId } = await createCheckout(testPrisma, { ...checkoutArgs(ctx, stubPayu()), sandbox: true });
     return testPrisma.order.findUniqueOrThrow({ where: { id: orderId } });

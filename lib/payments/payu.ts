@@ -20,7 +20,8 @@ export function isSandboxUrl(baseUrl: string): boolean {
   } catch {
     // Not a parsable URL: fall back to matching the raw value.
   }
-  const hostname = host.toLowerCase();
+  // A fully qualified hostname may carry one trailing dot (secure.snd.payu.com.).
+  const hostname = host.toLowerCase().replace(/\.$/, "");
   return hostname === "snd.payu.com" || hostname.endsWith(".snd.payu.com");
 }
 
