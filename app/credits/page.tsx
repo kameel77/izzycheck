@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Coins, Building2, User, Info, Loader2 } from "lucide-react";
 
@@ -61,14 +61,18 @@ export default function CreditsPage() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [credits, setCredits] = useState<CreditsInfo | null>(null);
   const [creditsLoading, setCreditsLoading] = useState(true);
+  const [creditsError, setCreditsError] = useState(false);
 
   const [scope, setScope] = useState<Scope>("mine");
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [ledgerLoading, setLedgerLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [ledgerError, setLedgerError] = useState(false);
+  const latestRequestId = useRef(0);
 
-  const canViewOrg = currentUser?.role === "MANAGER" || currentUser?.role === "ADMIN";
+  const canViewOrg =
+    Boolean(currentUser?.organizationId) && (currentUser?.role === "MANAGER" || currentUser?.role === "ADMIN");
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -79,11 +83,15 @@ export default function CreditsPage() {
       .catch(() => {});
 
     fetch("/api/credits/balance")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("balance request failed");
+        return res.json();
+      })
       .then((data) => {
         if (data && data.billingMode) setCredits(data);
+        else setCreditsError(true);
       })
-      .catch(() => {})
+      .catch(() => setCreditsError(true))
       .finally(() => setCreditsLoading(false));
   }, []);
 
@@ -91,24 +99,47 @@ export default function CreditsPage() {
     const params = new URLSearchParams({ scope: activeScope });
     if (cursor) params.set("cursor", cursor);
 
-    if (cursor) setLoadingMore(true);
-    else setLedgerLoading(true);
+    // Only the most recent request may commit its result; older ones are stale.
+    const requestId = ++latestRequestId.current;
+    const isCurrent = () => requestId === latestRequestId.current;
+
+    setLedgerError(false);
+    if (cursor) {
+      setLoadingMore(true);
+    } else {
+      setLoadingMore(false);
+      setLedgerLoading(true);
+    }
 
     fetch(`/api/credits/ledger?${params.toString()}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error("ledger request failed");
+        return res.json();
+      })
       .then((data) => {
-        if (!Array.isArray(data.entries)) return;
+        if (!isCurrent()) return;
+        if (!Array.isArray(data.entries)) throw new Error("invalid ledger response");
         setEntries((prev) => (cursor ? [...prev, ...data.entries] : data.entries));
         setNextCursor(data.nextCursor ?? null);
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!isCurrent()) return;
+        setLedgerError(true);
+        if (!cursor) {
+          setEntries([]);
+          setNextCursor(null);
+        }
+      })
       .finally(() => {
+        if (!isCurrent()) return;
         setLedgerLoading(false);
         setLoadingMore(false);
       });
   }, []);
 
   useEffect(() => {
+    setEntries([]);
+    setNextCursor(null);
     loadLedger(scope, null);
   }, [scope, loadLedger]);
 
@@ -137,6 +168,10 @@ export default function CreditsPage() {
           <BalanceTile label="Wycena" value={credits.balances.VALUATION} />
           <BalanceTile label="Szczegóły szkód" value={credits.balances.CLAIM_DETAILS} />
         </div>
+      ) : creditsError ? (
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-5 text-sm text-red-700 dark:text-red-300">
+          Nie udało się wczytać salda.
+        </div>
       ) : (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-300">
           Twoja organizacja nie jest rozliczana kredytami.
@@ -164,6 +199,8 @@ export default function CreditsPage() {
       <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
         {ledgerLoading ? (
           <div className="p-8 text-center text-xs text-slate-400">Pobieranie historii zużycia...</div>
+        ) : ledgerError && entries.length === 0 ? (
+          <div className="p-8 text-center text-xs text-red-600 dark:text-red-400">Nie udało się wczytać historii.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
@@ -206,7 +243,7 @@ export default function CreditsPage() {
                             href={`/reports/${entry.report.id}`}
                             className="font-mono text-[11px] font-semibold text-blue-600 hover:underline dark:text-blue-400"
                           >
-                            {entry.report.publicReference}
+                            {entry.report.publicReference ?? "—"}
                           </Link>
                         ) : (
                           "—"
@@ -221,6 +258,10 @@ export default function CreditsPage() {
           </div>
         )}
       </div>
+
+      {ledgerError && entries.length > 0 && (
+        <p className="text-center text-xs text-red-600 dark:text-red-400">Nie udało się wczytać historii.</p>
+      )}
 
       {nextCursor && !ledgerLoading && (
         <div className="flex justify-center">
