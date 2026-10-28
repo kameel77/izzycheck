@@ -85,8 +85,8 @@ export function parsePackageInput(body: unknown, opts: { partial: boolean }): Pa
     value.isActive = input.isActive;
   }
   if (has("sortOrder")) {
-    if (typeof input.sortOrder !== "number" || !Number.isInteger(input.sortOrder)) {
-      return { ok: false, error: "Kolejność musi być liczbą całkowitą." };
+    if (!isIntInRange(input.sortOrder, -1_000_000, 1_000_000)) {
+      return { ok: false, error: "Kolejność musi być liczbą całkowitą od -1 000 000 do 1 000 000." };
     }
     value.sortOrder = input.sortOrder;
   }

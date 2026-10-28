@@ -32,7 +32,7 @@ export async function GET() {
 
     const packages = await prisma.creditPackage.findMany({
       where: { isActive: true },
-      orderBy: [{ creditType: "asc" }, { sortOrder: "asc" }],
+      orderBy: [{ creditType: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
       select: { id: true, name: true, creditType: true, credits: true, priceNetGrosze: true, vatRate: true },
     });
 

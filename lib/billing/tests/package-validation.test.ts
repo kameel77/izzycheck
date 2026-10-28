@@ -57,7 +57,12 @@ describe("parsePackageInput field limits", () => {
       "Cena netto (w groszach) musi być liczbą całkowitą 1–100000000.",
     ],
     ["vatRate", [0, 100], [-1, 101, 23.5, "23", null], "Stawka VAT musi być liczbą całkowitą 0–100."],
-    ["sortOrder", [-3, 0, 99], [1.5, "1", null], "Kolejność musi być liczbą całkowitą."],
+    [
+      "sortOrder",
+      [-3, 0, 99, -1000000, 1000000],
+      [1.5, "1", null, -1000001, 1000001],
+      "Kolejność musi być liczbą całkowitą od -1 000 000 do 1 000 000.",
+    ],
     ["isActive", [true, false], ["true", 1, null], "Aktywność musi być wartością logiczną."],
   ];
 
