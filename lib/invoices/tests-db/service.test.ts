@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, describe, mock, test } from "node:test";
 import type { InvoiceStatus, OrderStatus, Prisma } from "@prisma/client";
-import { FakturowniaError, type FakturowniaInvoiceInput } from "../fakturownia.ts";
+import { FakturowniaError, createFakturowniaClient, type FakturowniaInvoiceInput } from "../fakturownia.ts";
 import {
   invoiceRetryDelayMs,
   processInvoice,
@@ -159,7 +159,7 @@ describe("processInvoice", () => {
     const { client, calls } = stubClient();
     const now = new Date();
 
-    assert.equal(await processInvoice(testPrisma, order.id, { client, now }), "ISSUED");
+    assert.equal(await processInvoice(testPrisma, order.id, { client, clock: () => now }), "ISSUED");
 
     assert.equal(calls.created.length, 1);
     assert.equal(calls.created[0].oid, order.id);
@@ -185,7 +185,7 @@ describe("processInvoice", () => {
     await testPrisma.user.update({ where: { id: ctx.user.id }, data: { email: org.billingEmail.toUpperCase() } });
     const order = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(Date.now() - MIN) } });
     const { client, calls } = stubClient();
-    await processInvoice(testPrisma, order.id, { client, now: new Date() });
+    await processInvoice(testPrisma, order.id, { client, clock: () => new Date() });
     assert.deepEqual(calls.emails[0].emailCc, []);
   });
 
@@ -193,7 +193,7 @@ describe("processInvoice", () => {
     const ctx = await seed();
     const order = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(Date.now() - MIN) } });
     const { client, calls } = stubClient();
-    await processInvoice(testPrisma, order.id, { client, now: new Date(), departmentId: 4242 });
+    await processInvoice(testPrisma, order.id, { client, clock: () => new Date(), departmentId: 4242 });
     assert.equal(calls.created[0].department_id, 4242);
   });
 
@@ -210,7 +210,7 @@ describe("processInvoice", () => {
     });
     const now = new Date();
     const results = await Promise.all(
-      Array.from({ length: 5 }, () => processInvoice(testPrisma, order.id, { client, now })),
+      Array.from({ length: 5 }, () => processInvoice(testPrisma, order.id, { client, clock: () => now })),
     );
     assert.equal(created, 1);
     assert.equal(results.filter((r) => r === "ISSUED").length, 1);
@@ -227,7 +227,7 @@ describe("processInvoice", () => {
       },
     });
     const now = new Date();
-    const { result, errors } = await captured(() => processInvoice(testPrisma, order.id, { client, now }));
+    const { result, errors } = await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => now }));
     assert.equal(result, "FAILED");
     const row = await read(order.id);
     assert.equal(row.invoiceStatus, "FAILED");
@@ -248,7 +248,7 @@ describe("processInvoice", () => {
         },
       });
       const now = new Date();
-      const { result } = await captured(() => processInvoice(testPrisma, order.id, { client, now }));
+      const { result } = await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => now }));
       assert.equal(result, "FAILED", code);
       const row = await read(order.id);
       assert.equal(row.invoiceStatus, "FAILED", code);
@@ -268,7 +268,7 @@ describe("processInvoice", () => {
       },
     });
     const now = new Date();
-    await captured(() => processInvoice(testPrisma, order.id, { client, now }));
+    await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => now }));
     const row = await read(order.id);
     assert.equal(row.invoiceAttempts, 4);
     assert.equal(row.invoiceNextAttemptAt?.getTime(), now.getTime() + 40 * MIN);
@@ -285,7 +285,7 @@ describe("processInvoice", () => {
         throw new FakturowniaError("x", { code: "SERVER" });
       },
     });
-    await captured(() => processInvoice(testPrisma, order.id, { client, now: new Date() }));
+    await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => new Date() }));
     const row = await read(order.id);
     assert.equal(row.invoiceStatus, "FAILED");
     assert.equal(row.invoiceAttempts, 10);
@@ -300,7 +300,7 @@ describe("processInvoice", () => {
         throw new FakturowniaError("dup", { status: 422, code: "DUPLICATE_OID" });
       },
     });
-    const { result, errors } = await captured(() => processInvoice(testPrisma, order.id, { client, now: new Date() }));
+    const { result, errors } = await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => new Date() }));
     assert.equal(result, "NEEDS_ATTENTION");
     const row = await read(order.id);
     assert.equal(row.invoiceStatus, "NEEDS_ATTENTION");
@@ -318,7 +318,7 @@ describe("processInvoice", () => {
     });
     const { client, calls } = stubClient();
     const now = new Date();
-    const { result, errors } = await captured(() => processInvoice(testPrisma, order.id, { client, now }));
+    const { result, errors } = await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => now }));
     assert.equal(result, "FAILED");
     assert.equal(calls.created.length, 0);
     const row = await read(order.id);
@@ -336,7 +336,7 @@ describe("processInvoice", () => {
         throw new FakturowniaError("Fakturownia: nie udało się wysłać faktury e-mailem (HTTP 422)", { code: "VALIDATION" });
       },
     });
-    const { result, errors } = await captured(() => processInvoice(testPrisma, order.id, { client, now: new Date() }));
+    const { result, errors } = await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => new Date() }));
     assert.equal(result, "ISSUED");
     const row = await read(order.id);
     assert.equal(row.invoiceStatus, "ISSUED");
@@ -354,7 +354,7 @@ describe("processInvoice", () => {
       extra: { invoiceAttempts: 1, invoiceClaimedAt: new Date(now.getTime() - 11 * MIN) },
     });
     const { client, calls } = stubClient();
-    assert.equal(await processInvoice(testPrisma, order.id, { client, now }), "ISSUED");
+    assert.equal(await processInvoice(testPrisma, order.id, { client, clock: () => now }), "ISSUED");
     assert.equal(calls.created.length, 1);
     assert.equal((await read(order.id)).invoiceAttempts, 2);
   });
@@ -367,7 +367,7 @@ describe("processInvoice", () => {
       extra: { invoiceAttempts: 1, invoiceClaimedAt: new Date(now.getTime() - 5 * MIN) },
     });
     const { client, calls } = stubClient();
-    assert.equal(await processInvoice(testPrisma, order.id, { client, now }), "SKIPPED");
+    assert.equal(await processInvoice(testPrisma, order.id, { client, clock: () => now }), "SKIPPED");
     assert.equal(calls.created.length, 0);
     assert.equal((await read(order.id)).invoiceAttempts, 1);
   });
@@ -385,10 +385,10 @@ describe("processInvoice", () => {
     ];
     for (const c of cases) {
       const order = await createOrder(ctx, { invoiceStatus: c.invoiceStatus, extra: { invoiceNextAttemptAt: c.next } });
-      assert.equal(await processInvoice(testPrisma, order.id, { client, now }), "SKIPPED", c.invoiceStatus);
+      assert.equal(await processInvoice(testPrisma, order.id, { client, clock: () => now }), "SKIPPED", c.invoiceStatus);
       assert.equal((await read(order.id)).invoiceAttempts, 0);
     }
-    assert.equal(await processInvoice(testPrisma, randomUUID(), { client, now }), "SKIPPED");
+    assert.equal(await processInvoice(testPrisma, randomUUID(), { client, clock: () => now }), "SKIPPED");
     assert.equal(calls.created.length, 0);
   });
 
@@ -420,12 +420,12 @@ describe("sendInvoiceEmail", () => {
     const order = await issuedOrder(ctx, { invoiceLastError: "stary błąd" });
     const { client, calls } = stubClient();
     const now = new Date();
-    assert.equal(await sendInvoiceEmail(testPrisma, order.id, { client, now }), true);
+    assert.equal(await sendInvoiceEmail(testPrisma, order.id, { client, clock: () => now }), true);
     const row = await read(order.id);
     assert.equal(row.invoiceEmailedAt?.getTime(), now.getTime());
     assert.equal(row.invoiceLastError, null);
     // Already e-mailed: not sent again.
-    assert.equal(await sendInvoiceEmail(testPrisma, order.id, { client, now }), false);
+    assert.equal(await sendInvoiceEmail(testPrisma, order.id, { client, clock: () => now }), false);
     assert.equal(calls.emails.length, 1);
   });
 
@@ -444,7 +444,7 @@ describe("refreshKsefStatus", () => {
     const order = await issuedOrder(ctx);
     const { client, calls } = stubClient();
     const now = new Date();
-    const res = await refreshKsefStatus(testPrisma, order.id, { client, now });
+    const res = await refreshKsefStatus(testPrisma, order.id, { client, clock: () => now });
     assert.deepEqual(res, { result: "REFRESHED", ksefStatus: "ok" });
     assert.deepEqual(calls.ksef, [order.fakturowniaInvoiceId]);
     const row = await read(order.id);
@@ -472,7 +472,7 @@ describe("refreshKsefStatus", () => {
     const { client } = stubClient({
       getInvoiceKsef: async () => ({ govStatus: "send_error", govId: null, verificationLink: null, errors: ["Błąd 21405"] }),
     });
-    const { result, errors } = await captured(() => refreshKsefStatus(testPrisma, order.id, { client, now: new Date() }));
+    const { result, errors } = await captured(() => refreshKsefStatus(testPrisma, order.id, { client, clock: () => new Date() }));
     assert.deepEqual(result, { result: "REFRESHED", ksefStatus: "send_error" });
     assert.equal((await read(order.id)).ksefStatus, "send_error");
     assert.equal(errors.filter((a) => a[0] === "[INVOICE_KSEF_ERROR]").length, 1);
@@ -487,7 +487,7 @@ describe("refreshKsefStatus", () => {
       },
     });
     const now = new Date();
-    const { result, errors } = await captured(() => refreshKsefStatus(testPrisma, order.id, { client, now }));
+    const { result, errors } = await captured(() => refreshKsefStatus(testPrisma, order.id, { client, clock: () => now }));
     assert.deepEqual(result, { result: "ERROR", ksefStatus: "processing" });
     const row = await read(order.id);
     assert.equal(row.ksefStatus, "processing");
@@ -556,7 +556,7 @@ describe("runBillingCron", () => {
     });
 
     const { client, calls } = stubClient();
-    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: payu, now }));
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: payu, clock: () => now }));
 
     // (a) three due invoices
     assert.equal(result.invoicesProcessed, 3);
@@ -570,15 +570,15 @@ describe("runBillingCron", () => {
     assert.equal((await read(notRequired.id)).invoiceStatus, "NOT_REQUIRED");
     assert.equal((await read(notRequired.id)).invoiceAttempts, 0);
 
-    // (b) never-checked and stale-checked invoices are refreshed; recently checked and final ones are not
+    // (b) never-checked and stale-checked invoices are refreshed; recently checked and final ones are not,
+    // and neither are the invoices just issued in (a) (their first KSeF check is a full pause away)
     const checked = new Set(calls.ksef);
+    assert.equal(checked.size, 2);
     assert.ok(checked.has(ksefDue.fakturowniaInvoiceId!));
     assert.ok(checked.has(ksefNeverChecked.fakturowniaInvoiceId!));
-    assert.ok(!checked.has(ksefRecentlyChecked.fakturowniaInvoiceId!));
-    assert.ok(!checked.has(ksefFinal.fakturowniaInvoiceId!));
     assert.equal((await read(ksefDue.id)).ksefStatus, "ok");
     assert.equal((await read(ksefRecentlyChecked.id)).ksefStatus, "processing");
-    assert.equal(result.ksefRefreshed, 5);
+    assert.equal(result.ksefRefreshed, 2);
     assert.equal(result.emailsSent, 0);
 
     // (c) only the old PENDING_PAYMENT order with a PayU id was polled
@@ -601,8 +601,8 @@ describe("runBillingCron", () => {
       extra: { invoiceNextAttemptAt: new Date(now.getTime() - MIN), invoiceClaimedAt: new Date(now.getTime() - 30 * MIN) },
     });
     const { client, calls } = stubClient();
-    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, now }));
-    assert.deepEqual(result, { invoicesProcessed: 0, ksefRefreshed: 0, emailsSent: 0, ordersSynced: 0 });
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => now }));
+    assert.deepEqual(result, { invoicesProcessed: 0, ksefRefreshed: 0, emailsSent: 0, ordersSynced: 0, budgetExhausted: false });
     assert.equal(calls.created.length, 0);
     assert.equal((await read(order.id)).invoiceStatus, "NOT_REQUIRED");
     assert.equal((await read(order.id)).invoiceAttempts, 0);
@@ -619,12 +619,12 @@ describe("runBillingCron", () => {
       },
     });
     const issuedAt = new Date();
-    await captured(() => processInvoice(testPrisma, order.id, { client, now: issuedAt }));
+    await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => issuedAt }));
     assert.equal((await read(order.id)).invoiceEmailedAt, null);
 
     failMail = false;
     const later = new Date(issuedAt.getTime() + 20 * MIN);
-    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, now: later }));
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => later }));
     assert.equal(result.emailsSent, 1);
     assert.equal(result.ksefRefreshed, 1);
     const row = await read(order.id);
@@ -644,7 +644,7 @@ describe("runBillingCron", () => {
       getInvoiceKsef: async () => ({ govStatus: "processing", govId: null, verificationLink: null, errors: [] }),
     });
     const issuedAt = new Date();
-    await captured(() => processInvoice(testPrisma, order.id, { client, now: issuedAt }));
+    await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => issuedAt }));
 
     let mailAttempts = 0;
     const counting: FakturowniaClientLike = {
@@ -654,7 +654,7 @@ describe("runBillingCron", () => {
       },
     };
     const later = new Date(issuedAt.getTime() + 20 * MIN);
-    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: counting, payuClient: null, now: later }));
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: counting, payuClient: null, clock: () => later }));
     assert.equal(result.ksefRefreshed, 1);
     assert.equal(result.emailsSent, 0);
     assert.equal(mailAttempts, 0);
@@ -672,7 +672,7 @@ describe("runBillingCron", () => {
         mailAttempts += 1;
       },
     });
-    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, now }));
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => now }));
     assert.equal(result.emailsSent, 0);
     assert.equal(mailAttempts, 0);
     assert.equal((await read(order.id)).invoiceEmailedAt, null);
@@ -689,10 +689,10 @@ describe("runBillingCron", () => {
         throw new FakturowniaError("nie działa", { code: "SERVER" });
       },
     });
-    await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, now }));
-    await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, now: new Date(now.getTime() + 5 * MIN) }));
+    await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => now }));
+    await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => new Date(now.getTime() + 5 * MIN) }));
     assert.equal(mailAttempts, 1);
-    await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, now: new Date(now.getTime() + 16 * MIN) }));
+    await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => new Date(now.getTime() + 16 * MIN) }));
     assert.equal(mailAttempts, 2);
     assert.equal((await read(order.id)).invoiceEmailedAt, null);
   });
@@ -707,7 +707,7 @@ describe("runBillingCron", () => {
       extra: { createdAt: new Date(Date.now() - 60 * MIN), updatedAt: new Date(Date.now() - 60 * MIN) },
     });
     const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: null, payuClient: null }));
-    assert.deepEqual(result, { invoicesProcessed: 0, ksefRefreshed: 0, emailsSent: 0, ordersSynced: 0 });
+    assert.deepEqual(result, { invoicesProcessed: 0, ksefRefreshed: 0, emailsSent: 0, ordersSynced: 0, budgetExhausted: false });
     assert.equal((await read(pending.id)).invoiceStatus, "PENDING");
     assert.equal((await read(lost.id)).status, "PENDING_PAYMENT");
   });
@@ -726,10 +726,10 @@ describe("runBillingCron", () => {
       polls += 1;
       return { status: "PENDING", totalAmount: 2460, currencyCode: "PLN", extOrderId: waiting.id };
     });
-    await captured(() => runBillingCron(testPrisma, { invoiceClient: null, payuClient: payu, now }));
-    await captured(() => runBillingCron(testPrisma, { invoiceClient: null, payuClient: payu, now: new Date(now.getTime() + 5 * MIN) }));
+    await captured(() => runBillingCron(testPrisma, { invoiceClient: null, payuClient: payu, clock: () => now }));
+    await captured(() => runBillingCron(testPrisma, { invoiceClient: null, payuClient: payu, clock: () => new Date(now.getTime() + 5 * MIN) }));
     assert.equal(polls, 1);
-    await captured(() => runBillingCron(testPrisma, { invoiceClient: null, payuClient: payu, now: new Date(now.getTime() + 16 * MIN) }));
+    await captured(() => runBillingCron(testPrisma, { invoiceClient: null, payuClient: payu, clock: () => new Date(now.getTime() + 16 * MIN) }));
     assert.equal(polls, 2);
     assert.equal((await read(waiting.id)).status, "PENDING_PAYMENT");
   });
@@ -749,5 +749,340 @@ describe("runBillingCron", () => {
     const row = await read(lost.id);
     assert.equal(row.status, "PAID");
     assert.equal(row.invoiceStatus, "PENDING");
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("waitFor timed out");
+}
+
+type Created = { id: string; number: string; token: string };
+
+describe("claim ownership", () => {
+  /** A claims at T, stalls inside createInvoice; B takes the stale claim over at T+11 min. */
+  async function staleClaimScenario() {
+    const ctx = await seed();
+    const T = new Date();
+    const tB = new Date(T.getTime() + 11 * MIN);
+    const order = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(T.getTime() - MIN) } });
+    const started: string[] = [];
+    const gateA = deferred<Created>();
+    const gateB = deferred<Created>();
+    const emailsA: string[] = [];
+    const clientA: FakturowniaClientLike = {
+      ...stubClient().client,
+      createInvoice: async () => {
+        started.push("A");
+        return gateA.promise;
+      },
+      sendInvoiceByEmail: async (id) => {
+        emailsA.push(id);
+      },
+    };
+    const clientB: FakturowniaClientLike = {
+      ...stubClient().client,
+      createInvoice: async () => {
+        started.push("B");
+        return gateB.promise;
+      },
+    };
+    // One console capture for the whole scenario: the two workers overlap in time.
+    const errorLog = mock.method(console, "error", () => {});
+    const pA = processInvoice(testPrisma, order.id, { client: clientA, clock: () => T });
+    await waitFor(() => started.includes("A"));
+    const pB = processInvoice(testPrisma, order.id, { client: clientB, clock: () => tB });
+    await waitFor(() => started.includes("B"));
+    return {
+      order,
+      T,
+      tB,
+      gateA,
+      gateB,
+      pA,
+      pB,
+      emailsA,
+      errors: () => errorLog.mock.calls.map((c) => c.arguments),
+      restore: () => errorLog.mock.restore(),
+    };
+  }
+
+  test("a late failure of the old owner does not touch the new owner's claim", async () => {
+    const s = await staleClaimScenario();
+    try {
+      s.gateA.reject(new FakturowniaError("late", { code: "SERVER" }));
+      assert.equal(await s.pA, "SKIPPED");
+      assert.equal(s.errors().filter((e) => e[0] === "[INVOICE_CLAIM_LOST]").length, 1);
+
+      const mid = await read(s.order.id);
+      assert.equal(mid.invoiceStatus, "ISSUING");
+      assert.equal(mid.invoiceClaimedAt?.getTime(), s.tB.getTime());
+      assert.equal(mid.invoiceAttempts, 2);
+      // untouched by the late failure: no backoff from A
+      assert.equal(mid.invoiceNextAttemptAt?.getTime(), s.order.invoiceNextAttemptAt?.getTime());
+      assert.equal(mid.invoiceLastError, null);
+
+      s.gateB.resolve({ id: "INV-B", number: "FV/B", token: "tok-b" });
+      assert.equal(await s.pB, "ISSUED");
+      const row = await read(s.order.id);
+      assert.equal(row.invoiceStatus, "ISSUED");
+      assert.equal(row.fakturowniaInvoiceId, "INV-B");
+    } finally {
+      s.restore();
+    }
+  });
+
+  test("a late DUPLICATE_OID of the old owner does not touch the new owner's claim", async () => {
+    const s = await staleClaimScenario();
+    try {
+      s.gateA.reject(new FakturowniaError("dup", { code: "DUPLICATE_OID" }));
+      assert.equal(await s.pA, "SKIPPED");
+      assert.equal((await read(s.order.id)).invoiceStatus, "ISSUING");
+      s.gateB.resolve({ id: "INV-B", number: "FV/B", token: "tok-b" });
+      assert.equal(await s.pB, "ISSUED");
+    } finally {
+      s.restore();
+    }
+  });
+
+  test("a late success of the old owner never overwrites the new owner's issued invoice", async () => {
+    const s = await staleClaimScenario();
+    try {
+      s.gateB.resolve({ id: "INV-B", number: "FV/B", token: "tok-b" });
+      assert.equal(await s.pB, "ISSUED");
+
+      s.gateA.resolve({ id: "INV-A", number: "FV/A", token: "tok-a" });
+      assert.equal(await s.pA, "NEEDS_ATTENTION");
+      const lost = s.errors().filter((e) => e[0] === "[INVOICE_CLAIM_LOST]");
+      assert.equal(lost.length, 1);
+      assert.deepEqual(lost[0][1], { orderId: s.order.id, createdInvoiceId: "INV-A", createdNumber: "FV/A" });
+
+      const row = await read(s.order.id);
+      assert.equal(row.invoiceStatus, "ISSUED");
+      assert.equal(row.fakturowniaInvoiceId, "INV-B");
+      assert.equal(row.invoiceNumber, "FV/B");
+      assert.equal(row.invoiceToken, "tok-b");
+      assert.deepEqual(s.emailsA, []);
+    } finally {
+      s.restore();
+    }
+  });
+
+  test("a late success of the old owner while the new owner is still in flight parks the order", async () => {
+    const s = await staleClaimScenario();
+    try {
+      s.gateA.resolve({ id: "INV-A", number: "FV/A", token: "tok-a" });
+      assert.equal(await s.pA, "NEEDS_ATTENTION");
+      const row = await read(s.order.id);
+      assert.equal(row.invoiceStatus, "NEEDS_ATTENTION");
+      assert.equal(row.fakturowniaInvoiceId, null);
+      assert.match(row.invoiceLastError ?? "", /FV\/A/);
+
+      // The new owner's own success write is refused as well: two invoices may exist, a human decides.
+      s.gateB.resolve({ id: "INV-B", number: "FV/B", token: "tok-b" });
+      assert.equal(await s.pB, "NEEDS_ATTENTION");
+      assert.equal((await read(s.order.id)).fakturowniaInvoiceId, null);
+    } finally {
+      s.restore();
+    }
+  });
+
+  test("a database error after createInvoice logs the invoice and parks the order instead of retrying", async () => {
+    const ctx = await seed();
+    const order = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(Date.now() - MIN) } });
+    const { client, calls } = stubClient();
+    // 1 = claim, 2 = the success write (fails), 3 = parking the order
+    let call = 0;
+    const flakyDb = new Proxy(testPrisma, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop, target);
+        if (prop !== "order") return value;
+        return new Proxy(value, {
+          get(orderTarget, orderProp) {
+            const member = Reflect.get(orderTarget, orderProp, orderTarget);
+            if (orderProp !== "updateMany") return typeof member === "function" ? member.bind(orderTarget) : member;
+            return (args: unknown) => {
+              call += 1;
+              if (call === 2) throw new Error("db down");
+              return member.call(orderTarget, args);
+            };
+          },
+        });
+      },
+    });
+    const outcome = await captured(() => processInvoice(flakyDb, order.id, { client }));
+    assert.equal(outcome.result, "NEEDS_ATTENTION");
+    assert.equal(calls.created.length, 1);
+    const issueErrors = outcome.errors.filter((e) => e[0] === "[INVOICE_ISSUE_ERROR]");
+    assert.equal(issueErrors.length, 1);
+    const logged = issueErrors[0][1] as { createdInvoiceId: string; createdNumber: string };
+    assert.ok(logged.createdInvoiceId.startsWith("INV-"));
+    assert.equal(logged.createdNumber, "FV/1/10/2026");
+    const row = await read(order.id);
+    assert.equal(row.invoiceStatus, "NEEDS_ATTENTION");
+    assert.equal(row.invoiceNextAttemptAt, null);
+    assert.equal(row.fakturowniaInvoiceId, null);
+    assert.match(row.invoiceLastError ?? "", /FV\/1\/10\/2026/);
+  });
+});
+
+describe("per-item clock", () => {
+  test("claim, issue time and backoff use the time of each step, not the start of a run", async () => {
+    const ctx = await seed();
+    let t = Date.now();
+    const clock = () => new Date(t);
+    const first = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(t - MIN) } });
+    const second = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(t - MIN) } });
+    const start = t;
+    let n = 0;
+    const { client } = stubClient({
+      createInvoice: async (invoice) => {
+        t += 10_000;
+        n += 1;
+        if (invoice.oid === second.id) throw new FakturowniaError("x", { code: "SERVER" });
+        return { id: `INV-${n}`, number: `FV/${n}`, token: "t" };
+      },
+    });
+    await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock }));
+    const rows = await Promise.all([read(first.id), read(second.id)]);
+    const issued = rows.find((r) => r.invoiceStatus === "ISSUED")!;
+    const failed = rows.find((r) => r.invoiceStatus === "FAILED")!;
+    // Whichever ran second claimed 10 s after the run started; the failing one backs off from its failure time.
+    assert.ok(issued.invoiceIssuedAt!.getTime() >= start + 10_000);
+    assert.equal(failed.invoiceNextAttemptAt!.getTime(), start + (failed.id === first.id ? 10_000 : 20_000) + 5 * MIN);
+  });
+});
+
+describe("cron safety", () => {
+  test("a successful issue marks ksefCheckedAt so the cron does not touch the invoice in the same window", async () => {
+    const ctx = await seed();
+    const now = new Date();
+    const order = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(now.getTime() - MIN) } });
+    const { client, calls } = stubClient();
+    await processInvoice(testPrisma, order.id, { client, clock: () => now });
+    assert.equal((await read(order.id)).ksefCheckedAt?.getTime(), now.getTime());
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => now }));
+    assert.equal(result.ksefRefreshed, 0);
+    assert.equal(calls.ksef.length, 0);
+    assert.equal(calls.emails.length, 1);
+  });
+
+  test("two parallel cron runs send a pending e-mail once", async () => {
+    const ctx = await seed();
+    const now = new Date();
+    const order = await issuedOrder(ctx, { invoiceIssuedAt: new Date(now.getTime() - 60 * MIN), ksefStatus: "ok" });
+    let mails = 0;
+    const { client } = stubClient({
+      sendInvoiceByEmail: async () => {
+        mails += 1;
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      },
+    });
+    const runs = await captured(() =>
+      Promise.all([
+        runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => now }),
+        runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => now }),
+      ]),
+    );
+    assert.equal(mails, 1);
+    assert.equal(runs.result[0].emailsSent + runs.result[1].emailsSent, 1);
+    assert.ok((await read(order.id)).invoiceEmailedAt);
+  });
+
+  test("a 200 'status: error' e-mail refusal keeps invoiceEmailedAt null and the cron retries after KSeF ok", async () => {
+    const ctx = await seed();
+    const order = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(Date.now() - MIN) } });
+    let sends = 0;
+    const fetchImpl = (async (url: string | URL | Request) => {
+      assert.match(String(url), /send_by_email/);
+      sends += 1;
+      const body = sends === 1 ? { status: "error", message: "Faktura nie może zostać wysłana - brak numeru KSeF" } : { status: "ok" };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const real = createFakturowniaClient({ domain: "izzy-test", apiToken: "tok", departmentId: null }, fetchImpl);
+    const client: FakturowniaClientLike = { ...stubClient().client, sendInvoiceByEmail: real.sendInvoiceByEmail };
+
+    const issuedAt = new Date();
+    const first = await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => issuedAt }));
+    assert.equal(first.result, "ISSUED");
+    let row = await read(order.id);
+    assert.equal(row.invoiceEmailedAt, null);
+    assert.match(row.invoiceLastError ?? "", /brak numeru KSeF/);
+
+    const later = new Date(issuedAt.getTime() + 20 * MIN);
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => later }));
+    assert.equal(result.emailsSent, 1);
+    assert.equal(sends, 2);
+    row = await read(order.id);
+    assert.equal(row.invoiceEmailedAt?.getTime(), later.getTime());
+    assert.equal(row.invoiceLastError, null);
+  });
+
+  test("the time budget stops a run between items and is reported", async () => {
+    const ctx = await seed();
+    let t = Date.now();
+    const clock = () => new Date(t);
+    for (let i = 0; i < 3; i++) await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(t - MIN) } });
+    const { client, calls } = stubClient({
+      createInvoice: async () => {
+        t += 30_000;
+        return { id: `INV-${randomUUID()}`, number: "FV/1", token: "t" };
+      },
+    });
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock }));
+    assert.equal(result.invoicesProcessed, 2);
+    assert.equal(result.budgetExhausted, true);
+    assert.equal(calls.ksef.length, 0);
+    assert.equal(await testPrisma.order.count({ where: { invoiceStatus: "PENDING" } }), 1);
+  });
+
+  test("KSeF is polled only for invoices issued within the last 30 days", async () => {
+    const ctx = await seed();
+    const now = new Date();
+    const mk = (days: number) =>
+      issuedOrder(ctx, {
+        ksefStatus: "processing",
+        ksefCheckedAt: new Date(now.getTime() - 60 * MIN),
+        invoiceEmailedAt: new Date(now.getTime() - 60 * MIN),
+        invoiceIssuedAt: new Date(now.getTime() - days * DAY),
+      });
+    const recent = await mk(29);
+    const stale = await mk(31);
+    const { client, calls } = stubClient();
+    await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => now }));
+    assert.deepEqual(calls.ksef, [recent.fakturowniaInvoiceId]);
+    assert.equal((await read(stale.id)).ksefStatus, "processing");
+  });
+
+  test("invoices with a final non-mailable KSeF status never crowd out other candidates", async () => {
+    const ctx = await seed();
+    const now = new Date();
+    for (let i = 0; i < 22; i++) {
+      await issuedOrder(ctx, { ksefStatus: i % 2 ? "duplicate_error" : "demo_duplicate_error", invoiceIssuedAt: new Date(now.getTime() - 60 * MIN) });
+    }
+    const waiting = await issuedOrder(ctx, {
+      ksefStatus: "processing",
+      ksefCheckedAt: new Date(now.getTime() - 60 * MIN),
+      invoiceIssuedAt: new Date(now.getTime() - 60 * MIN),
+      invoiceEmailedAt: new Date(now.getTime() - 60 * MIN),
+    });
+    const { client, calls } = stubClient();
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => now }));
+    assert.deepEqual(calls.ksef, [waiting.fakturowniaInvoiceId]);
+    assert.equal(result.ksefRefreshed, 1);
+    assert.equal(calls.emails.length, 0);
   });
 });

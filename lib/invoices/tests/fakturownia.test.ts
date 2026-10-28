@@ -418,6 +418,28 @@ test("sendInvoiceByEmail: POSTs to send_by_email.json with encoded api_token, em
   assert.ok(calls[0].init.signal instanceof AbortSignal);
 });
 
+test("sendInvoiceByEmail: HTTP 200 with status error is a VALIDATION refusal (message from body, token redacted)", async () => {
+  const { fetchImpl } = mockFetch(() =>
+    json({ status: "error", message: `Faktura nie może zostać wysłana - brak numeru KSeF ${TOKEN}` }, 200),
+  );
+  const client = createFakturowniaClient(config, fetchImpl);
+  await assert.rejects(client.sendInvoiceByEmail("9", { emailTo: ["a@b.pl"], emailCc: [] }), (err: unknown) => {
+    assert.ok(err instanceof FakturowniaError);
+    assert.equal(err.code, "VALIDATION");
+    assert.equal(err.status, 200);
+    assert.match(err.message, /brak numeru KSeF/);
+    assert.equal(err.message.includes(TOKEN), false);
+    return true;
+  });
+});
+
+test("sendInvoiceByEmail: HTTP 200 with status ok or an empty body succeeds", async () => {
+  for (const body of [{ status: "ok" }, {}]) {
+    const { fetchImpl } = mockFetch(() => json(body, 200));
+    await createFakturowniaClient(config, fetchImpl).sendInvoiceByEmail("9", { emailTo: ["a@b.pl"], emailCc: [] });
+  }
+});
+
 test("sendInvoiceByEmail: omits email_cc when there is no copy recipient", async () => {
   const { calls, fetchImpl } = mockFetch(() => json({}, 200));
   const client = createFakturowniaClient(config, fetchImpl);

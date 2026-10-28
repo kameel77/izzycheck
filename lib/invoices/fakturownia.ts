@@ -322,7 +322,16 @@ export function createFakturowniaClient(config: FakturowniaConfig, fetchImpl: ty
       headers: { Accept: "application/json" },
     });
     if (!res.ok) throw await failure(res, "Fakturownia: nie udało się wysłać faktury e-mailem");
-    await readText(res);
+    // Fakturownia answers HTTP 200 with {"status":"error","message":...} when it refuses to send, e.g. while
+    // the invoice has no KSeF number yet: that is a refusal, not a success.
+    const body = readJson(await readText(res));
+    if (body?.status === "error") {
+      const message = redact(String(body.message ?? "").trim()).slice(0, MAX_MESSAGE_LENGTH);
+      throw new FakturowniaError(
+        `Fakturownia: nie udało się wysłać faktury e-mailem${message ? `: ${message}` : ""}`,
+        { status: res.status, code: "VALIDATION" },
+      );
+    }
   }
 
   async function getInvoiceKsef(id: string): Promise<FakturowniaKsefInfo> {

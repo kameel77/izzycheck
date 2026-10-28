@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, mock, test } from "node:test";
 import { handleBillingCronRequest } from "../cron-handler.ts";
 
-const counters = { invoicesProcessed: 2, ksefRefreshed: 3, emailsSent: 1, ordersSynced: 4 };
+const counters = { invoicesProcessed: 2, ksefRefreshed: 3, emailsSent: 1, ordersSynced: 4, budgetExhausted: false };
 
 function request(authorization?: string): Request {
   return new Request("http://localhost/api/internal/billing-cron", {
