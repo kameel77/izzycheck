@@ -63,6 +63,7 @@ enum InvoiceStatus {
 
 enum PaymentMethod {
   PAYU
+  PROFORMA
 }
 
 enum CreditHoldStatus {
@@ -351,6 +352,15 @@ model Order {
   ksefId               String?
   ksefVerificationLink String?
   ksefCheckedAt        DateTime?
+
+  proformaFakturowniaId String?   @unique
+  proformaNumber        String?
+  proformaToken         String?
+  proformaIssuedAt      DateTime?
+  proformaDueDate       DateTime? @db.Date
+  proformaEmailedAt     DateTime?
+  proformaLastError     String?
+  paymentNote           String?
 
   @@index([organizationId, createdAt])
   @@index([userId, createdAt])

@@ -1,3 +1,5 @@
+import { PROFORMA_VALIDITY_DAYS, addDaysToDate, warsawDate } from "../billing/proforma-dates.ts";
+
 export type FakturowniaConfig = {
   /** Subdomain only, without `.fakturownia.pl`. */
   domain: string;
@@ -70,7 +72,7 @@ export type FakturowniaInvoiceInput = {
   paid: string;
   /** Warsaw date of the payment. */
   paid_date: string;
-  payment_type: "payu";
+  payment_type: "payu" | "transfer";
   /** "off": the invoice has no payment deadline (it is already paid). */
   payment_to_kind: "off";
   issue_date: string;
@@ -79,6 +81,32 @@ export type FakturowniaInvoiceInput = {
   lang: "pl";
   oid: string;
   oid_unique: "yes";
+  calculating_strategy: { position: "keep_gross"; sum: "keep_gross" };
+  buyer_name: string;
+  buyer_tax_no: string;
+  buyer_street: string;
+  buyer_post_code: string;
+  buyer_city: string;
+  buyer_country: string;
+  buyer_email: string;
+  buyer_company: true;
+  department_id?: number;
+  /** Fakturownia id of the proforma this invoice settles (a number in the JSON payload). */
+  from_invoice_id?: number;
+  positions: FakturowniaPositionInput[];
+};
+
+export type FakturowniaProformaInput = {
+  kind: "proforma";
+  payment_type: "transfer";
+  issue_date: string;
+  sell_date: string;
+  /** Payment deadline: issue date + PROFORMA_VALIDITY_DAYS. */
+  payment_to: string;
+  currency: "PLN";
+  lang: "pl";
+  /** "proforma-{orderId}", deliberately without oid_unique so the VAT invoice (oid = orderId) never collides. */
+  oid: string;
   calculating_strategy: { position: "keep_gross"; sum: "keep_gross" };
   buyer_name: string;
   buyer_tax_no: string;
@@ -98,19 +126,6 @@ function formatGrosze(grosze: number): string {
   const sign = grosze < 0 ? "-" : "";
   const abs = Math.abs(grosze);
   return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
-}
-
-const warsawDay = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Europe/Warsaw",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-/** YYYY-MM-DD of the given instant in Europe/Warsaw. */
-function warsawDate(date: Date): string {
-  const parts = Object.fromEntries(warsawDay.formatToParts(date).map((p) => [p.type, p.value]));
-  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 export type InvoiceOrderInput = {
@@ -140,6 +155,7 @@ export function buildInvoicePayload(
   organization: InvoiceOrganizationInput,
   departmentId: number | null,
   issueDate: Date,
+  options: { paymentType?: "payu" | "transfer"; fromInvoiceId?: string | null } = {},
 ): FakturowniaInvoiceInput {
   if (!order.paidAt) throw new Error(`Zamówienie ${order.id} nie ma daty płatności (paidAt)`);
   const linesGross = order.items.reduce((sum, item) => sum + item.lineGrossGrosze, 0);
@@ -153,7 +169,7 @@ export function buildInvoicePayload(
     status: "paid",
     paid: formatGrosze(order.totalGrossGrosze),
     paid_date: warsawDate(order.paidAt),
-    payment_type: "payu",
+    payment_type: options.paymentType ?? "payu",
     payment_to_kind: "off",
     issue_date: warsawDate(issueDate),
     sell_date: warsawDate(order.paidAt),
@@ -178,7 +194,60 @@ export function buildInvoicePayload(
     })),
   };
   if (departmentId !== null) invoice.department_id = departmentId;
+  if (options.fromInvoiceId) {
+    const fromInvoiceId = Number(options.fromInvoiceId);
+    if (!Number.isSafeInteger(fromInvoiceId) || fromInvoiceId <= 0) {
+      throw new Error(`Nieprawidłowe id proformy: ${options.fromInvoiceId}`);
+    }
+    invoice.from_invoice_id = fromInvoiceId;
+  }
   return invoice;
+}
+
+/**
+ * Pure builder of the Fakturownia proforma for an order that is not paid yet. Buyer and positions match the
+ * VAT invoice (keep_gross); throws when the lines do not add up to the order total.
+ */
+export function buildProformaPayload(
+  order: Omit<InvoiceOrderInput, "paidAt">,
+  organization: InvoiceOrganizationInput,
+  departmentId: number | null,
+  issueDate: Date,
+): FakturowniaProformaInput {
+  const linesGross = order.items.reduce((sum, item) => sum + item.lineGrossGrosze, 0);
+  if (linesGross !== order.totalGrossGrosze) {
+    throw new Error(
+      `Pozycje zamówienia ${order.id} (${linesGross} gr) nie sumują się do kwoty brutto zamówienia (${order.totalGrossGrosze} gr)`,
+    );
+  }
+  const issued = warsawDate(issueDate);
+  const proforma: FakturowniaProformaInput = {
+    kind: "proforma",
+    payment_type: "transfer",
+    issue_date: issued,
+    sell_date: issued,
+    payment_to: addDaysToDate(issued, PROFORMA_VALIDITY_DAYS),
+    currency: "PLN",
+    lang: "pl",
+    oid: `proforma-${order.id}`,
+    calculating_strategy: { position: "keep_gross", sum: "keep_gross" },
+    buyer_name: organization.name,
+    buyer_tax_no: organization.nip,
+    buyer_street: organization.street,
+    buyer_post_code: organization.postalCode,
+    buyer_city: organization.city,
+    buyer_country: organization.country,
+    buyer_email: organization.billingEmail,
+    buyer_company: true,
+    positions: order.items.map((item) => ({
+      name: item.packageName,
+      quantity: item.quantity,
+      tax: item.vatRate,
+      total_price_gross: formatGrosze(item.lineGrossGrosze),
+    })),
+  };
+  if (departmentId !== null) proforma.department_id = departmentId;
+  return proforma;
 }
 
 export type FakturowniaKsefInfo = {
@@ -299,21 +368,41 @@ export function createFakturowniaClient(config: FakturowniaConfig, fetchImpl: ty
     return new FakturowniaError(`${fallback} ${suffix}`, { status, code: "SERVER" });
   }
 
-  async function createInvoice(invoice: FakturowniaInvoiceInput): Promise<{ id: string; number: string; token: string }> {
+  /** POSTs a document to /invoices.json and reads back its id, number and public token. */
+  async function postDocument(
+    document: FakturowniaInvoiceInput | FakturowniaProformaInput,
+    fallback: string,
+    incompleteMessage: string,
+    detectDuplicateOid: boolean,
+  ): Promise<{ id: string; number: string; token: string }> {
     const res = await send(`${baseUrl}/invoices.json`, {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ api_token: config.apiToken, invoice }),
+      body: JSON.stringify({ api_token: config.apiToken, invoice: document }),
     });
-    if (!res.ok) throw await failure(res, "Fakturownia: nie udało się wystawić faktury", true);
+    if (!res.ok) throw await failure(res, fallback, detectDuplicateOid);
     const data = readJson(await readText(res));
     const id = typeof data?.id === "number" || typeof data?.id === "string" ? String(data.id) : null;
     const number = asString(data?.number);
     const token = asString(data?.token);
     if (!id || !number || !token) {
-      throw new FakturowniaError("Fakturownia: niepełna odpowiedź na wystawienie faktury", { status: res.status, code: "SERVER" });
+      throw new FakturowniaError(incompleteMessage, { status: res.status, code: "SERVER" });
     }
     return { id, number, token };
+  }
+
+  function createInvoice(invoice: FakturowniaInvoiceInput): Promise<{ id: string; number: string; token: string }> {
+    return postDocument(invoice, "Fakturownia: nie udało się wystawić faktury", "Fakturownia: niepełna odpowiedź na wystawienie faktury", true);
+  }
+
+  /** Proformas carry no oid_unique, so a 422 mentioning oid is a plain validation error, never DUPLICATE_OID. */
+  function createProforma(proforma: FakturowniaProformaInput): Promise<{ id: string; number: string; token: string }> {
+    return postDocument(
+      proforma,
+      "Fakturownia: nie udało się wystawić proformy",
+      "Fakturownia: niepełna odpowiedź na wystawienie proformy",
+      false,
+    );
   }
 
   async function sendInvoiceByEmail(id: string, recipients: { emailTo: string[]; emailCc: string[] }): Promise<void> {
@@ -364,7 +453,7 @@ export function createFakturowniaClient(config: FakturowniaConfig, fetchImpl: ty
     return `${baseUrl}/invoice/${encodeURIComponent(token)}.pdf`;
   }
 
-  return { createInvoice, sendInvoiceByEmail, getInvoiceKsef, invoicePdfUrl };
+  return { createInvoice, createProforma, sendInvoiceByEmail, getInvoiceKsef, invoicePdfUrl };
 }
 
 export type FakturowniaClient = ReturnType<typeof createFakturowniaClient>;
