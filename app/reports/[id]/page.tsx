@@ -347,7 +347,9 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
     { label: "Wycena i wyposażenie pojazdu", mod: valModule, id: "VALUATION" },
     { label: "Szczegółowy wykaz szkód", mod: detailsModule, id: "CLAIM_DETAILS" },
   ].filter(
-    (item) => creditBlocked[item.id] && (item.mod?.status === "PENDING" || item.mod?.status === "FAILED")
+    (item) =>
+      creditBlocked[item.id] &&
+      (item.mod?.status === "PENDING" || item.mod?.status === "FAILED" || item.mod?.status === "RUNNING")
   );
 
   const claimsHistoryPresentation = getClaimsHistoryPresentation({

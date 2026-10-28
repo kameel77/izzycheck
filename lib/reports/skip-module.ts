@@ -1,7 +1,7 @@
 import { prisma } from "../db.ts";
 import type { ReportModuleId, Role } from "@prisma/client";
 import { releaseCredit } from "../billing/credits.ts";
-import { ModuleExecutionError, checkAndFinalizeReportIfDone } from "./module-executor.ts";
+import { ModuleExecutionError, STALE_LOCK_MS, checkAndFinalizeReportIfDone, isModuleLockStale } from "./module-executor.ts";
 
 const SKIPPABLE_MODULES: ReportModuleId[] = ["VALUATION", "CLAIM_DETAILS"];
 
@@ -56,17 +56,24 @@ export async function skipReportModule(
   if (!targetModule) {
     throw new ModuleExecutionError("Ten moduł nie został zamówiony w ramach bieżącego raportu.", 400);
   }
-  if (targetModule.status === "RUNNING") {
+  // A RUNNING module with a stale lock (e.g. its execution died, then a takeover was refused with 402) is skippable
+  if (targetModule.status === "RUNNING" && !isModuleLockStale(targetModule)) {
     throw new ModuleExecutionError("Moduł jest obecnie przetwarzany. Spróbuj ponownie za chwilę.", 409);
   }
-  if (targetModule.status !== "PENDING" && targetModule.status !== "FAILED") {
+  if (targetModule.status !== "PENDING" && targetModule.status !== "FAILED" && targetModule.status !== "RUNNING") {
     throw new ModuleExecutionError("Ten moduł nie może zostać pominięty w bieżącym stanie.", 400);
   }
 
   await db.$transaction(async (tx: any) => {
     // Guarded transition first: if the module started running (or was captured) meanwhile, nothing is hidden or released.
     const { count } = await tx.reportModuleResult.updateMany({
-      where: { id: targetModule.id, status: { in: ["PENDING", "FAILED"] } },
+      where: {
+        id: targetModule.id,
+        OR: [
+          { status: { in: ["PENDING", "FAILED"] } },
+          { status: "RUNNING", updatedAt: { lt: new Date(Date.now() - STALE_LOCK_MS) } },
+        ],
+      },
       data: { status: "NOT_REQUESTED", errorMessage: null },
     });
     if (count === 0) {

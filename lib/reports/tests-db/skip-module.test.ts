@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
-import { executeReportModule, ModuleExecutionError } from "../module-executor.ts";
+import { executeReportModule, ModuleExecutionError, STALE_LOCK_MS } from "../module-executor.ts";
+import { reserveCredit } from "../../billing/credits.ts";
 import { skipReportModule } from "../skip-module.ts";
 import { createOrg, createReport, createUser, resetDb, setBalance, testPrisma } from "../../test-db/helpers.ts";
 
@@ -148,4 +149,93 @@ test("skip refuses a report with a frozen PDF and changes nothing", async () => 
     where: { reportId: report.id, moduleId: "VALUATION" },
   });
   assert.equal(valuation.status, "FAILED");
+});
+
+test("stale RUNNING module whose hold was released elsewhere: takeover 402, then skip finishes the report", async () => {
+  const org = await createOrg({ billingMode: "PREPAID" });
+  const user = await createUser({ organizationId: org.id });
+  const report = await createReport({
+    organizationId: org.id,
+    createdById: user.id,
+    modules: { VALUATION: "RUNNING", CLAIM_CHECK: "SUCCEEDED" },
+  });
+  const other = await createReport({
+    organizationId: org.id,
+    createdById: user.id,
+    modules: { VALUATION: "PENDING" },
+  });
+  await testPrisma.creditHold.create({
+    data: { organizationId: org.id, reportId: report.id, moduleId: "VALUATION", creditType: "VALUATION", status: "HELD" },
+  });
+  const old = new Date(Date.now() - STALE_LOCK_MS - 5000);
+  await testPrisma.$executeRaw`UPDATE report_module_results SET "updatedAt" = ${old} WHERE "reportId" = ${report.id} AND "moduleId" = 'VALUATION'`;
+  await testPrisma.$executeRaw`UPDATE credit_holds SET "updatedAt" = ${old} WHERE "reportId" = ${report.id}`;
+
+  // Another report's reservation sweeps the stale hold and takes the returned credit.
+  await reserveCredit(testPrisma, {
+    organizationId: org.id,
+    reportId: other.id,
+    moduleId: "VALUATION",
+    creditType: "VALUATION",
+    staleBefore: new Date(Date.now() - STALE_LOCK_MS),
+  });
+  assert.equal(await readBalance(org.id, "VALUATION"), 0);
+  const swept = await testPrisma.creditHold.findUniqueOrThrow({
+    where: { reportId_moduleId: { reportId: report.id, moduleId: "VALUATION" } },
+  });
+  assert.equal(swept.status, "RELEASED");
+
+  await assert.rejects(executeReportModule(report.id, "VALUATION", runOptions(user.id)), (err: any) => {
+    assert.ok(err instanceof ModuleExecutionError);
+    assert.equal(err.statusCode, 402);
+    return true;
+  });
+  const stuck = await testPrisma.reportModuleResult.findFirstOrThrow({
+    where: { reportId: report.id, moduleId: "VALUATION" },
+  });
+  assert.equal(stuck.status, "RUNNING");
+
+  const res = await skipReportModule(report.id, "VALUATION", {
+    customPrisma: testPrisma,
+    userId: user.id,
+    role: "USER",
+    organizationId: org.id,
+  });
+  assert.deepEqual(res, { success: true, moduleId: "VALUATION" });
+
+  const valuation = await testPrisma.reportModuleResult.findFirstOrThrow({
+    where: { reportId: report.id, moduleId: "VALUATION" },
+  });
+  assert.equal(valuation.status, "NOT_REQUESTED");
+  const finished = await testPrisma.report.findUniqueOrThrow({ where: { id: report.id } });
+  assert.equal(finished.status, "COMPLETED");
+  assert.equal(await readBalance(org.id, "VALUATION"), 0);
+});
+
+test("skip still refuses a freshly RUNNING module", async () => {
+  const org = await createOrg({ billingMode: "PREPAID" });
+  const user = await createUser({ organizationId: org.id });
+  const report = await createReport({
+    organizationId: org.id,
+    createdById: user.id,
+    modules: { VALUATION: "RUNNING" },
+  });
+
+  await assert.rejects(
+    skipReportModule(report.id, "VALUATION", {
+      customPrisma: testPrisma,
+      userId: user.id,
+      role: "USER",
+      organizationId: org.id,
+    }),
+    (err: any) => {
+      assert.ok(err instanceof ModuleExecutionError);
+      assert.equal(err.statusCode, 409);
+      return true;
+    },
+  );
+  const valuation = await testPrisma.reportModuleResult.findFirstOrThrow({
+    where: { reportId: report.id, moduleId: "VALUATION" },
+  });
+  assert.equal(valuation.status, "RUNNING");
 });

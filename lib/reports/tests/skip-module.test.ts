@@ -115,7 +115,9 @@ describe("skipReportModule", () => {
     assert.strictEqual(moduleUpdate.where.id, "m-val");
     assert.strictEqual(moduleUpdate.data.status, "NOT_REQUESTED");
     assert.strictEqual(moduleUpdate.data.errorMessage, null);
-    assert.deepStrictEqual(moduleUpdate.where.status, { in: ["PENDING", "FAILED"] });
+    assert.deepStrictEqual(moduleUpdate.where.OR[0], { status: { in: ["PENDING", "FAILED"] } });
+    assert.strictEqual(moduleUpdate.where.OR[1].status, "RUNNING");
+    assert.ok(moduleUpdate.where.OR[1].updatedAt.lt instanceof Date, "RUNNING only matches a stale lock");
     assert.ok(reportUpdate, "report must be finalized");
     assert.strictEqual(reportUpdate.status, "COMPLETED");
   });
