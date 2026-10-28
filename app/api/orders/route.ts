@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { CheckoutError, createCheckout } from "@/lib/billing/orders";
 import { getPayuConfig, getSharedPayuClient } from "@/lib/payments/payu";
 import { isRateLimited } from "@/lib/rate-limit";
+import { sharedPdfUrlBuilder, withCustomerInvoice } from "@/lib/invoices/views";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,12 @@ const ORDER_LIST_SELECT = {
   totalGrossGrosze: true,
   createdAt: true,
   paidAt: true,
+  invoiceStatus: true,
+  invoiceNumber: true,
+  invoiceToken: true,
+  fakturowniaInvoiceId: true,
+  ksefStatus: true,
+  invoiceEmailedAt: true,
   user: { select: { name: true } },
   items: {
     select: { packageName: true, creditType: true, creditsPerPackage: true, quantity: true, lineGrossGrosze: true },
@@ -136,10 +143,11 @@ export async function GET(request: Request) {
     });
 
     const hasMore = rows.length > PAGE_SIZE;
-    const orders = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+    const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+    const buildPdfUrl = sharedPdfUrlBuilder();
     return NextResponse.json({
-      orders,
-      nextCursor: hasMore ? orders[orders.length - 1].id : null,
+      orders: page.map((row) => withCustomerInvoice(row, buildPdfUrl)),
+      nextCursor: hasMore ? page[page.length - 1].id : null,
     });
   } catch (error) {
     console.error("[ORDERS_GET_ERROR]", error);

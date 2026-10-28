@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { after, beforeEach, describe, mock, test } from "node:test";
+import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 import type { CreditType, PrismaClient } from "@prisma/client";
 import {
   applyPayuStatus,
@@ -583,6 +583,94 @@ describe("applyPayuStatus COMPLETED", () => {
   });
 });
 
+describe("applyPayuStatus invoice outbox", () => {
+  // Default behaviour must not depend on the host's INVOICE_SANDBOX_ORDERS; the opt-in test sets it itself.
+  let previousSandboxFlag: string | undefined;
+  beforeEach(() => {
+    previousSandboxFlag = process.env.INVOICE_SANDBOX_ORDERS;
+    delete process.env.INVOICE_SANDBOX_ORDERS;
+  });
+  afterEach(() => {
+    if (previousSandboxFlag === undefined) delete process.env.INVOICE_SANDBOX_ORDERS;
+    else process.env.INVOICE_SANDBOX_ORDERS = previousSandboxFlag;
+  });
+
+  async function placeSandboxOrder(ctx: Ctx) {
+    const { orderId } = await createCheckout(testPrisma, { ...checkoutArgs(ctx, stubPayu()), sandbox: true });
+    return testPrisma.order.findUniqueOrThrow({ where: { id: orderId } });
+  }
+
+  test("new orders start with NOT_REQUIRED invoice status and no attempts", async () => {
+    const order = await placeOrder(await setup());
+    assert.equal(order.invoiceStatus, "NOT_REQUIRED");
+    assert.equal(order.invoiceAttempts, 0);
+    assert.equal(order.invoiceNextAttemptAt, null);
+  });
+
+  test("a paid order gets invoiceStatus PENDING and invoiceNextAttemptAt set", async () => {
+    const order = await placeOrder(await setup());
+    const before = Date.now();
+    assert.equal(await applyPayuStatus(testPrisma, completed(order)), "PAID_NOW");
+    const paid = await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    assert.equal(paid.invoiceStatus, "PENDING");
+    assert.ok(paid.invoiceNextAttemptAt);
+    assert.ok(paid.invoiceNextAttemptAt.getTime() >= before - 1000);
+    assert.ok(paid.invoiceNextAttemptAt.getTime() <= Date.now() + 1000);
+    assert.equal(paid.invoiceAttempts, 0);
+  });
+
+  test("a sandbox order stays NOT_REQUIRED when paid", async () => {
+    const order = await placeSandboxOrder(await setup());
+    assert.equal(await applyPayuStatus(testPrisma, completed(order)), "PAID_NOW");
+    const paid = await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    assert.equal(paid.status, "PAID");
+    assert.equal(paid.invoiceStatus, "NOT_REQUIRED");
+  });
+
+  test("a sandbox order is invoiced when INVOICE_SANDBOX_ORDERS=true", async () => {
+    const previous = process.env.INVOICE_SANDBOX_ORDERS;
+    process.env.INVOICE_SANDBOX_ORDERS = "true";
+    try {
+      const order = await placeSandboxOrder(await setup());
+      assert.equal(await applyPayuStatus(testPrisma, completed(order)), "PAID_NOW");
+      const paid = await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } });
+      assert.equal(paid.invoiceStatus, "PENDING");
+      assert.ok(paid.invoiceNextAttemptAt);
+    } finally {
+      if (previous === undefined) delete process.env.INVOICE_SANDBOX_ORDERS;
+      else process.env.INVOICE_SANDBOX_ORDERS = previous;
+    }
+  });
+
+  test("ALREADY_PAID does not touch the invoice fields", async () => {
+    const order = await placeOrder(await setup());
+    assert.equal(await applyPayuStatus(testPrisma, completed(order)), "PAID_NOW");
+    const marker = new Date("2026-01-02T03:04:05.000Z");
+    await testPrisma.order.update({
+      where: { id: order.id },
+      data: { invoiceStatus: "ISSUING", invoiceAttempts: 3, invoiceNextAttemptAt: marker },
+    });
+    assert.equal(await applyPayuStatus(testPrisma, completed(order)), "ALREADY_PAID");
+    const after = await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    assert.equal(after.invoiceStatus, "ISSUING");
+    assert.equal(after.invoiceAttempts, 3);
+    assert.equal(after.invoiceNextAttemptAt?.getTime(), marker.getTime());
+  });
+
+  test("CANCELED then COMPLETED sets PENDING", async () => {
+    const order = await placeOrder(await setup());
+    await applyPayuStatus(testPrisma, completed(order, { status: "CANCELED" }));
+    assert.equal(
+      (await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).invoiceStatus,
+      "NOT_REQUIRED",
+    );
+    assert.equal(await applyPayuStatus(testPrisma, completed(order)), "PAID_NOW");
+    const paid = await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    assert.equal(paid.invoiceStatus, "PENDING");
+    assert.ok(paid.invoiceNextAttemptAt);
+  });
+});
+
 describe("applyPayuStatus amount, currency and other statuses", () => {
   test("wrong amount returns AMOUNT_MISMATCH and changes nothing", async () => {
     const ctx = await setup();
@@ -753,7 +841,7 @@ describe("handlePayuNotification", () => {
     const ctx = await setup();
     const order = await placeOrder(ctx);
     const res = await handlePayuNotification(testPrisma, { ...signed(payload(order)), config });
-    assert.deepEqual(res, { status: 200, body: { status: "OK" } });
+    assert.deepEqual(res, { status: 200, body: { status: "OK" }, paidOrderId: order.id });
     assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PAID");
     assert.equal(await readBalance(ctx.org.id, "VALUATION"), 25);
     assert.equal(await readBalance(ctx.org.id, "CLAIM_DETAILS"), 10);
@@ -761,6 +849,7 @@ describe("handlePayuNotification", () => {
     // PayU retries the same notification: still 200, no double credit.
     const again = await handlePayuNotification(testPrisma, { ...signed(payload(order)), config });
     assert.equal(again.status, 200);
+    assert.equal(again.paidOrderId, undefined);
     assert.equal(await readBalance(ctx.org.id, "VALUATION"), 25);
   });
 
@@ -887,7 +976,7 @@ describe("syncOrderWithPayu", () => {
         return { status: "COMPLETED", totalAmount: order.totalGrossGrosze, currencyCode: "PLN", extOrderId: order.id };
       },
     });
-    await syncOrderWithPayu(testPrisma, order.id, payu);
+    assert.deepEqual(await syncOrderWithPayu(testPrisma, order.id, payu), { synced: true, result: "PAID_NOW" });
     assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PAID");
     assert.equal(await readBalance(ctx.org.id, "VALUATION"), 25);
     assert.equal(await readBalance(ctx.org.id, "CLAIM_DETAILS"), 10);
@@ -903,7 +992,7 @@ describe("syncOrderWithPayu", () => {
         return { status: "COMPLETED", totalAmount: order.totalGrossGrosze, currencyCode: "PLN", extOrderId: order.id };
       },
     });
-    await syncOrderWithPayu(testPrisma, order.id, payu);
+    assert.deepEqual(await syncOrderWithPayu(testPrisma, order.id, payu), { synced: false, result: null });
     assert.equal(calls, 0);
     assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PENDING_PAYMENT");
   });

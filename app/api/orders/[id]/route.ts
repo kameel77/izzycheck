@@ -3,8 +3,10 @@ import { getCurrentUser, getFreshUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { syncOrderWithPayu } from "@/lib/billing/orders";
 import { canResumePayment, canViewOrder } from "@/lib/billing/order-access";
+import { issueInvoiceAfterResponse } from "@/lib/invoices/background";
 import { getSharedPayuClient } from "@/lib/payments/payu";
 import { isRateLimited } from "@/lib/rate-limit";
+import { sharedPdfUrlBuilder, withCustomerInvoice } from "@/lib/invoices/views";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,12 @@ const ORDER_SELECT = {
   createdAt: true,
   paidAt: true,
   payuRedirectUri: true,
+  invoiceStatus: true,
+  invoiceNumber: true,
+  invoiceToken: true,
+  fakturowniaInvoiceId: true,
+  ksefStatus: true,
+  invoiceEmailedAt: true,
   items: {
     select: { packageName: true, creditType: true, creditsPerPackage: true, quantity: true, lineGrossGrosze: true },
   },
@@ -42,16 +50,31 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     let order = await prisma.order.findUnique({ where: { id }, select: ORDER_SELECT });
     if (!order || !canViewOrder(viewer, order)) return notFound();
 
+    // True only when PayU was really polled; false when the order needed no sync or the poll was throttled.
+    let synced = false;
     if (order.status === "PENDING_PAYMENT") {
       const payu = getSharedPayuClient();
       // At most one PayU poll per order per 10 s, however often the page asks; otherwise return DB state.
       if (payu && !isRateLimited("orders_sync", order.id, 1, 10_000).limited) {
-        await syncOrderWithPayu(prisma, order.id, payu);
+        const sync = await syncOrderWithPayu(prisma, order.id, payu);
+        synced = sync.synced;
+        if (sync.result === "PAID_NOW") issueInvoiceAfterResponse(order.id);
         order = await prisma.order.findUnique({ where: { id }, select: ORDER_SELECT });
         if (!order) return notFound();
       }
     }
 
+    const invoice = withCustomerInvoice(
+      {
+        invoiceStatus: order.invoiceStatus,
+        invoiceNumber: order.invoiceNumber,
+        invoiceToken: order.invoiceToken,
+        fakturowniaInvoiceId: order.fakturowniaInvoiceId,
+        ksefStatus: order.ksefStatus,
+        invoiceEmailedAt: order.invoiceEmailedAt,
+      },
+      sharedPdfUrlBuilder(),
+    );
     return NextResponse.json({
       id: order.id,
       status: order.status,
@@ -59,6 +82,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       createdAt: order.createdAt,
       paidAt: order.paidAt,
       items: order.items,
+      invoiceStatus: invoice.invoiceStatus,
+      invoiceNumber: invoice.invoiceNumber,
+      invoicePdfUrl: invoice.invoicePdfUrl,
+      synced,
       ...(canResumePayment(freshUser.id, order) ? { payuRedirectUri: order.payuRedirectUri } : {}),
     });
   } catch (error) {

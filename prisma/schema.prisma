@@ -52,6 +52,15 @@ enum OrderStatus {
   FAILED
 }
 
+enum InvoiceStatus {
+  NOT_REQUIRED
+  PENDING
+  ISSUING
+  ISSUED
+  FAILED
+  NEEDS_ATTENTION
+}
+
 enum PaymentMethod {
   PAYU
 }
@@ -328,9 +337,35 @@ model Order {
   items            OrderItem[]
   ledgerEntries    CreditLedgerEntry[]
 
+  invoiceStatus        InvoiceStatus @default(NOT_REQUIRED)
+  invoiceAttempts      Int           @default(0)
+  invoiceNextAttemptAt DateTime?
+  invoiceClaimedAt     DateTime?
+  invoiceLastError     String?
+  fakturowniaInvoiceId String?       @unique
+  invoiceNumber        String?
+  invoiceToken         String?
+  invoiceIssuedAt      DateTime?
+  invoiceEmailedAt     DateTime?
+  ksefStatus           String?
+  ksefId               String?
+  ksefVerificationLink String?
+  ksefCheckedAt        DateTime?
+
   @@index([organizationId, createdAt])
   @@index([userId, createdAt])
+  @@index([invoiceStatus, invoiceNextAttemptAt])
   @@map("orders")
+}
+
+/// Last run of a background job (e.g. the billing cron), so the admin panel can tell when it stopped running.
+model JobHeartbeat {
+  name           String   @id
+  lastRunAt      DateTime
+  lastResultJson String?  @db.Text
+  updatedAt      DateTime @updatedAt
+
+  @@map("job_heartbeats")
 }
 
 model OrderItem {

@@ -13,14 +13,16 @@ export type PayuConfig = {
 
 let sandboxInProductionLogged = false;
 
-function isSandboxUrl(baseUrl: string): boolean {
+export function isSandboxUrl(baseUrl: string): boolean {
   let host = baseUrl;
   try {
     host = new URL(baseUrl).hostname;
   } catch {
     // Not a parsable URL: fall back to matching the raw value.
   }
-  return host.toLowerCase().includes(".snd.");
+  // A fully qualified hostname may carry one trailing dot (secure.snd.payu.com.).
+  const hostname = host.toLowerCase().replace(/\.$/, "");
+  return hostname === "snd.payu.com" || hostname.endsWith(".snd.payu.com");
 }
 
 /**

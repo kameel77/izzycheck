@@ -191,6 +191,7 @@ export async function applyPayuStatus(
       userId: true,
       totalGrossGrosze: true,
       currency: true,
+      payuSandbox: true,
       items: { select: { creditType: true, creditsPerPackage: true, quantity: true }, orderBy: { id: "asc" } },
     },
   });
@@ -222,13 +223,23 @@ export async function applyPayuStatus(
       throw new Error(`Zamówienie ${orderId} nie ma pozycji do zaksięgowania.`);
     }
 
+    // Read at call time so tests (and a staging env) can flip it without a restart.
+    const shouldInvoice = !order.payuSandbox || process.env.INVOICE_SANDBOX_ORDERS === "true";
+
     const outcome = await db.$transaction(async (tx) => {
       // Row lock first: the status read here is exactly the one the guarded update below acts on.
       const locked = await tx.$queryRaw<{ status: OrderStatus }[]>`SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE`;
       const previousStatus = locked[0]?.status;
+      const now = new Date();
       const { count } = await tx.order.updateMany({
         where: { id: orderId, status: { in: PAYABLE_STATUSES } },
-        data: { status: "PAID", paidAt: new Date(), ...(payuOrderId ? { payuOrderId } : {}) },
+        data: {
+          status: "PAID",
+          paidAt: now,
+          invoiceStatus: shouldInvoice ? "PENDING" : "NOT_REQUIRED",
+          invoiceNextAttemptAt: now,
+          ...(payuOrderId ? { payuOrderId } : {}),
+        },
       });
       if (count === 0) return { result: "ALREADY_PAID" as const, previousStatus };
 
@@ -280,10 +291,11 @@ export async function applyPayuStatus(
   return "IGNORED";
 }
 
+/** `paidOrderId` is set only when this notification moved the order to PAID, i.e. an invoice is now due. */
 export async function handlePayuNotification(
   db: PrismaClient,
   args: { rawBody: string; signatureHeader: string | null; config: { secondKey: string } },
-): Promise<{ status: number; body: object }> {
+): Promise<{ status: number; body: object; paidOrderId?: string }> {
   const { rawBody, signatureHeader, config } = args;
 
   if (!verifyPayuSignature(rawBody, signatureHeader, config.secondKey)) {
@@ -326,14 +338,14 @@ export async function handlePayuNotification(
   }
 
   try {
-    await applyPayuStatus(db, {
+    const result = await applyPayuStatus(db, {
       orderId: o.extOrderId,
       payuOrderId: typeof o.orderId === "string" ? o.orderId : undefined,
       status: o.status,
       totalAmount: Number(o.totalAmount),
       currencyCode: o.currencyCode,
     });
-    return { status: 200, body: { status: "OK" } };
+    return { status: 200, body: { status: "OK" }, ...(result === "PAID_NOW" ? { paidOrderId: o.extOrderId } : {}) };
   } catch (error) {
     // 5xx makes PayU retry the notification later.
     console.error("[PAYU_NOTIFY_ERROR]", error);
@@ -344,30 +356,38 @@ export async function handlePayuNotification(
 /**
  * Pull-based fallback for a missed notification: asks PayU for the order state and applies it. Only for
  * PENDING_PAYMENT orders with a PayU id, older than 10 s. Errors are logged and swallowed (a status read
- * must not fail because PayU is slow).
+ * must not fail because PayU is slow). `synced` is true only when PayU's state was fetched and applied, and
+ * `result` is then what applyPayuStatus decided (PAID_NOW means an invoice is now due).
  */
-export async function syncOrderWithPayu(db: PrismaClient, orderId: string, payu: PayuClientLike): Promise<void> {
+export async function syncOrderWithPayu(
+  db: PrismaClient,
+  orderId: string,
+  payu: PayuClientLike,
+): Promise<{ synced: boolean; result: ApplyPayuStatusResult | null }> {
+  const notSynced = { synced: false, result: null } as const;
   try {
     const order = await db.order.findUnique({
       where: { id: orderId },
       select: { status: true, payuOrderId: true, createdAt: true },
     });
-    if (!order || order.status !== "PENDING_PAYMENT" || !order.payuOrderId) return;
-    if (Date.now() - order.createdAt.getTime() < SYNC_MIN_AGE_MS) return;
+    if (!order || order.status !== "PENDING_PAYMENT" || !order.payuOrderId) return notSynced;
+    if (Date.now() - order.createdAt.getTime() < SYNC_MIN_AGE_MS) return notSynced;
 
     const info = await payu.getOrder(order.payuOrderId);
     if (info.extOrderId !== orderId) {
       console.error("[PAYU_SYNC_MISMATCH]", { orderId, payuOrderId: order.payuOrderId, receivedExtOrderId: info.extOrderId });
-      return;
+      return notSynced;
     }
-    await applyPayuStatus(db, {
+    const result = await applyPayuStatus(db, {
       orderId,
       payuOrderId: order.payuOrderId,
       status: info.status,
       totalAmount: info.totalAmount,
       currencyCode: info.currencyCode,
     });
+    return { synced: true, result };
   } catch (error) {
     console.error("[PAYU_SYNC_ERROR]", orderId, error);
+    return notSynced;
   }
 }

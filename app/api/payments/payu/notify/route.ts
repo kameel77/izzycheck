@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { handlePayuNotification } from "@/lib/billing/orders";
+import { issueInvoiceAfterResponse } from "@/lib/invoices/background";
 import { getPayuConfig } from "@/lib/payments/payu";
 
 // Called by PayU servers: no session, authenticity comes from the OpenPayu-Signature header. Never cached.
@@ -19,5 +20,6 @@ export async function POST(req: Request) {
     signatureHeader: req.headers.get("openpayu-signature"),
     config,
   });
+  if (result.paidOrderId) issueInvoiceAfterResponse(result.paidOrderId);
   return NextResponse.json(result.body, { status: result.status });
 }

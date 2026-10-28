@@ -6,6 +6,7 @@ import {
   createPayuClient,
   getPayuConfig,
   getSharedPayuClient,
+  isSandboxUrl,
   parsePayuSignatureHeader,
   verifyPayuSignature,
   type PayuConfig,
@@ -433,4 +434,20 @@ test("getOrder rejects malformed order payloads", async () => {
     );
     await assert.rejects(() => createPayuClient(config, fetchImpl).getOrder("P1"), PayuError);
   }
+});
+
+test("isSandboxUrl: matches snd.payu.com and its subdomains exactly", () => {
+  assert.equal(isSandboxUrl("https://snd.payu.com"), true);
+  assert.equal(isSandboxUrl("https://secure.snd.payu.com"), true);
+  assert.equal(isSandboxUrl("https://secure.snd.payu.com/"), true);
+  assert.equal(isSandboxUrl("https://SECURE.SND.PAYU.COM"), true);
+  assert.equal(isSandboxUrl("https://secure.snd.payu.com."), true);
+});
+
+test("isSandboxUrl: production and look-alike hosts are not sandbox", () => {
+  assert.equal(isSandboxUrl("https://secure.payu.com"), false);
+  assert.equal(isSandboxUrl("https://secure.snd.payu.com.evil.test"), false);
+  assert.equal(isSandboxUrl("https://notsnd.payu.com"), false);
+  assert.equal(isSandboxUrl("https://example.com/.snd./x"), false);
+  assert.equal(isSandboxUrl("https://snd.payu.com.example.com"), false);
 });

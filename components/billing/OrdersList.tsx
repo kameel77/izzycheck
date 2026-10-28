@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Building2, ExternalLink, Loader2, Receipt, RefreshCw, User } from "lucide-react";
+import { Building2, ExternalLink, FileDown, Loader2, Receipt, RefreshCw, User } from "lucide-react";
 import { ORDER_STATUS_LABELS, formatGrosze, formatOrderItem } from "@/lib/billing/labels";
 
 interface OrderRow {
@@ -10,6 +10,9 @@ interface OrderRow {
   totalGrossGrosze: number;
   createdAt: string;
   paidAt: string | null;
+  invoiceStatus: "NOT_REQUIRED" | "PENDING" | "ISSUED";
+  invoiceNumber: string | null;
+  invoicePdfUrl: string | null;
   user: { name: string } | null;
   items: Array<{
     packageName: string;
@@ -36,6 +39,29 @@ const STATUS_CLASSES: Record<OrderRow["status"], string> = {
   CANCELED: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
   FAILED: "bg-red-500/10 text-red-700 dark:text-red-400",
 };
+
+function InvoiceCell({ order }: { order: OrderRow }) {
+  if (order.invoiceStatus === "NOT_REQUIRED") return <span className="text-slate-400">—</span>;
+  if (order.invoiceStatus === "PENDING") {
+    return <span className="text-slate-500 dark:text-slate-400">W przygotowaniu</span>;
+  }
+  return (
+    <div className="flex flex-col items-start gap-1">
+      {order.invoiceNumber && <span className="font-medium text-slate-700 dark:text-slate-300">{order.invoiceNumber}</span>}
+      {order.invoicePdfUrl && (
+        <a
+          href={order.invoicePdfUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline dark:text-blue-400"
+        >
+          <FileDown className="h-3 w-3" />
+          Pobierz PDF
+        </a>
+      )}
+    </div>
+  );
+}
 
 function OrderActions({
   order,
@@ -153,13 +179,27 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
         if (!res.ok) throw new Error(typeof json?.error === "string" && json.error ? json.error : "Nie udało się sprawdzić statusu.");
         if (typeof json?.status !== "string") throw new Error("Nie udało się sprawdzić statusu.");
         setOrders((prev) =>
-          prev.map((row) => (row.id === orderId ? { ...row, status: json.status, paidAt: json.paidAt ?? null } : row)),
+          prev.map((row) =>
+            row.id === orderId
+              ? {
+                  ...row,
+                  status: json.status,
+                  paidAt: json.paidAt ?? null,
+                  invoiceStatus: json.invoiceStatus ?? row.invoiceStatus,
+                  invoiceNumber: json.invoiceNumber ?? null,
+                  invoicePdfUrl: json.invoicePdfUrl ?? null,
+                }
+              : row,
+          ),
         );
         setRowChecks((prev) => ({
           ...prev,
           [orderId]: {
             checking: false,
-            message: "Status sprawdzony.",
+            message:
+              json.synced === true || json.status !== "PENDING_PAYMENT"
+                ? "Status sprawdzony."
+                : "Sprawdzono niedawno — spróbuj ponownie za kilka sekund.",
             payuRedirectUri:
               json.status === "PENDING_PAYMENT" && typeof json.payuRedirectUri === "string" ? json.payuRedirectUri : undefined,
           },
@@ -220,6 +260,7 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
                   <th className="px-5 py-3.5 font-semibold">Pozycje</th>
                   <th className="px-5 py-3.5 font-semibold">Kwota brutto</th>
                   <th className="px-5 py-3.5 font-semibold">Status</th>
+                  <th className="px-5 py-3.5 font-semibold">Faktura</th>
                   <th className="px-5 py-3.5 font-semibold">Akcje</th>
                   {scope === "org" && <th className="px-5 py-3.5 font-semibold">Użytkownik</th>}
                 </tr>
@@ -227,7 +268,7 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
               <tbody className="divide-y divide-slate-100 text-slate-700 dark:divide-slate-800/60 dark:text-slate-300">
                 {orders.length === 0 ? (
                   <tr>
-                    <td colSpan={scope === "org" ? 6 : 5} className="px-5 py-8 text-center text-slate-500">
+                    <td colSpan={scope === "org" ? 7 : 6} className="px-5 py-8 text-center text-slate-500">
                       Brak zamówień.
                     </td>
                   </tr>
@@ -247,6 +288,9 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
                         >
                           {ORDER_STATUS_LABELS[order.status]}
                         </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        <InvoiceCell order={order} />
                       </td>
                       <td className="px-5 py-4">
                         {order.status === "PENDING_PAYMENT" && (
