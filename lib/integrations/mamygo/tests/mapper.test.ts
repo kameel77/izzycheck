@@ -178,6 +178,14 @@ describe("toExternalVinIdentification: constructionYear", () => {
     assert.equal(year("5"), null); // cyfra 5 = 2035
   });
 
+  test("granica 'bieżący rok + 1' liczona w czasie polskim, nie w strefie serwera", () => {
+    // 2026-12-31 23:30 UTC to już 2027-01-01 w Polsce, więc maksymalny rok to 2028.
+    const now = new Date("2026-12-31T23:30:00Z");
+    const yearAt = (yearChar: string) => toExternalVinIdentification(syntheticVin(yearChar), rawFor("bmw-420d"), now).constructionYear;
+    assert.equal(yearAt("W"), "2028");
+    assert.equal(yearAt("X"), null); // 2029
+  });
+
   test("cykl 30-letni: cyfry 1-9 to lata 2031-2039", () => {
     const farFuture = toExternalVinIdentification(syntheticVin("1"), rawFor("bmw-420d"), new Date("2031-01-15T00:00:00Z"));
     assert.equal(farFuture.constructionYear, "2031");
@@ -300,6 +308,13 @@ describe("toExternalVinIdentification: słowniki", () => {
     assert.equal(mapWith("kia-sportage", { carBodyKind: "", carBodyType: "sedan" }).body, "Sedan/Saloon");
   });
 
+  test("nadwozie: carBodyKind spoza słownika -> próba carBodyType, potem null", () => {
+    assert.equal(mapWith("kia-sportage", { carBodyKind: "pikap", carBodyType: "sedan" }).body, "Sedan/Saloon");
+    assert.equal(mapWith("kia-sportage", { carBodyKind: "pikap", carBodyType: "furgon" }).body, null);
+    // carBodyKind w słowniku ma pierwszeństwo przed carBodyType
+    assert.equal(mapWith("kia-sportage", { carBodyKind: "sedan", carBodyType: "kupe" }).body, "Sedan/Saloon");
+  });
+
   test("napęd: 4x4 lub P1Z1 -> AWD, P1 -> FWD, Z1 -> RWD", () => {
     assert.equal(mapWith("kia-sportage", { axlePowered: "4x4" }).drive, "All wheel drive");
     assert.equal(mapWith("kia-sportage", { powerAxleLocation: "P1Z1" }).drive, "All wheel drive");
@@ -326,6 +341,32 @@ describe("toExternalVinIdentification: słowniki", () => {
     assert.equal(product("XX", "N1"), "Truck");
     assert.equal(product("XX", "L3e"), "Motorcycle");
     assert.equal(product("XX", "O1"), null);
+  });
+});
+
+describe("toExternalVinIdentification: wyposażenie seryjne (Basic)", () => {
+  const standardItem = (code: string, name: string) =>
+    `<Equipment><EquipmentType>Standard</EquipmentType><Code>${code}</Code><Name>${name}</Name><Nr>1</Nr></Equipment>`;
+
+  /** Dokleja pozycje na początek pierwszego bloku <Equipments> klasyfikacji Kii. */
+  const mapWithStandard = (extra: string[]) => {
+    const xml = loadFixture("kia-sportage.cls.xml").replace("<Equipments>", `<Equipments>${extra.join("")}`);
+    return toExternalVinIdentification(syntheticVin(), { classificationXml: xml, fittedEquipmentCodes: [] }, NOW)
+      .carFeaturesBasicWithId;
+  };
+
+  test("duplikaty po kodzie są usuwane (zostaje pierwsze wystąpienie), pusty kod pomijany", () => {
+    const basic = mapWithStandard([standardItem("ZQ1", "Pierwsza"), standardItem("ZQ1", "Druga"), standardItem("", "Bez kodu")]);
+    assert.equal(basic.filter((item) => item.id === "ZQ1").length, 1);
+    assert.deepEqual(basic[0], { label: "Pierwsza", id: "ZQ1" });
+    assert.equal(basic.some((item) => item.id === ""), false);
+    assert.equal(new Set(basic.map((item) => item.id)).size, basic.length);
+  });
+
+  test("pusta nazwa: najpierw katalog Audatex, potem sam kod", () => {
+    const basic = mapWithStandard([standardItem("B02", ""), standardItem("ZQ2", "")]);
+    assert.deepEqual(basic[0], { label: "System EDL - el. blokada dyferencjału", id: "B02" });
+    assert.deepEqual(basic[1], { label: "ZQ2", id: "ZQ2" });
   });
 });
 

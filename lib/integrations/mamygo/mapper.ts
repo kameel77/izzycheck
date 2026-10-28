@@ -1,4 +1,5 @@
 import equipmentCatalog from "../../audatex/equipment-catalog-pl.json" with { type: "json" };
+import { currentMonthWarsaw } from "../../api-clients/month.ts";
 import { parseClassificationXml, type ParsedClassification } from "./parse.ts";
 import type { ExternalEquipmentItem, ExternalVinIdentification } from "./types.ts";
 
@@ -78,14 +79,19 @@ function mapConstructionYear(vin: string, productionBeginYear: string | undefine
 
   const beginYear = numberOrNull(productionBeginYear);
   if (beginYear !== null && year < beginYear) return null;
-  if (year > now.getFullYear() + 1) return null;
+  // Bieżący rok w czasie polskim (nie strefie serwera), żeby przełom roku nie zmieniał wyniku zależnie od TZ hosta.
+  if (year > Number(currentMonthWarsaw(now).slice(0, 4)) + 1) return null;
   return String(year);
 }
 
 function mapBody(params: Record<string, string>): string | null {
-  const source = !isBlank(params.carBodyKind) ? params.carBodyKind : params.carBodyType;
-  if (isBlank(source)) return null;
-  return BODY_MAP[source.trim().toLowerCase()] ?? null;
+  // carBodyKind ma pierwszeństwo; gdy jest pusty albo spoza słownika, próbujemy carBodyType.
+  for (const source of [params.carBodyKind, params.carBodyType]) {
+    if (isBlank(source)) continue;
+    const mapped = BODY_MAP[source.trim().toLowerCase()];
+    if (mapped) return mapped;
+  }
+  return null;
 }
 
 function mapDrive(params: Record<string, string>): string | null {
@@ -122,6 +128,19 @@ function mapBatteryCapacity(fuelCode: string, params: Record<string, string>): s
   if (fuelCode === "EL") return scalar(params.petrolCapacityMain, true);
   if (fuelCode === "BAEL" || fuelCode === "NMEL") return scalar(params.petrlCapacitySecondary, true); // literówka Audatex
   return null;
+}
+
+/** Seria Audatex 1:1; pusty kod pomijamy, duplikaty po kodzie usuwamy, pusta nazwa -> katalog -> kod. */
+function mapBasicFeatures(classification: ParsedClassification): ExternalEquipmentItem[] {
+  const seen = new Set<string>();
+  const items: ExternalEquipmentItem[] = [];
+  for (const item of classification.standard) {
+    const code = item.code.trim();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    items.push({ label: item.name || AUDATEX_EQUIPMENT_NAMES[code] || code, id: code });
+  }
+  return items;
 }
 
 function mapAdditionalFeatures(
@@ -192,7 +211,7 @@ export function toExternalVinIdentification(
     wheelBase: scalar(p.wheelBase, true),
     airbagsCount: null,
     seatsCount: scalar(p.sittingPlaceNr),
-    carFeaturesBasicWithId: classification.standard.map((item) => ({ label: item.name, id: item.code })),
+    carFeaturesBasicWithId: mapBasicFeatures(classification),
     carFeaturesAdditionalWithId: mapAdditionalFeatures(classification, raw.fittedEquipmentCodes),
   };
 }
