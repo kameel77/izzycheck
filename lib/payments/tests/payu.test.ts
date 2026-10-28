@@ -5,6 +5,7 @@ import {
   PayuError,
   createPayuClient,
   getPayuConfig,
+  getSharedPayuClient,
   parsePayuSignatureHeader,
   verifyPayuSignature,
   type PayuConfig,
@@ -70,6 +71,21 @@ test("getPayuConfig returns null when PAYU_SECOND_KEY is missing", () => {
   const { PAYU_SECOND_KEY: _omit, ...rest } = fullEnv;
   assert.equal(getPayuConfig(rest), null);
   assert.equal(getPayuConfig({ ...fullEnv, PAYU_SECOND_KEY: "  " }), null);
+});
+
+test("getSharedPayuClient returns null without config", () => {
+  assert.equal(getSharedPayuClient({}), null);
+});
+
+test("getSharedPayuClient reuses the instance for the same config and recreates it when config changes", () => {
+  const a = getSharedPayuClient(fullEnv);
+  assert.ok(a);
+  assert.equal(getSharedPayuClient({ ...fullEnv }), a);
+  const b = getSharedPayuClient({ ...fullEnv, PAYU_CLIENT_SECRET: "rotated-secret" });
+  assert.ok(b);
+  assert.notEqual(b, a);
+  assert.equal(getSharedPayuClient({ ...fullEnv, PAYU_CLIENT_SECRET: "rotated-secret" }), b);
+  assert.notEqual(getSharedPayuClient(fullEnv), b);
 });
 
 // --- OAuth token + createOrder ---

@@ -168,7 +168,10 @@ export async function applyPayuStatus(
       items: { select: { creditType: true, creditsPerPackage: true, quantity: true } },
     },
   });
-  if (!order) return "UNKNOWN_ORDER";
+  if (!order) {
+    console.error("[PAYU_UNKNOWN_ORDER]", { extOrderId: orderId, payuOrderId, status, totalAmount, currencyCode });
+    return "UNKNOWN_ORDER";
+  }
 
   // Checked before any status change, for every status.
   if (totalAmount !== order.totalGrossGrosze || currencyCode !== order.currency) {
@@ -193,12 +196,15 @@ export async function applyPayuStatus(
       throw new Error(`Zamówienie ${orderId} nie ma pozycji do zaksięgowania.`);
     }
 
-    return db.$transaction(async (tx) => {
+    const outcome = await db.$transaction(async (tx) => {
+      // Row lock first: the status read here is exactly the one the guarded update below acts on.
+      const locked = await tx.$queryRaw<{ status: OrderStatus }[]>`SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE`;
+      const previousStatus = locked[0]?.status;
       const { count } = await tx.order.updateMany({
         where: { id: orderId, status: { in: PAYABLE_STATUSES } },
         data: { status: "PAID", paidAt: new Date(), ...(payuOrderId ? { payuOrderId } : {}) },
       });
-      if (count === 0) return "ALREADY_PAID";
+      if (count === 0) return { result: "ALREADY_PAID" as const, previousStatus };
 
       for (const [creditType, amount] of creditsByType) {
         await addCredits(tx, {
@@ -211,8 +217,19 @@ export async function applyPayuStatus(
           note: "Zakup online (PayU)",
         });
       }
-      return "PAID_NOW";
+      return { result: "PAID_NOW" as const, previousStatus };
     });
+
+    // After commit, so the log only exists for a payment that really was booked.
+    if (outcome.result === "PAID_NOW" && (outcome.previousStatus === "CANCELED" || outcome.previousStatus === "FAILED")) {
+      console.error("[PAYU_PAID_AFTER_CANCEL]", {
+        orderId,
+        previousStatus: outcome.previousStatus,
+        payuOrderId,
+        totalAmount,
+      });
+    }
+    return outcome.result;
   }
 
   if (status === "CANCELED") {
@@ -258,16 +275,19 @@ export async function handlePayuNotification(
   const order = (payload as { order?: unknown }).order;
   // Signed notifications that are not about an order payment (e.g. refunds) are acknowledged and ignored.
   if (order === undefined) {
+    console.warn("[PAYU_NOTIFY_IGNORED]", { keys: Object.keys(payload) });
     return { status: 200, body: { status: "OK" } };
   }
   const o = order as Record<string, unknown> | null;
-  if (
-    typeof o !== "object" ||
-    o === null ||
-    typeof o.extOrderId !== "string" ||
-    typeof o.status !== "string" ||
-    typeof o.currencyCode !== "string"
-  ) {
+  if (typeof o !== "object" || o === null || Array.isArray(o)) {
+    return { status: 400, body: { error: "Invalid payload" } };
+  }
+  // Without our order id there is nothing to retry for: acknowledge, so PayU does not resend it forever.
+  if (typeof o.extOrderId !== "string") {
+    console.warn("[PAYU_NOTIFY_NO_EXT_ORDER_ID]", { payuOrderId: typeof o.orderId === "string" ? o.orderId : undefined });
+    return { status: 200, body: { status: "OK" } };
+  }
+  if (typeof o.status !== "string" || typeof o.currencyCode !== "string") {
     return { status: 400, body: { error: "Invalid payload" } };
   }
 
@@ -302,6 +322,10 @@ export async function syncOrderWithPayu(db: PrismaClient, orderId: string, payu:
     if (Date.now() - order.createdAt.getTime() < SYNC_MIN_AGE_MS) return;
 
     const info = await payu.getOrder(order.payuOrderId);
+    if (info.extOrderId !== orderId) {
+      console.error("[PAYU_SYNC_MISMATCH]", { orderId, payuOrderId: order.payuOrderId, receivedExtOrderId: info.extOrderId });
+      return;
+    }
     await applyPayuStatus(db, {
       orderId,
       payuOrderId: order.payuOrderId,

@@ -197,6 +197,24 @@ export function createPayuClient(config: PayuConfig, fetchImpl: typeof fetch = f
   return { createOrder, getOrder };
 }
 
+export type PayuClient = ReturnType<typeof createPayuClient>;
+
+let sharedClient: { key: string; client: PayuClient } | null = null;
+
+/**
+ * Process-wide PayU client so the OAuth token cache survives across requests. Recreated when any
+ * configuration value changes; null when PayU is not configured.
+ */
+export function getSharedPayuClient(env: Record<string, string | undefined> = process.env): PayuClient | null {
+  const config = getPayuConfig(env);
+  if (!config) return null;
+  const key = JSON.stringify([config.baseUrl, config.posId, config.clientId, config.clientSecret, config.secondKey, config.appUrl]);
+  if (!sharedClient || sharedClient.key !== key) {
+    sharedClient = { key, client: createPayuClient(config) };
+  }
+  return sharedClient.client;
+}
+
 export type PayuSignatureAlgorithm = "MD5" | "SHA-256";
 
 /** Parses `sender=checkout;signature=...;algorithm=MD5;content=DOCUMENT`. Missing algorithm means MD5. */

@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { getCurrentUser, getFreshUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { syncOrderWithPayu } from "@/lib/billing/orders";
-import { createPayuClient, getPayuConfig } from "@/lib/payments/payu";
+import { canViewOrder } from "@/lib/billing/order-access";
+import { getSharedPayuClient } from "@/lib/payments/payu";
+import { isRateLimited } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -34,19 +36,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const { id } = await params;
     const notFound = () => NextResponse.json({ error: "Nie znaleziono zamówienia." }, { status: 404 });
 
-    // Creator, or MANAGER/ADMIN of the order's organization; everybody else gets 404 (existence is not revealed).
-    const canAccess = (order: { organizationId: string; userId: string }) =>
-      freshUser.organizationId !== null &&
-      order.organizationId === freshUser.organizationId &&
-      (order.userId === freshUser.id || freshUser.role === "MANAGER" || freshUser.role === "ADMIN");
-
+    // Everybody who may not view the order gets 404 (existence is not revealed).
+    const viewer = { userId: freshUser.id, role: freshUser.role, organizationId: freshUser.organizationId };
     let order = await prisma.order.findUnique({ where: { id }, select: ORDER_SELECT });
-    if (!order || !canAccess(order)) return notFound();
+    if (!order || !canViewOrder(viewer, order)) return notFound();
 
     if (order.status === "PENDING_PAYMENT") {
-      const config = getPayuConfig();
-      if (config) {
-        await syncOrderWithPayu(prisma, order.id, createPayuClient(config));
+      const payu = getSharedPayuClient();
+      // At most one PayU poll per order per 10 s, however often the page asks; otherwise return DB state.
+      if (payu && !isRateLimited("orders_sync", order.id, 1, 10_000).limited) {
+        await syncOrderWithPayu(prisma, order.id, payu);
         order = await prisma.order.findUnique({ where: { id }, select: ORDER_SELECT });
         if (!order) return notFound();
       }

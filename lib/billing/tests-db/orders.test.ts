@@ -124,6 +124,23 @@ function completed(order: { id: string; totalGrossGrosze: number; payuOrderId: s
   };
 }
 
+/** Captures console.error / console.warn calls made while fn runs. */
+async function captureConsole<T>(fn: () => Promise<T>) {
+  const error = mock.method(console, "error", () => {});
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    const result = await fn();
+    return {
+      result,
+      errors: error.mock.calls.map((c) => c.arguments),
+      warns: warn.mock.calls.map((c) => c.arguments),
+    };
+  } finally {
+    error.mock.restore();
+    warn.mock.restore();
+  }
+}
+
 async function expectCheckoutError(promise: Promise<unknown>, status: number, message: string) {
   await assert.rejects(promise, (err) => {
     assert.ok(err instanceof CheckoutError);
@@ -427,6 +444,42 @@ describe("applyPayuStatus COMPLETED", () => {
     assert.equal(await readBalance(ctx.org.id, "VALUATION"), 25);
   });
 
+  test("paying a CANCELED order logs [PAYU_PAID_AFTER_CANCEL] with the previous status", async () => {
+    const ctx = await setup();
+    const order = await placeOrder(ctx);
+    await applyPayuStatus(testPrisma, completed(order, { status: "CANCELED" }));
+    const { result, errors } = await captureConsole(() => applyPayuStatus(testPrisma, completed(order)));
+    assert.equal(result, "PAID_NOW");
+    const logs = errors.filter((a) => a[0] === "[PAYU_PAID_AFTER_CANCEL]");
+    assert.equal(logs.length, 1);
+    assert.deepEqual(logs[0][1], {
+      orderId: order.id,
+      previousStatus: "CANCELED",
+      payuOrderId: order.payuOrderId,
+      totalAmount: order.totalGrossGrosze,
+    });
+  });
+
+  test("paying a FAILED order logs [PAYU_PAID_AFTER_CANCEL] with previousStatus FAILED", async () => {
+    const ctx = await setup();
+    const order = await placeOrder(ctx);
+    await applyPayuStatus(testPrisma, completed(order, { status: "REJECTED" }));
+    const { errors } = await captureConsole(() => applyPayuStatus(testPrisma, completed(order)));
+    const logs = errors.filter((a) => a[0] === "[PAYU_PAID_AFTER_CANCEL]");
+    assert.equal(logs.length, 1);
+    assert.equal((logs[0][1] as { previousStatus: string }).previousStatus, "FAILED");
+  });
+
+  test("a normal payment and a repeated delivery do not log [PAYU_PAID_AFTER_CANCEL]", async () => {
+    const ctx = await setup();
+    const order = await placeOrder(ctx);
+    const { errors } = await captureConsole(async () => {
+      await applyPayuStatus(testPrisma, completed(order));
+      await applyPayuStatus(testPrisma, completed(order));
+    });
+    assert.equal(errors.filter((a) => a[0] === "[PAYU_PAID_AFTER_CANCEL]").length, 0);
+  });
+
   test("a failure while crediting rolls back the PAID status (no PAID without credits)", async () => {
     const ctx = await setup();
     const order = await placeOrder(ctx);
@@ -524,16 +577,27 @@ describe("applyPayuStatus amount, currency and other statuses", () => {
     assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PENDING_PAYMENT");
   });
 
-  test("unknown order id returns UNKNOWN_ORDER", async () => {
-    assert.equal(
-      await applyPayuStatus(testPrisma, {
-        orderId: randomUUID(),
+  test("unknown order id returns UNKNOWN_ORDER and logs [PAYU_UNKNOWN_ORDER]", async () => {
+    const orderId = randomUUID();
+    const { result, errors } = await captureConsole(() =>
+      applyPayuStatus(testPrisma, {
+        orderId,
+        payuOrderId: "PAYU-X",
         status: "COMPLETED",
         totalAmount: 100,
         currencyCode: "PLN",
       }),
-      "UNKNOWN_ORDER",
     );
+    assert.equal(result, "UNKNOWN_ORDER");
+    const logs = errors.filter((a) => a[0] === "[PAYU_UNKNOWN_ORDER]");
+    assert.equal(logs.length, 1);
+    assert.deepEqual(logs[0][1], {
+      extOrderId: orderId,
+      payuOrderId: "PAYU-X",
+      status: "COMPLETED",
+      totalAmount: 100,
+      currencyCode: "PLN",
+    });
   });
 });
 
@@ -622,17 +686,37 @@ describe("handlePayuNotification", () => {
     assert.equal(res.status, 400);
   });
 
-  test("signed payload with an order of the wrong shape returns 400", async () => {
-    const res = await handlePayuNotification(testPrisma, { ...signed({ order: { status: "COMPLETED" } }), config });
-    assert.equal(res.status, 400);
+  test("signed payload with an order missing status or currency returns 400", async () => {
+    const extOrderId = randomUUID();
+    for (const order of [{ extOrderId, currencyCode: "PLN" }, { extOrderId, status: "COMPLETED" }, null, "x"]) {
+      const res = await handlePayuNotification(testPrisma, { ...signed({ order }), config });
+      assert.equal(res.status, 400);
+    }
   });
 
-  test("signed notification without an order (e.g. refund) is acknowledged with 200 and ignored", async () => {
-    const res = await handlePayuNotification(testPrisma, {
-      ...signed({ orderId: "PAYU-1", extOrderId: randomUUID(), refund: { status: "FINALIZED" } }),
-      config,
-    });
-    assert.deepEqual(res, { status: 200, body: { status: "OK" } });
+  test("signed order without a string extOrderId returns 200 and warns [PAYU_NOTIFY_NO_EXT_ORDER_ID]", async () => {
+    const { result, warns } = await captureConsole(() =>
+      handlePayuNotification(testPrisma, {
+        ...signed({ order: { orderId: "PAYU-1", status: "COMPLETED", totalAmount: "100", currencyCode: "PLN" } }),
+        config,
+      }),
+    );
+    assert.deepEqual(result, { status: 200, body: { status: "OK" } });
+    assert.equal(warns.filter((a) => a[0] === "[PAYU_NOTIFY_NO_EXT_ORDER_ID]").length, 1);
+    assert.equal(await testPrisma.creditLedgerEntry.count(), 0);
+  });
+
+  test("signed notification without an order (e.g. refund) returns 200 and warns [PAYU_NOTIFY_IGNORED] with the keys", async () => {
+    const { result, warns } = await captureConsole(() =>
+      handlePayuNotification(testPrisma, {
+        ...signed({ orderId: "PAYU-1", extOrderId: randomUUID(), refund: { status: "FINALIZED" } }),
+        config,
+      }),
+    );
+    assert.deepEqual(result, { status: 200, body: { status: "OK" } });
+    const logs = warns.filter((a) => a[0] === "[PAYU_NOTIFY_IGNORED]");
+    assert.equal(logs.length, 1);
+    assert.deepEqual(logs[0][1], { keys: ["orderId", "extOrderId", "refund"] });
   });
 
   test("unknown order returns 200", async () => {
@@ -761,6 +845,24 @@ describe("syncOrderWithPayu", () => {
       err.mock.restore();
     }
     assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PENDING_PAYMENT");
+  });
+
+  test("skips and logs [PAYU_SYNC_MISMATCH] when PayU returns a different extOrderId", async () => {
+    const ctx = await setup();
+    const order = await placeOrder(ctx);
+    await ageOrder(order.id, 60);
+    const payu = stubPayu({
+      getOrder: async () => ({
+        status: "COMPLETED",
+        totalAmount: order.totalGrossGrosze,
+        currencyCode: "PLN",
+        extOrderId: randomUUID(),
+      }),
+    });
+    const { errors } = await captureConsole(() => syncOrderWithPayu(testPrisma, order.id, payu));
+    assert.equal(errors.filter((a) => a[0] === "[PAYU_SYNC_MISMATCH]").length, 1);
+    assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PENDING_PAYMENT");
+    assert.equal(await testPrisma.creditLedgerEntry.count(), 0);
   });
 
   test("a mismatching amount from PayU never credits", async () => {

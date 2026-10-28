@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser, getFreshUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { CheckoutError, createCheckout } from "@/lib/billing/orders";
-import { createPayuClient, getPayuConfig } from "@/lib/payments/payu";
+import { getPayuConfig, getSharedPayuClient } from "@/lib/payments/payu";
 import { isRateLimited } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +34,8 @@ export async function POST(request: Request) {
     }
 
     const config = getPayuConfig();
-    if (!config) {
+    const payu = getSharedPayuClient();
+    if (!config || !payu) {
       return NextResponse.json({ error: "Płatności online są chwilowo niedostępne." }, { status: 503 });
     }
 
@@ -69,7 +70,7 @@ export async function POST(request: Request) {
       },
       items: items as Array<{ packageId: string; quantity: number }>,
       customerIp,
-      payu: createPayuClient(config),
+      payu,
       appUrl: config.appUrl,
     });
 
