@@ -341,40 +341,6 @@ export async function executeReportModule(
         valuationDate: report.valuationDate,
       });
 
-      // Upsert VehicleSnapshot
-      await db.vehicleSnapshot.upsert({
-        where: { reportId: report.id },
-        create: {
-          reportId: report.id,
-          ibsCode: valRes.ibsCode,
-          make: valRes.make,
-          model: valRes.model,
-          variant: valRes.variant,
-          newPriceCv: valRes.newPriceCv,
-          marketPriceCob: valRes.marketPriceCob,
-          technicalValueTh: valRes.technicalValueTh,
-          mileageUsed: valRes.mileageUsed,
-          isAverageMileageUsed: valRes.isAverageMileageUsed,
-          standardEquipment: JSON.stringify(valRes.standardEquipment),
-          optionalEquipment: JSON.stringify(valRes.optionalEquipment),
-          technicalSpecJson: valRes.technicalSpec ? JSON.stringify(valRes.technicalSpec) : null,
-        },
-        update: {
-          ibsCode: valRes.ibsCode,
-          make: valRes.make,
-          model: valRes.model,
-          variant: valRes.variant,
-          newPriceCv: valRes.newPriceCv,
-          marketPriceCob: valRes.marketPriceCob,
-          technicalValueTh: valRes.technicalValueTh,
-          mileageUsed: valRes.mileageUsed,
-          isAverageMileageUsed: valRes.isAverageMileageUsed,
-          standardEquipment: JSON.stringify(valRes.standardEquipment),
-          optionalEquipment: JSON.stringify(valRes.optionalEquipment),
-          technicalSpecJson: valRes.technicalSpec ? JSON.stringify(valRes.technicalSpec) : null,
-        },
-      });
-
       await settleModule(
         {
           status: "SUCCEEDED",
@@ -382,7 +348,42 @@ export async function executeReportModule(
           errorMessage: null,
           responseMetadata: JSON.stringify({ ibsCode: valRes.ibsCode, make: valRes.make, model: valRes.model }),
         },
-        true
+        true,
+        async (tx: any) => {
+          // Upsert VehicleSnapshot (only if this execution still owns the module)
+          await tx.vehicleSnapshot.upsert({
+            where: { reportId: report.id },
+            create: {
+              reportId: report.id,
+              ibsCode: valRes.ibsCode,
+              make: valRes.make,
+              model: valRes.model,
+              variant: valRes.variant,
+              newPriceCv: valRes.newPriceCv,
+              marketPriceCob: valRes.marketPriceCob,
+              technicalValueTh: valRes.technicalValueTh,
+              mileageUsed: valRes.mileageUsed,
+              isAverageMileageUsed: valRes.isAverageMileageUsed,
+              standardEquipment: JSON.stringify(valRes.standardEquipment),
+              optionalEquipment: JSON.stringify(valRes.optionalEquipment),
+              technicalSpecJson: valRes.technicalSpec ? JSON.stringify(valRes.technicalSpec) : null,
+            },
+            update: {
+              ibsCode: valRes.ibsCode,
+              make: valRes.make,
+              model: valRes.model,
+              variant: valRes.variant,
+              newPriceCv: valRes.newPriceCv,
+              marketPriceCob: valRes.marketPriceCob,
+              technicalValueTh: valRes.technicalValueTh,
+              mileageUsed: valRes.mileageUsed,
+              isAverageMileageUsed: valRes.isAverageMileageUsed,
+              standardEquipment: JSON.stringify(valRes.standardEquipment),
+              optionalEquipment: JSON.stringify(valRes.optionalEquipment),
+              technicalSpecJson: valRes.technicalSpec ? JSON.stringify(valRes.technicalSpec) : null,
+            },
+          });
+        }
       );
       executedStatus = "SUCCEEDED";
       executionSuccess = true;
@@ -436,31 +437,6 @@ export async function executeReportModule(
         firstRegistration: report.firstRegistrationDate,
       });
 
-      // Clear existing claims to avoid duplication on retry
-      await db.damageClaim.deleteMany({ where: { reportId: report.id } });
-
-      for (const claim of detailsRes.claims) {
-        await db.damageClaim.create({
-          data: {
-            reportId: report.id,
-            claimId: claim.claimId,
-            accidentDate: claim.accidentDate,
-            claimDate: claim.creationDate,
-            country: claim.country,
-            makeModel: claim.makeModel,
-            mileage: claim.mileage,
-            damageValue: claim.damageValue,
-            currency: claim.currency,
-            isTotalLoss: claim.isTotalLoss,
-            mandateCode: claim.mandateCode,
-            mandateDescription: claim.mandateDescription,
-            damageZones: JSON.stringify(claim.affectedZones),
-            significantParts: JSON.stringify(claim.significantParts),
-            damageAssessmentJson: claim.damageAssessment ? JSON.stringify(claim.damageAssessment) : null,
-          },
-        });
-      }
-
       // Zero claims is a free result: the reservation is released instead of captured.
       await settleModule(
         {
@@ -469,7 +445,33 @@ export async function executeReportModule(
           errorMessage: null,
           responseMetadata: JSON.stringify({ claimsCount: detailsRes.claims.length }),
         },
-        detailsRes.claims.length > 0
+        detailsRes.claims.length > 0,
+        async (tx: any) => {
+          // Clear existing claims to avoid duplication on retry
+          await tx.damageClaim.deleteMany({ where: { reportId: report.id } });
+
+          if (detailsRes.claims.length > 0) {
+            await tx.damageClaim.createMany({
+              data: detailsRes.claims.map((claim: any) => ({
+                reportId: report.id,
+                claimId: claim.claimId,
+                accidentDate: claim.accidentDate,
+                claimDate: claim.creationDate,
+                country: claim.country,
+                makeModel: claim.makeModel,
+                mileage: claim.mileage,
+                damageValue: claim.damageValue,
+                currency: claim.currency,
+                isTotalLoss: claim.isTotalLoss,
+                mandateCode: claim.mandateCode,
+                mandateDescription: claim.mandateDescription,
+                damageZones: JSON.stringify(claim.affectedZones),
+                significantParts: JSON.stringify(claim.significantParts),
+                damageAssessmentJson: claim.damageAssessment ? JSON.stringify(claim.damageAssessment) : null,
+              })),
+            });
+          }
+        }
       );
       executedStatus = "SUCCEEDED";
       executionSuccess = true;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
 import { executeReportModule, ModuleExecutionError, STALE_LOCK_MS } from "../module-executor.ts";
+import { skipReportModule } from "../skip-module.ts";
 import { createOrg, createReport, createUser, resetDb, setBalance, testPrisma } from "../../test-db/helpers.ts";
 
 beforeEach(async () => {
@@ -148,6 +149,9 @@ test("successful VALUATION captures one credit billed to the report owner", asyn
   assert.equal(entries[0].userId, user.id);
   const hold = await testPrisma.creditHold.findFirstOrThrow({ where: { reportId: report.id } });
   assert.equal(hold.status, "CAPTURED");
+  const snapshot = await testPrisma.vehicleSnapshot.findUniqueOrThrow({ where: { reportId: report.id } });
+  assert.equal(snapshot.ibsCode, "IBS1");
+  assert.equal(snapshot.make, "BMW");
 });
 
 test("failed VALUATION releases the credit", async () => {
@@ -400,4 +404,147 @@ test("late success after takeover does not double-capture", async () => {
   assert.equal(await readBalance(org.id, "VALUATION"), 1);
   const hold = await testPrisma.creditHold.findFirstOrThrow({ where: { reportId: report.id } });
   assert.equal(hold.status, "CAPTURED");
+});
+
+function claimResult(claimId: string) {
+  return {
+    claimId,
+    accidentDate: "2024-01-10",
+    creationDate: "2024-01-12",
+    country: "PL",
+    makeModel: "BMW 3",
+    mileage: 12000,
+    damageValue: 4500,
+    currency: "PLN",
+    isTotalLoss: false,
+    mandateCode: "M1",
+    mandateDescription: "Opis",
+    affectedZones: ["FRONT"],
+    significantParts: ["bumper"],
+  };
+}
+
+async function setupClaimDetails(balance: number) {
+  const org = await createOrg();
+  const user = await createUser({ organizationId: org.id });
+  await setBalance(org.id, "CLAIM_DETAILS", balance);
+  const report = await createReport({
+    organizationId: org.id,
+    createdById: user.id,
+    modules: { CLAIM_CHECK: "SUCCEEDED", CLAIM_DETAILS: "PENDING" },
+  });
+  return { org, user, report };
+}
+
+test("successful CLAIM_DETAILS writes all claims and captures one credit", async () => {
+  const { org, user, report } = await setupClaimDetails(1);
+  const histAdapter = { getClaimDetails: async () => ({ claims: [claimResult("C-1"), claimResult("C-2")] }) };
+
+  const res = await executeReportModule(
+    report.id,
+    "CLAIM_DETAILS",
+    runOptions(user.id, { customHistoryAdapter: histAdapter }),
+  );
+  assert.equal(res.success, true);
+
+  const claims = await testPrisma.damageClaim.findMany({ where: { reportId: report.id }, orderBy: { claimId: "asc" } });
+  assert.deepEqual(claims.map((c) => c.claimId), ["C-1", "C-2"]);
+  assert.equal(claims[0].claimDate, "2024-01-12");
+  assert.equal(claims[0].damageValue, 4500);
+  assert.equal(claims[0].damageZones, JSON.stringify(["FRONT"]));
+  assert.equal((await moduleState(report.id, "CLAIM_DETAILS")).status, "SUCCEEDED");
+  assert.equal(await readBalance(org.id, "CLAIM_DETAILS"), 0);
+  assert.deepEqual(await ledgerAmounts(org.id), [-1]);
+});
+
+test("late valuation after skip leaves no snapshot", async () => {
+  const { org, user, report } = await setupValuation({ balance: 1 });
+  const slow = makeGatedValuationAdapter("succeed");
+
+  const first = executeReportModule(
+    report.id,
+    "VALUATION",
+    runOptions(user.id, { customValuationAdapter: slow.adapter }),
+  );
+  const firstSettled = first.then(
+    () => ({ ok: true as const }),
+    (error: any) => ({ ok: false as const, error }),
+  );
+  await slow.started;
+  await makeLockStale(report.id);
+
+  const skipped = await skipReportModule(report.id, "VALUATION", {
+    customPrisma: testPrisma,
+    userId: user.id,
+    role: "USER",
+    organizationId: org.id,
+  });
+  assert.deepEqual(skipped, { success: true, moduleId: "VALUATION" });
+
+  slow.release();
+  const outcome = await firstSettled;
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) {
+    assert.ok(outcome.error instanceof ModuleExecutionError);
+    assert.equal(outcome.error.statusCode, 409);
+  }
+
+  assert.equal(await testPrisma.vehicleSnapshot.count({ where: { reportId: report.id } }), 0);
+  assert.equal((await moduleState(report.id, "VALUATION")).status, "NOT_REQUESTED");
+  assert.equal(await readBalance(org.id, "VALUATION"), 1);
+  assert.deepEqual(await ledgerAmounts(org.id), []);
+});
+
+test("late claim details after skip leaves no claims", async () => {
+  const { org, user, report } = await setupClaimDetails(1);
+  let release!: () => void;
+  let markStarted!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const histAdapter = {
+    getClaimDetails: async () => {
+      markStarted();
+      await gate;
+      return { claims: [claimResult("C-1"), claimResult("C-2")] };
+    },
+  };
+
+  const first = executeReportModule(
+    report.id,
+    "CLAIM_DETAILS",
+    runOptions(user.id, { customHistoryAdapter: histAdapter }),
+  );
+  const firstSettled = first.then(
+    () => ({ ok: true as const }),
+    (error: any) => ({ ok: false as const, error }),
+  );
+  await started;
+  const old = new Date(Date.now() - STALE_LOCK_MS - 5000);
+  await testPrisma.$executeRaw`UPDATE report_module_results SET "updatedAt" = ${old} WHERE "reportId" = ${report.id} AND "moduleId" = 'CLAIM_DETAILS'`;
+  await testPrisma.$executeRaw`UPDATE credit_holds SET "updatedAt" = ${old} WHERE "reportId" = ${report.id}`;
+
+  const skipped = await skipReportModule(report.id, "CLAIM_DETAILS", {
+    customPrisma: testPrisma,
+    userId: user.id,
+    role: "USER",
+    organizationId: org.id,
+  });
+  assert.deepEqual(skipped, { success: true, moduleId: "CLAIM_DETAILS" });
+
+  release();
+  const outcome = await firstSettled;
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) {
+    assert.ok(outcome.error instanceof ModuleExecutionError);
+    assert.equal(outcome.error.statusCode, 409);
+  }
+
+  assert.equal(await testPrisma.damageClaim.count({ where: { reportId: report.id } }), 0);
+  assert.equal((await moduleState(report.id, "CLAIM_DETAILS")).status, "NOT_REQUESTED");
+  assert.equal(await readBalance(org.id, "CLAIM_DETAILS"), 1);
+  assert.deepEqual(await ledgerAmounts(org.id), []);
 });
