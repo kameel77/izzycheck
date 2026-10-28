@@ -165,7 +165,9 @@ test("buildInvoicePayload: sets invoice, buyer and position fields", () => {
     kind: "vat",
     status: "paid",
     paid: "516.60",
+    paid_date: "2026-10-28",
     payment_type: "payu",
+    payment_to_kind: "off",
     issue_date: "2026-10-29",
     sell_date: "2026-10-28",
     currency: "PLN",
@@ -198,6 +200,7 @@ test("buildInvoicePayload: sell_date uses the Europe/Warsaw calendar day of paid
   // 23:30 UTC on 28 Oct is already 00:30 on 29 Oct in Warsaw (CET, UTC+1).
   const late = buildInvoicePayload({ ...order, paidAt: new Date("2026-10-28T23:30:00.000Z") }, organization, null, issueDate);
   assert.equal(late.sell_date, "2026-10-29");
+  assert.equal(late.paid_date, "2026-10-29");
   // 22:30 UTC on 28 Oct is 23:30 in Warsaw: still the 28th.
   const early = buildInvoicePayload({ ...order, paidAt: new Date("2026-10-28T22:30:00.000Z") }, organization, null, issueDate);
   assert.equal(early.sell_date, "2026-10-28");

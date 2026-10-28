@@ -68,7 +68,11 @@ export type FakturowniaInvoiceInput = {
   kind: "vat";
   status: "paid";
   paid: string;
+  /** Warsaw date of the payment. */
+  paid_date: string;
   payment_type: "payu";
+  /** "off": the invoice has no payment deadline (it is already paid). */
+  payment_to_kind: "off";
   issue_date: string;
   sell_date: string;
   currency: "PLN";
@@ -148,7 +152,9 @@ export function buildInvoicePayload(
     kind: "vat",
     status: "paid",
     paid: formatGrosze(order.totalGrossGrosze),
+    paid_date: warsawDate(order.paidAt),
     payment_type: "payu",
+    payment_to_kind: "off",
     issue_date: warsawDate(issueDate),
     sell_date: warsawDate(order.paidAt),
     currency: "PLN",
