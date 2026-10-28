@@ -8,3 +8,11 @@ export function canViewOrder(
   if (viewer.organizationId === null || viewer.organizationId !== order.organizationId) return false;
   return order.userId === viewer.userId || viewer.role === "MANAGER" || viewer.role === "ADMIN";
 }
+
+/** The PayU payment link is only for the order's creator and only while the payment is still open. */
+export function canResumePayment(
+  viewerUserId: string,
+  order: { userId: string; status: string; payuRedirectUri: string | null },
+): boolean {
+  return order.userId === viewerUserId && order.status === "PENDING_PAYMENT" && Boolean(order.payuRedirectUri);
+}

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser, getFreshUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { syncOrderWithPayu } from "@/lib/billing/orders";
-import { canViewOrder } from "@/lib/billing/order-access";
+import { canResumePayment, canViewOrder } from "@/lib/billing/order-access";
 import { getSharedPayuClient } from "@/lib/payments/payu";
 import { isRateLimited } from "@/lib/rate-limit";
 
@@ -16,6 +16,7 @@ const ORDER_SELECT = {
   totalGrossGrosze: true,
   createdAt: true,
   paidAt: true,
+  payuRedirectUri: true,
   items: {
     select: { packageName: true, creditType: true, creditsPerPackage: true, quantity: true, lineGrossGrosze: true },
   },
@@ -58,6 +59,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       createdAt: order.createdAt,
       paidAt: order.paidAt,
       items: order.items,
+      ...(canResumePayment(freshUser.id, order) ? { payuRedirectUri: order.payuRedirectUri } : {}),
     });
   } catch (error) {
     console.error("[ORDERS_ID_GET_ERROR]", error);

@@ -670,6 +670,34 @@ describe("handlePayuNotification", () => {
     assert.equal(await readBalance(ctx.org.id, "VALUATION"), 0);
   });
 
+  test("invalid signature is logged as metadata only (no body, no keys)", async () => {
+    const ctx = await setup();
+    const order = await placeOrder(ctx);
+    const { rawBody } = signed(payload(order));
+    const withHeader = await captureConsole(() =>
+      handlePayuNotification(testPrisma, {
+        rawBody,
+        signatureHeader: "sender=checkout;signature=deadbeef;algorithm=SHA-256;content=DOCUMENT",
+        config,
+      }),
+    );
+    assert.equal(withHeader.result.status, 400);
+    assert.deepEqual(withHeader.errors, [
+      ["[PAYU_INVALID_SIGNATURE]", { hasHeader: true, algorithm: "SHA-256", bodyLength: rawBody.length }],
+    ]);
+    const logged = JSON.stringify(withHeader.errors);
+    assert.ok(!logged.includes(SECOND_KEY));
+    assert.ok(!logged.includes(order.id));
+
+    const noHeader = await captureConsole(() =>
+      handlePayuNotification(testPrisma, { rawBody, signatureHeader: null, config }),
+    );
+    assert.equal(noHeader.result.status, 400);
+    assert.deepEqual(noHeader.errors, [
+      ["[PAYU_INVALID_SIGNATURE]", { hasHeader: false, algorithm: null, bodyLength: rawBody.length }],
+    ]);
+  });
+
   test("missing signature header and signature made with another key return 400", async () => {
     const ctx = await setup();
     const order = await placeOrder(ctx);

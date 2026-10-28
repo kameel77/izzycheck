@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Building2, Loader2, Receipt, User } from "lucide-react";
+import { Building2, ExternalLink, Loader2, Receipt, RefreshCw, User } from "lucide-react";
 import { ORDER_STATUS_LABELS, formatGrosze, formatOrderItem } from "@/lib/billing/labels";
 
 interface OrderRow {
@@ -22,12 +22,65 @@ interface OrderRow {
 
 type Scope = "mine" | "org";
 
+/** Per-row result of "Sprawdź status"; payuRedirectUri is only present for the order's creator. */
+interface RowCheck {
+  checking: boolean;
+  message?: string;
+  error?: boolean;
+  payuRedirectUri?: string;
+}
+
 const STATUS_CLASSES: Record<OrderRow["status"], string> = {
   PENDING_PAYMENT: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
   PAID: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   CANCELED: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
   FAILED: "bg-red-500/10 text-red-700 dark:text-red-400",
 };
+
+function OrderActions({
+  order,
+  check,
+  onCheck,
+}: {
+  order: OrderRow;
+  check: RowCheck | undefined;
+  onCheck: (orderId: string) => void;
+}) {
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onCheck(order.id)}
+          disabled={check?.checking}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-200 disabled:opacity-50 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700 transition-colors"
+        >
+          {check?.checking ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+          Sprawdź status
+        </button>
+        {check?.payuRedirectUri && (
+          <a
+            href={check.payuRedirectUri}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-500 transition-colors"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Dokończ płatność
+          </a>
+        )}
+      </div>
+      {check?.message && (
+        <p
+          role="status"
+          className={`text-[11px] ${check.error ? "text-red-600 dark:text-red-400" : "text-slate-500 dark:text-slate-400"}`}
+        >
+          {check.message}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
   const [scope, setScope] = useState<Scope>("mine");
@@ -36,7 +89,9 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [rowChecks, setRowChecks] = useState<Record<string, RowCheck>>({});
   const latestRequestId = useRef(0);
+  const checkingRef = useRef(new Set<string>());
 
   const loadOrders = useCallback((activeScope: Scope, cursor: string | null) => {
     const params = new URLSearchParams({ scope: activeScope });
@@ -86,6 +141,45 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
     loadOrders(scope, null);
   }, [scope, loadOrders]);
 
+  // GET /api/orders/:id syncs a pending order with PayU (throttled server-side) and returns its current state.
+  const checkStatus = useCallback((orderId: string) => {
+    if (checkingRef.current.has(orderId)) return;
+    checkingRef.current.add(orderId);
+    setRowChecks((prev) => ({ ...prev, [orderId]: { checking: true } }));
+
+    fetch(`/api/orders/${encodeURIComponent(orderId)}`)
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(typeof json?.error === "string" && json.error ? json.error : "Nie udało się sprawdzić statusu.");
+        if (typeof json?.status !== "string") throw new Error("Nie udało się sprawdzić statusu.");
+        setOrders((prev) =>
+          prev.map((row) => (row.id === orderId ? { ...row, status: json.status, paidAt: json.paidAt ?? null } : row)),
+        );
+        setRowChecks((prev) => ({
+          ...prev,
+          [orderId]: {
+            checking: false,
+            message: "Status sprawdzony.",
+            payuRedirectUri:
+              json.status === "PENDING_PAYMENT" && typeof json.payuRedirectUri === "string" ? json.payuRedirectUri : undefined,
+          },
+        }));
+      })
+      .catch((err) => {
+        setRowChecks((prev) => ({
+          ...prev,
+          [orderId]: {
+            checking: false,
+            error: true,
+            message: err instanceof Error && err.message ? err.message : "Nie udało się sprawdzić statusu.",
+          },
+        }));
+      })
+      .finally(() => {
+        checkingRef.current.delete(orderId);
+      });
+  }, []);
+
   const scopeButtonClass = (active: boolean) =>
     `inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all ${
       active
@@ -126,13 +220,14 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
                   <th className="px-5 py-3.5 font-semibold">Pozycje</th>
                   <th className="px-5 py-3.5 font-semibold">Kwota brutto</th>
                   <th className="px-5 py-3.5 font-semibold">Status</th>
+                  <th className="px-5 py-3.5 font-semibold">Akcje</th>
                   {scope === "org" && <th className="px-5 py-3.5 font-semibold">Użytkownik</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700 dark:divide-slate-800/60 dark:text-slate-300">
                 {orders.length === 0 ? (
                   <tr>
-                    <td colSpan={scope === "org" ? 5 : 4} className="px-5 py-8 text-center text-slate-500">
+                    <td colSpan={scope === "org" ? 6 : 5} className="px-5 py-8 text-center text-slate-500">
                       Brak zamówień.
                     </td>
                   </tr>
@@ -152,6 +247,11 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
                         >
                           {ORDER_STATUS_LABELS[order.status]}
                         </span>
+                      </td>
+                      <td className="px-5 py-4">
+                        {order.status === "PENDING_PAYMENT" && (
+                          <OrderActions order={order} check={rowChecks[order.id]} onCheck={checkStatus} />
+                        )}
                       </td>
                       {scope === "org" && (
                         <td className="px-5 py-4 text-slate-500 dark:text-slate-400">{order.user?.name ?? "—"}</td>

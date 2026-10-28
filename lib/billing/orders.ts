@@ -9,7 +9,7 @@
 import type { CreditType, OrderStatus, PrismaClient } from "@prisma/client";
 import { addCredits, isPrepaid } from "./credits.ts";
 import { priceCart, type CartPackage } from "./pricing.ts";
-import { verifyPayuSignature, type createPayuClient } from "../payments/payu.ts";
+import { parsePayuSignatureHeader, verifyPayuSignature, type createPayuClient } from "../payments/payu.ts";
 
 export type PayuClientLike = Pick<ReturnType<typeof createPayuClient>, "createOrder" | "getOrder">;
 
@@ -264,6 +264,12 @@ export async function handlePayuNotification(
   const { rawBody, signatureHeader, config } = args;
 
   if (!verifyPayuSignature(rawBody, signatureHeader, config.secondKey)) {
+    // Metadata only: never the body or any key. Usually a wrong PAYU_SECOND_KEY or APP_URL/notify URL setup.
+    console.error("[PAYU_INVALID_SIGNATURE]", {
+      hasHeader: Boolean(signatureHeader),
+      algorithm: parsePayuSignatureHeader(signatureHeader)?.algorithm ?? null,
+      bodyLength: rawBody.length,
+    });
     return { status: 400, body: { error: "Invalid signature" } };
   }
 
