@@ -6,6 +6,7 @@ import { canResumePayment, canViewOrder } from "@/lib/billing/order-access";
 import { issueInvoiceAfterResponse } from "@/lib/invoices/background";
 import { getSharedPayuClient } from "@/lib/payments/payu";
 import { isRateLimited } from "@/lib/rate-limit";
+import { sharedPdfUrlBuilder, withCustomerInvoice } from "@/lib/invoices/views";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,9 @@ const ORDER_SELECT = {
   createdAt: true,
   paidAt: true,
   payuRedirectUri: true,
+  invoiceStatus: true,
+  invoiceNumber: true,
+  invoiceToken: true,
   items: {
     select: { packageName: true, creditType: true, creditsPerPackage: true, quantity: true, lineGrossGrosze: true },
   },
@@ -57,6 +61,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       }
     }
 
+    const invoice = withCustomerInvoice(
+      { invoiceStatus: order.invoiceStatus, invoiceNumber: order.invoiceNumber, invoiceToken: order.invoiceToken },
+      sharedPdfUrlBuilder(),
+    );
     return NextResponse.json({
       id: order.id,
       status: order.status,
@@ -64,6 +72,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       createdAt: order.createdAt,
       paidAt: order.paidAt,
       items: order.items,
+      invoiceStatus: invoice.invoiceStatus,
+      invoiceNumber: invoice.invoiceNumber,
+      invoicePdfUrl: invoice.invoicePdfUrl,
       synced,
       ...(canResumePayment(freshUser.id, order) ? { payuRedirectUri: order.payuRedirectUri } : {}),
     });

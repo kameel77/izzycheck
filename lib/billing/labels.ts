@@ -1,5 +1,5 @@
 // Type-only Prisma imports: safe to use from client components (nothing from @prisma/client reaches the bundle).
-import type { CreditLedgerType, CreditType, OrderStatus } from "@prisma/client";
+import type { CreditLedgerType, CreditType, InvoiceStatus, OrderStatus } from "@prisma/client";
 
 export const LEDGER_TYPE_LABELS: Record<CreditLedgerType, string> = {
   USAGE: "Zużycie",
@@ -22,6 +22,16 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   PAID: "Opłacone",
   CANCELED: "Anulowane",
   FAILED: "Nieudane",
+};
+
+/** Admin view of an order's invoice status (customers only see "Pobierz PDF" or "W przygotowaniu"). */
+export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
+  NOT_REQUIRED: "Nie dotyczy",
+  PENDING: "Do wystawienia",
+  ISSUING: "W trakcie",
+  ISSUED: "Wystawiona",
+  FAILED: "Błąd (ponowienie)",
+  NEEDS_ATTENTION: "Wymaga sprawdzenia",
 };
 
 /** Polish plural forms (one, few, many) of what a single credit of each type buys. */

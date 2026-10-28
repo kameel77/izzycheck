@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { FileText, History, ShieldAlert, LogOut, CheckCircle2, AlertTriangle, Building2, Users, Menu, X, Coins, Tags } from "lucide-react";
+import { FileText, History, ShieldAlert, LogOut, CheckCircle2, AlertTriangle, Building2, Users, Menu, X, Coins, Tags, Receipt } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -202,6 +202,21 @@ export function Navbar() {
                         >
                           <Tags className="h-4 w-4 shrink-0" />
                           Cennik kredytów
+                        </Link>
+                      )}
+
+                      {currentUser?.role === "ADMIN" && (
+                        <Link
+                          href="/admin/orders"
+                          onClick={() => setIsMenuOpen(false)}
+                          className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                            pathname.startsWith("/admin/orders")
+                              ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-200"
+                          }`}
+                        >
+                          <Receipt className="h-4 w-4 shrink-0" />
+                          Zamówienia
                         </Link>
                       )}
 

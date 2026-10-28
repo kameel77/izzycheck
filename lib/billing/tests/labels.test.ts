@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 import {
   CREDIT_TYPE_LABELS,
+  INVOICE_STATUS_LABELS,
   LEDGER_TYPE_LABELS,
   ORDER_STATUS_LABELS,
   formatCreditAmount,
@@ -38,6 +39,17 @@ describe("order labels", () => {
       PAID: "Opłacone",
       CANCELED: "Anulowane",
       FAILED: "Nieudane",
+    });
+  });
+
+  test("every invoice status has its admin label", () => {
+    assert.deepEqual(INVOICE_STATUS_LABELS, {
+      NOT_REQUIRED: "Nie dotyczy",
+      PENDING: "Do wystawienia",
+      ISSUING: "W trakcie",
+      ISSUED: "Wystawiona",
+      FAILED: "Błąd (ponowienie)",
+      NEEDS_ATTENTION: "Wymaga sprawdzenia",
     });
   });
 
