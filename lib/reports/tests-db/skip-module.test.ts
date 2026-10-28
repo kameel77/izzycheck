@@ -113,3 +113,39 @@ test("skip releases a dangling credit reservation", async () => {
   assert.equal(await testPrisma.creditHold.count({ where: { reportId: report.id, status: "HELD" } }), 0);
   assert.equal(await readBalance(org.id, "VALUATION"), 1);
 });
+
+test("skip refuses a report with a frozen PDF and changes nothing", async () => {
+  const org = await createOrg({ billingMode: "PREPAID" });
+  const user = await createUser({ organizationId: org.id });
+  const report = await createReport({
+    organizationId: org.id,
+    createdById: user.id,
+    modules: { VALUATION: "FAILED" },
+  });
+  await testPrisma.report.update({
+    where: { id: report.id },
+    data: { status: "PARTIALLY_FAILED", pdfBytes: Buffer.from("%PDF-1.4 FROZEN") },
+  });
+
+  await assert.rejects(
+    skipReportModule(report.id, "VALUATION", {
+      customPrisma: testPrisma,
+      userId: user.id,
+      role: "USER",
+      organizationId: org.id,
+    }),
+    (err: any) => {
+      assert.ok(err instanceof ModuleExecutionError);
+      assert.equal(err.statusCode, 409);
+      return true;
+    },
+  );
+
+  const after = await testPrisma.report.findUniqueOrThrow({ where: { id: report.id } });
+  assert.equal(after.status, "PARTIALLY_FAILED");
+  assert.equal(Buffer.from(after.pdfBytes as Uint8Array).toString(), "%PDF-1.4 FROZEN");
+  const valuation = await testPrisma.reportModuleResult.findFirstOrThrow({
+    where: { reportId: report.id, moduleId: "VALUATION" },
+  });
+  assert.equal(valuation.status, "FAILED");
+});

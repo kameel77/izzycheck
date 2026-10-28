@@ -97,11 +97,11 @@ describe("skipReportModule", () => {
         },
       },
       reportModuleResult: {
-        update: async (args: any) => {
+        updateMany: async (args: any) => {
           moduleUpdate = args;
           const mod = modules.find((m) => m.id === args.where.id);
           Object.assign(mod, args.data);
-          return mod;
+          return { count: 1 };
         },
       },
       // releaseCredit locks the hold row via $queryRaw; no hold -> nothing to release
@@ -115,7 +115,56 @@ describe("skipReportModule", () => {
     assert.strictEqual(moduleUpdate.where.id, "m-val");
     assert.strictEqual(moduleUpdate.data.status, "NOT_REQUESTED");
     assert.strictEqual(moduleUpdate.data.errorMessage, null);
+    assert.deepStrictEqual(moduleUpdate.where.status, { in: ["PENDING", "FAILED"] });
     assert.ok(reportUpdate, "report must be finalized");
     assert.strictEqual(reportUpdate.status, "COMPLETED");
+  });
+
+  test("refuses to skip when the report already has a frozen PDF", async () => {
+    const report = makeReport([{ id: "m-val", moduleId: "VALUATION", status: "FAILED" }], {
+      status: "PARTIALLY_FAILED",
+      pdfBytes: Buffer.from("%PDF-1.4 FROZEN"),
+    });
+    let wrote = false;
+    const mockPrisma: any = {
+      report: { findUnique: async () => report, update: async () => { wrote = true; } },
+      reportModuleResult: { updateMany: async () => { wrote = true; return { count: 1 }; } },
+      $transaction: async (fn: any) => fn(mockPrisma),
+    };
+
+    await assert.rejects(
+      skipReportModule("rep-skip-1", "VALUATION", { customPrisma: mockPrisma, ...owner }),
+      (err: any) => {
+        assert.ok(err instanceof ModuleExecutionError);
+        assert.strictEqual(err.statusCode, 409);
+        assert.strictEqual(err.message, "Raport został już zamrożony i nie może zostać zmieniony.");
+        return true;
+      }
+    );
+    assert.strictEqual(wrote, false);
+  });
+
+  test("returns 409 when the guarded status update matches no row", async () => {
+    const report = makeReport([{ id: "m-val", moduleId: "VALUATION", status: "PENDING" }]);
+    let released = false;
+    const mockPrisma: any = {
+      report: { findUnique: async () => report },
+      reportModuleResult: { updateMany: async () => ({ count: 0 }) },
+      $queryRaw: async () => {
+        released = true;
+        return [];
+      },
+      $transaction: async (fn: any) => fn(mockPrisma),
+    };
+
+    await assert.rejects(
+      skipReportModule("rep-skip-1", "VALUATION", { customPrisma: mockPrisma, ...owner }),
+      (err: any) => {
+        assert.ok(err instanceof ModuleExecutionError);
+        assert.strictEqual(err.statusCode, 409);
+        return true;
+      }
+    );
+    assert.strictEqual(released, false, "credit must not be released when the transition did not happen");
   });
 });

@@ -47,6 +47,11 @@ export async function skipReportModule(
     throw new ModuleExecutionError("Tego modułu nie można pominąć.", 400);
   }
 
+  // A report with a stored PDF is frozen: skipping would re-finalize it and overwrite the frozen document
+  if (report.pdfBytes) {
+    throw new ModuleExecutionError("Raport został już zamrożony i nie może zostać zmieniony.", 409);
+  }
+
   const targetModule = report.moduleResults.find((m: any) => m.moduleId === moduleId);
   if (!targetModule) {
     throw new ModuleExecutionError("Ten moduł nie został zamówiony w ramach bieżącego raportu.", 400);
@@ -59,12 +64,16 @@ export async function skipReportModule(
   }
 
   await db.$transaction(async (tx: any) => {
-    // A reservation may still be held (e.g. a crashed execution); returns the credit if so.
-    await releaseCredit(tx, { reportId, moduleId });
-    await tx.reportModuleResult.update({
-      where: { id: targetModule.id },
+    // Guarded transition first: if the module started running (or was captured) meanwhile, nothing is hidden or released.
+    const { count } = await tx.reportModuleResult.updateMany({
+      where: { id: targetModule.id, status: { in: ["PENDING", "FAILED"] } },
       data: { status: "NOT_REQUESTED", errorMessage: null },
     });
+    if (count === 0) {
+      throw new ModuleExecutionError("Moduł jest obecnie przetwarzany przez inne żądanie.", 409);
+    }
+    // A reservation may still be held (e.g. a crashed execution); returns the credit if so.
+    await releaseCredit(tx, { reportId, moduleId });
   });
 
   await checkAndFinalizeReportIfDone(reportId, db);

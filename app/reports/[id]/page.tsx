@@ -334,7 +334,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
   const checkModule = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_CHECK");
   const detailsModule = report.moduleResults?.find((m: any) => m.moduleId === "CLAIM_DETAILS");
 
-  const isValuationFailed = !valModule || valModule.status === "FAILED" || valModule.status === "NIEWYKONANO";
+  const isValuationFailed = !valModule || valModule.status === "FAILED" || valModule.status === "NOT_REQUESTED" || valModule.status === "NIEWYKONANO";
   const isAdmin = viewerRole === "ADMIN";
 
   const failedModules = [
