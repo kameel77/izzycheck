@@ -346,6 +346,30 @@ describe("processInvoice", () => {
     assert.equal(errors.filter((a) => a[0] === "[INVOICE_EMAIL_ERROR]").length, 1);
   });
 
+  test("only the 200 'brak numeru KSeF' refusal is silent: other e-mail errors are stored and logged", async () => {
+    const ctx = await seed();
+    const cases = [
+      { status: 200, message: "Nieprawidłowy adres e-mail" },
+      { status: 422, message: "Faktura nie może zostać wysłana - brak numeru KSeF" },
+    ];
+    for (const { status, message } of cases) {
+      const order = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(Date.now() - MIN) } });
+      const fetchImpl = (async () =>
+        new Response(JSON.stringify(status === 200 ? { status: "error", message } : { message }), {
+          status,
+          headers: { "content-type": "application/json" },
+        })) as typeof fetch;
+      const real = createFakturowniaClient({ domain: "izzy-test", apiToken: "tok", departmentId: null }, fetchImpl);
+      const client: FakturowniaClientLike = { ...stubClient().client, sendInvoiceByEmail: real.sendInvoiceByEmail };
+      const { errors, logs } = await captured(() => processInvoice(testPrisma, order.id, { client, clock: () => new Date() }));
+      const row = await read(order.id);
+      assert.equal(row.invoiceEmailedAt, null, String(status));
+      assert.match(row.invoiceLastError ?? "", /e-mailem/, String(status));
+      assert.equal(errors.filter((a) => a[0] === "[INVOICE_EMAIL_ERROR]").length, 1, String(status));
+      assert.equal(logs.filter((a) => a[0] === "[INVOICE_EMAIL_WAITING_FOR_KSEF]").length, 0, String(status));
+    }
+  });
+
   test("an expired ISSUING claim (older than 10 min) is taken over", async () => {
     const ctx = await seed();
     const now = new Date();
@@ -484,7 +508,7 @@ describe("refreshKsefStatus", () => {
   test("skips final statuses and invoices that are not ISSUED", async () => {
     const ctx = await seed();
     const { client, calls } = stubClient();
-    for (const ksefStatus of ["ok", "demo_ok", "not_applicable", "duplicate_error"]) {
+    for (const ksefStatus of ["ok", "demo_ok", "not_applicable", "demo_not_applicable", "duplicate_error", "demo_duplicate_error"]) {
       const order = await issuedOrder(ctx, { ksefStatus });
       assert.deepEqual(await refreshKsefStatus(testPrisma, order.id, { client }), { result: "SKIPPED", ksefStatus });
     }
@@ -502,6 +526,65 @@ describe("refreshKsefStatus", () => {
     const { result, errors } = await captured(() => refreshKsefStatus(testPrisma, order.id, { client, clock: () => new Date() }));
     assert.deepEqual(result, { result: "REFRESHED", ksefStatus: "send_error" });
     assert.equal((await read(order.id)).ksefStatus, "send_error");
+    assert.equal(errors.filter((a) => a[0] === "[INVOICE_KSEF_ERROR]").length, 1);
+  });
+
+  test("every KSeF problem status is logged with its errors on each refresh that observes it", async () => {
+    const ctx = await seed();
+    for (const govStatus of [
+      "send_error",
+      "server_error",
+      "status_check_error",
+      "blocked_403_error",
+      "not_connected",
+      "offline_error",
+      "demo_send_error",
+    ]) {
+      const order = await issuedOrder(ctx, { ksefStatus: "processing" });
+      const { client } = stubClient({
+        getInvoiceKsef: async () => ({ govStatus, govId: null, verificationLink: null, errors: ["Błąd 21405"] }),
+      });
+      for (let i = 0; i < 2; i++) {
+        const { errors } = await captured(() => refreshKsefStatus(testPrisma, order.id, { client, clock: () => new Date() }));
+        const logged = errors.filter((a) => a[0] === "[INVOICE_KSEF_ERROR]");
+        assert.equal(logged.length, 1, `${govStatus} refresh ${i + 1}`);
+        assert.deepEqual(logged[0][1], { orderId: order.id, govStatus, errors: ["Błąd 21405"] });
+      }
+    }
+  });
+
+  test("healthy statuses and a fresh 'processing' are not logged", async () => {
+    const ctx = await seed();
+    for (const govStatus of ["ok", "processing", "offline", "not_applicable", "demo_processing", "demo_ok"]) {
+      const order = await issuedOrder(ctx, { ksefStatus: "processing", invoiceIssuedAt: new Date(Date.now() - 60 * MIN) });
+      const { client } = stubClient({
+        getInvoiceKsef: async () => ({ govStatus, govId: null, verificationLink: null, errors: [] }),
+      });
+      const { errors } = await captured(() => refreshKsefStatus(testPrisma, order.id, { client, clock: () => new Date() }));
+      assert.deepEqual(errors, [], govStatus);
+    }
+  });
+
+  test("no confirmation 6 h after issuing is logged as stale, a duplicate_error is an error", async () => {
+    const ctx = await seed();
+    const now = new Date();
+    const old = new Date(now.getTime() - 7 * 60 * MIN);
+    for (const govStatus of [null, "processing", "demo_processing"]) {
+      const order = await issuedOrder(ctx, { invoiceIssuedAt: old });
+      const { client } = stubClient({
+        getInvoiceKsef: async () => ({ govStatus, govId: null, verificationLink: null, errors: [] }),
+      });
+      const { errors } = await captured(() => refreshKsefStatus(testPrisma, order.id, { client, clock: () => now }));
+      const stale = errors.filter((a) => a[0] === "[INVOICE_KSEF_STALE]");
+      assert.equal(stale.length, 1, String(govStatus));
+      assert.deepEqual(stale[0][1], { orderId: order.id, govStatus, issuedAt: old.toISOString() });
+      assert.equal(errors.filter((a) => a[0] === "[INVOICE_KSEF_ERROR]").length, 0, String(govStatus));
+    }
+    const dup = await issuedOrder(ctx, { invoiceIssuedAt: old });
+    const { client } = stubClient({
+      getInvoiceKsef: async () => ({ govStatus: "duplicate_error", govId: null, verificationLink: null, errors: [] }),
+    });
+    const { errors } = await captured(() => refreshKsefStatus(testPrisma, dup.id, { client, clock: () => now }));
     assert.equal(errors.filter((a) => a[0] === "[INVOICE_KSEF_ERROR]").length, 1);
   });
 
@@ -1143,7 +1226,13 @@ describe("cron safety", () => {
     assert.equal(first.result, "ISSUED");
     let row = await read(order.id);
     assert.equal(row.invoiceEmailedAt, null);
-    assert.match(row.invoiceLastError ?? "", /brak numeru KSeF/);
+    // The refusal is expected while KSeF has not assigned a number: info log only, nothing stored.
+    assert.equal(row.invoiceLastError, null);
+    assert.equal(first.errors.filter((a) => a[0] === "[INVOICE_EMAIL_ERROR]").length, 0);
+    assert.deepEqual(
+      first.logs.filter((a) => a[0] === "[INVOICE_EMAIL_WAITING_FOR_KSEF]"),
+      [["[INVOICE_EMAIL_WAITING_FOR_KSEF]", { orderId: order.id }]],
+    );
 
     const later = new Date(issuedAt.getTime() + 20 * MIN);
     const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => later }));
@@ -1188,6 +1277,25 @@ describe("cron safety", () => {
     await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => now }));
     assert.deepEqual(calls.ksef, [recent.fakturowniaInvoiceId]);
     assert.equal((await read(stale.id)).ksefStatus, "processing");
+  });
+
+  test("KSeF problem statuses keep being polled within the window, a duplicate_error does not", async () => {
+    const ctx = await seed();
+    const now = new Date();
+    const checked = new Date(now.getTime() - 60 * MIN);
+    const mk = (ksefStatus: string) =>
+      issuedOrder(ctx, {
+        ksefStatus,
+        ksefCheckedAt: checked,
+        invoiceIssuedAt: new Date(now.getTime() - 4 * DAY),
+        invoiceEmailedAt: new Date(now.getTime() - 4 * DAY),
+      });
+    const problems = [await mk("send_error"), await mk("server_error"), await mk("demo_status_check_error")];
+    await mk("duplicate_error");
+    const { client, calls } = stubClient();
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => now }));
+    assert.equal(result.ksefRefreshed, 3);
+    assert.deepEqual([...calls.ksef].sort(), problems.map((o) => o.fakturowniaInvoiceId).sort());
   });
 
   test("invoices with a final non-mailable KSeF status never crowd out other candidates", async () => {

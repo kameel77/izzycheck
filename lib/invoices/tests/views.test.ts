@@ -5,13 +5,18 @@ import { withAdminInvoice, withCustomerInvoice } from "../views.ts";
 
 const buildUrl = (token: string) => `https://shop.fakturownia.pl/invoice/${token}.pdf`;
 
-function row(invoiceStatus: InvoiceStatus, extra: { invoiceNumber?: string | null; invoiceToken?: string | null } = {}) {
+function row(
+  invoiceStatus: InvoiceStatus,
+  extra: { invoiceNumber?: string | null; invoiceToken?: string | null; ksefStatus?: string | null; invoiceEmailedAt?: Date | null } = {},
+) {
   return {
     id: "order-1",
     totalGrossGrosze: 2460,
     invoiceStatus,
     invoiceNumber: extra.invoiceNumber === undefined ? "FV/1/10/2026" : extra.invoiceNumber,
     invoiceToken: extra.invoiceToken === undefined ? "secret-token" : extra.invoiceToken,
+    ksefStatus: extra.ksefStatus === undefined ? "ok" : extra.ksefStatus,
+    invoiceEmailedAt: extra.invoiceEmailedAt === undefined ? null : extra.invoiceEmailedAt,
   };
 }
 
@@ -25,14 +30,38 @@ describe("withCustomerInvoice", () => {
       invoiceNumber: "FV/1/10/2026",
       invoicePdfUrl: "https://shop.fakturownia.pl/invoice/secret-token.pdf",
     });
-    assert.ok(!("invoiceToken" in view));
+    assert.ok(!("invoiceToken" in view) && !("ksefStatus" in view) && !("invoiceEmailedAt" in view));
   });
 
-  test("ISSUED without a token (issued by hand) shows the number without a link", () => {
+  test("ISSUED without a token (issued by hand) is 'being prepared': no number, no link", () => {
     const view = withCustomerInvoice(row("ISSUED", { invoiceToken: null }), buildUrl);
-    assert.equal(view.invoiceStatus, "ISSUED");
-    assert.equal(view.invoiceNumber, "FV/1/10/2026");
+    assert.equal(view.invoiceStatus, "PENDING");
+    assert.equal(view.invoiceNumber, null);
     assert.equal(view.invoicePdfUrl, null);
+  });
+
+  test("ISSUED is shown for OK and final KSeF statuses (and their demo variants)", () => {
+    for (const ksefStatus of ["ok", "offline", "not_applicable", "demo_ok", "demo_offline", "demo_not_applicable"]) {
+      const view = withCustomerInvoice(row("ISSUED", { ksefStatus }), buildUrl);
+      assert.equal(view.invoiceStatus, "ISSUED", ksefStatus);
+      assert.equal(view.invoiceNumber, "FV/1/10/2026", ksefStatus);
+      assert.ok(view.invoicePdfUrl, ksefStatus);
+    }
+  });
+
+  test("ISSUED with a missing, pending or failing KSeF status stays 'being prepared' until it was e-mailed", () => {
+    const emailedAt = new Date("2026-10-29T10:00:00Z");
+    for (const ksefStatus of [null, "processing", "demo_processing", "send_error", "server_error", "duplicate_error", "offline_error"]) {
+      const hidden = withCustomerInvoice(row("ISSUED", { ksefStatus }), buildUrl);
+      assert.equal(hidden.invoiceStatus, "PENDING", String(ksefStatus));
+      assert.equal(hidden.invoiceNumber, null, String(ksefStatus));
+      assert.equal(hidden.invoicePdfUrl, null, String(ksefStatus));
+      assert.ok(!JSON.stringify(hidden).includes("secret-token"), String(ksefStatus));
+
+      const emailed = withCustomerInvoice(row("ISSUED", { ksefStatus, invoiceEmailedAt: emailedAt }), buildUrl);
+      assert.equal(emailed.invoiceStatus, "ISSUED", String(ksefStatus));
+      assert.ok(emailed.invoicePdfUrl, String(ksefStatus));
+    }
   });
 
   test("ISSUED while Fakturownia is not configured has no link", () => {

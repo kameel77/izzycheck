@@ -9,9 +9,11 @@ interface Filters {
   status: string;
   invoiceStatus: string;
   organizationId: string;
+  /** "true" shows only invoices with a KSeF problem. */
+  ksefProblem: string;
 }
 
-const NO_FILTERS: Filters = { status: "", invoiceStatus: "", organizationId: "" };
+const NO_FILTERS: Filters = { status: "", invoiceStatus: "", organizationId: "", ksefProblem: "" };
 
 const selectClass =
   "rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white";
@@ -34,6 +36,7 @@ export default function AdminOrdersPage() {
     if (activeFilters.status) params.set("status", activeFilters.status);
     if (activeFilters.invoiceStatus) params.set("invoiceStatus", activeFilters.invoiceStatus);
     if (activeFilters.organizationId) params.set("organizationId", activeFilters.organizationId);
+    if (activeFilters.ksefProblem) params.set("ksefProblem", activeFilters.ksefProblem);
     if (cursor) params.set("cursor", cursor);
 
     // Only the most recent request may commit its result; older ones are stale.
@@ -144,6 +147,13 @@ export default function AdminOrdersPage() {
                 {label}
               </option>
             ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className={labelClass}>KSeF</span>
+          <select value={filters.ksefProblem} onChange={(e) => setFilter({ ksefProblem: e.target.value })} className={selectClass}>
+            <option value="">Wszystkie</option>
+            <option value="true">Problemy KSeF</option>
           </select>
         </label>
         <label className="flex flex-col gap-1">

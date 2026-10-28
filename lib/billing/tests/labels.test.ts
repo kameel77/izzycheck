@@ -9,6 +9,7 @@ import {
   formatCreditCount,
   formatGrosze,
   formatOrderItem,
+  invoiceStatusLabel,
 } from "../labels.ts";
 
 describe("formatCreditAmount", () => {
@@ -79,5 +80,20 @@ describe("order labels", () => {
   test("grosze are formatted as PLN", () => {
     assert.equal(formatGrosze(12345).replace(/\s/g, " "), "123,45 zł");
     assert.equal(formatGrosze(0).replace(/\s/g, " "), "0,00 zł");
+  });
+});
+
+describe("invoiceStatusLabel", () => {
+  test("a FAILED invoice without a next attempt can only be fixed by hand", () => {
+    assert.equal(invoiceStatusLabel("FAILED", null), "Błąd (tylko ręcznie)");
+    assert.equal(invoiceStatusLabel("FAILED", new Date()), "Błąd (ponowienie)");
+    assert.equal(invoiceStatusLabel("FAILED", "2026-10-29T12:00:00.000Z"), "Błąd (ponowienie)");
+  });
+
+  test("other statuses keep their label whatever the next attempt", () => {
+    for (const status of ["NOT_REQUIRED", "PENDING", "ISSUING", "ISSUED", "NEEDS_ATTENTION"] as const) {
+      assert.equal(invoiceStatusLabel(status, null), INVOICE_STATUS_LABELS[status], status);
+      assert.equal(invoiceStatusLabel(status, new Date()), INVOICE_STATUS_LABELS[status], status);
+    }
   });
 });

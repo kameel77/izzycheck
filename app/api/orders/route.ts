@@ -19,6 +19,8 @@ const ORDER_LIST_SELECT = {
   invoiceStatus: true,
   invoiceNumber: true,
   invoiceToken: true,
+  ksefStatus: true,
+  invoiceEmailedAt: true,
   user: { select: { name: true } },
   items: {
     select: { packageName: true, creditType: true, creditsPerPackage: true, quantity: true, lineGrossGrosze: true },

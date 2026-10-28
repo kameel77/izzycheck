@@ -22,6 +22,8 @@ const ORDER_SELECT = {
   invoiceStatus: true,
   invoiceNumber: true,
   invoiceToken: true,
+  ksefStatus: true,
+  invoiceEmailedAt: true,
   items: {
     select: { packageName: true, creditType: true, creditsPerPackage: true, quantity: true, lineGrossGrosze: true },
   },
@@ -62,7 +64,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     }
 
     const invoice = withCustomerInvoice(
-      { invoiceStatus: order.invoiceStatus, invoiceNumber: order.invoiceNumber, invoiceToken: order.invoiceToken },
+      {
+        invoiceStatus: order.invoiceStatus,
+        invoiceNumber: order.invoiceNumber,
+        invoiceToken: order.invoiceToken,
+        ksefStatus: order.ksefStatus,
+        invoiceEmailedAt: order.invoiceEmailedAt,
+      },
       sharedPdfUrlBuilder(),
     );
     return NextResponse.json({

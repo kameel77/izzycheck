@@ -34,6 +34,15 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   NEEDS_ATTENTION: "Wymaga sprawdzenia",
 };
 
+/**
+ * Admin label of an order's invoice: a FAILED invoice with no next attempt has used up its automatic retries
+ * and only a manual action helps.
+ */
+export function invoiceStatusLabel(status: InvoiceStatus, nextAttemptAt: Date | string | null): string {
+  if (status === "FAILED" && nextAttemptAt === null) return "Błąd (tylko ręcznie)";
+  return INVOICE_STATUS_LABELS[status];
+}
+
 /** Polish plural forms (one, few, many) of what a single credit of each type buys. */
 const CREDIT_NOUNS: Record<CreditType, [string, string, string]> = {
   VALUATION: ["wycena pojazdu", "wyceny pojazdu", "wycen pojazdu"],

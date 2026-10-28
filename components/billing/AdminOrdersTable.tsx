@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { ExternalLink, FileDown, Loader2, RefreshCw, RotateCcw } from "lucide-react";
-import { INVOICE_STATUS_LABELS, ORDER_STATUS_LABELS, formatGrosze, formatOrderItem } from "@/lib/billing/labels";
+import { INVOICE_STATUS_LABELS, ORDER_STATUS_LABELS, formatGrosze, formatOrderItem, invoiceStatusLabel } from "@/lib/billing/labels";
 
 export interface AdminOrderRow {
   id: string;
@@ -22,13 +22,18 @@ export interface AdminOrderRow {
   }>;
   invoiceStatus: keyof typeof INVOICE_STATUS_LABELS;
   invoiceAttempts: number;
+  invoiceNextAttemptAt: string | null;
   invoiceLastError: string | null;
   invoiceNumber: string | null;
   invoicePdfUrl: string | null;
+  invoiceIssuedAt: string | null;
+  invoiceEmailedAt: string | null;
   fakturowniaInvoiceId: string | null;
   ksefStatus: string | null;
   ksefId: string | null;
   ksefVerificationLink: string | null;
+  /** ERROR: KSeF failure status; STALE: no confirmation 6 h after issuing. */
+  ksefProblem: "ERROR" | "STALE" | null;
 }
 
 const ORDER_STATUS_CLASSES: Record<AdminOrderRow["status"], string> = {
@@ -47,6 +52,11 @@ const INVOICE_STATUS_CLASSES: Record<AdminOrderRow["invoiceStatus"], string> = {
   NEEDS_ATTENTION: "bg-red-500/10 text-red-700 dark:text-red-400",
 };
 
+const KSEF_PROBLEM_LABELS: Record<NonNullable<AdminOrderRow["ksefProblem"]>, string> = {
+  ERROR: "Błąd KSeF",
+  STALE: "KSeF: brak potwierdzenia",
+};
+
 const inputClass =
   "rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white";
 const secondaryButtonClass =
@@ -63,11 +73,18 @@ interface RowFeedback {
 const isResolvable = (order: AdminOrderRow) => order.invoiceStatus === "FAILED" || order.invoiceStatus === "NEEDS_ATTENTION";
 
 function KsefCell({ order }: { order: AdminOrderRow }) {
-  if (!order.ksefStatus && !order.ksefId && !order.ksefVerificationLink) return <span className="text-slate-400">—</span>;
+  if (!order.ksefProblem && !order.ksefStatus && !order.ksefId && !order.ksefVerificationLink) {
+    return <span className="text-slate-400">—</span>;
+  }
   // The link comes from Fakturownia; only plain http(s) links are rendered.
   const safeLink = order.ksefVerificationLink && /^https?:\/\//i.test(order.ksefVerificationLink) ? order.ksefVerificationLink : null;
   return (
     <div className="flex flex-col items-start gap-1">
+      {order.ksefProblem && (
+        <span className="inline-block rounded-full bg-red-500/10 px-2.5 py-1 text-[11px] font-bold whitespace-nowrap text-red-700 dark:text-red-400">
+          {KSEF_PROBLEM_LABELS[order.ksefProblem]}
+        </span>
+      )}
       {order.ksefStatus && <span className="font-medium">{order.ksefStatus}</span>}
       {order.ksefId && <span className="break-all text-[11px] text-slate-500 dark:text-slate-400">{order.ksefId}</span>}
       {safeLink && (
@@ -91,9 +108,19 @@ function InvoiceCell({ order }: { order: AdminOrderRow }) {
       <span
         className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${INVOICE_STATUS_CLASSES[order.invoiceStatus]}`}
       >
-        {INVOICE_STATUS_LABELS[order.invoiceStatus]}
+        {invoiceStatusLabel(order.invoiceStatus, order.invoiceNextAttemptAt)}
       </span>
       {order.invoiceNumber && <span className="font-medium">{order.invoiceNumber}</span>}
+      {order.invoiceIssuedAt && (
+        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+          Wystawiona: {new Date(order.invoiceIssuedAt).toLocaleString("pl-PL")}
+        </span>
+      )}
+      {order.invoiceStatus === "ISSUED" && order.fakturowniaInvoiceId && (
+        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+          E-mail: {order.invoiceEmailedAt ? `wysłany ${new Date(order.invoiceEmailedAt).toLocaleString("pl-PL")}` : "nie"}
+        </span>
+      )}
       {order.invoicePdfUrl && (
         <a
           href={order.invoicePdfUrl}

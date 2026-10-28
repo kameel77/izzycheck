@@ -60,6 +60,14 @@ async function createOrder(invoiceStatus: InvoiceStatus, extra: Partial<Prisma.O
 
 const read = (id: string) => testPrisma.order.findUniqueOrThrow({ where: { id } });
 
+const customerSelect = {
+  invoiceStatus: true,
+  invoiceNumber: true,
+  invoiceToken: true,
+  ksefStatus: true,
+  invoiceEmailedAt: true,
+} as const;
+
 describe("retryInvoice", () => {
   test("FAILED and NEEDS_ATTENTION go back to PENDING, due now, attempts reset, error cleared", async () => {
     const now = new Date();
@@ -170,16 +178,13 @@ describe("markInvoiceManual", () => {
     }
   });
 
-  test("a customer sees the manual invoice's number without a link", async () => {
+  test("a customer sees a manual invoice (no token, no KSeF tracking) as 'being prepared'", async () => {
     const order = await createOrder("NEEDS_ATTENTION");
     await markInvoiceManual(testPrisma, order.id, "FV/ręczna/7", new Date());
-    const row = await testPrisma.order.findUniqueOrThrow({
-      where: { id: order.id },
-      select: { invoiceStatus: true, invoiceNumber: true, invoiceToken: true },
-    });
+    const row = await testPrisma.order.findUniqueOrThrow({ where: { id: order.id }, select: customerSelect });
     const view = withCustomerInvoice(row, buildUrl);
-    assert.equal(view.invoiceStatus, "ISSUED");
-    assert.equal(view.invoiceNumber, "FV/ręczna/7");
+    assert.equal(view.invoiceStatus, "PENDING");
+    assert.equal(view.invoiceNumber, null);
     assert.equal(view.invoicePdfUrl, null);
   });
 
@@ -214,10 +219,13 @@ describe("markInvoiceManual", () => {
 });
 
 describe("invoice exposure over the API views", () => {
-  const customerSelect = { invoiceStatus: true, invoiceNumber: true, invoiceToken: true } as const;
-
   test("customer: ISSUED with a token gets number and link; NEEDS_ATTENTION gets neither", async () => {
-    const issued = await createOrder("ISSUED", { invoiceNumber: "FV/1/10/2026", invoiceToken: "tok-1", fakturowniaInvoiceId: "INV-1" });
+    const issued = await createOrder("ISSUED", {
+      invoiceNumber: "FV/1/10/2026",
+      invoiceToken: "tok-1",
+      fakturowniaInvoiceId: "INV-1",
+      ksefStatus: "ok",
+    });
     const attention = await createOrder("NEEDS_ATTENTION", { invoiceNumber: "FV/leak", invoiceToken: "tok-leak", invoiceLastError: "x" });
     const issuedView = withCustomerInvoice(
       await testPrisma.order.findUniqueOrThrow({ where: { id: issued.id }, select: customerSelect }),

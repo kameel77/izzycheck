@@ -1,4 +1,5 @@
 import type { InvoiceStatus, OrderStatus, Prisma } from "@prisma/client";
+import { ksefProblemWhere } from "../invoices/ksef.ts";
 import { INVOICE_STATUS_LABELS, ORDER_STATUS_LABELS } from "./labels.ts";
 
 export const ADMIN_ORDERS_PAGE_SIZE = 50;
@@ -18,6 +19,7 @@ export const ADMIN_ORDER_SELECT = {
   },
   invoiceStatus: true,
   invoiceAttempts: true,
+  invoiceNextAttemptAt: true,
   invoiceLastError: true,
   invoiceNumber: true,
   invoiceToken: true,
@@ -33,6 +35,8 @@ export type AdminOrderFilters = {
   status?: OrderStatus;
   invoiceStatus?: InvoiceStatus;
   organizationId?: string;
+  /** Only ISSUED invoices with a KSeF problem (see ksefProblem). */
+  ksefProblem?: boolean;
 };
 
 /** Reads the list filters from the query string; unknown enum values and blank ids are ignored. */
@@ -48,5 +52,12 @@ export function parseAdminOrderFilters(params: URLSearchParams): AdminOrderFilte
   }
   const organizationId = params.get("organizationId")?.trim();
   if (organizationId) filters.organizationId = organizationId;
+  if (params.get("ksefProblem") === "true") filters.ksefProblem = true;
   return filters;
+}
+
+/** The database filter for the list; the KSeF problem filter is combined with AND so it never clashes with invoiceStatus. */
+export function buildAdminOrdersWhere(filters: AdminOrderFilters, now: Date): Prisma.OrderWhereInput {
+  const { ksefProblem, ...simple } = filters;
+  return ksefProblem ? { AND: [simple, ksefProblemWhere(now)] } : simple;
 }

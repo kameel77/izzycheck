@@ -17,6 +17,12 @@ describe("parseAdminOrderFilters", () => {
     });
   });
 
+  test("ksefProblem is on only for the exact value true", () => {
+    assert.deepEqual(parse("ksefProblem=true"), { ksefProblem: true });
+    assert.deepEqual(parse("ksefProblem=false&status=PAID"), { status: "PAID" });
+    assert.deepEqual(parse("ksefProblem=1"), {});
+  });
+
   test("ignores unknown values, blank ids and inherited property names", () => {
     assert.deepEqual(parse("status=REFUNDED&invoiceStatus=paid&organizationId=%20%20"), {});
     assert.deepEqual(parse("status=toString&invoiceStatus=__proto__&organizationId="), {});

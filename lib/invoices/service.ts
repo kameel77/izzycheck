@@ -12,6 +12,13 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { syncOrderWithPayu, type PayuClientLike } from "../billing/orders.ts";
 import { buildInvoicePayload, FakturowniaError, getFakturowniaConfig, type FakturowniaClient } from "./fakturownia.ts";
+import {
+  FINAL_KSEF_STATUSES,
+  FINAL_MAILABLE_KSEF_STATUSES,
+  MAILABLE_KSEF_STATUSES,
+  isKsefErrorStatus,
+  ksefProblem,
+} from "./ksef.ts";
 
 export type FakturowniaClientLike = Pick<FakturowniaClient, "createInvoice" | "sendInvoiceByEmail" | "getInvoiceKsef">;
 
@@ -43,15 +50,6 @@ const DUPLICATE_OID_MESSAGE = "Faktura z tym numerem zamówienia już istnieje w
 /** Lines of invoiceLastError that start with this prefix are never overwritten by e-mail bookkeeping. */
 const EXTRA_INVOICE_NOTE_PREFIX = "Wykryto dodatkową fakturę";
 const GENERIC_ERROR_MESSAGE = "Nieoczekiwany błąd podczas wystawiania faktury.";
-
-/** KSeF statuses that never change any more. */
-const FINAL_KSEF_STATUSES = ["ok", "demo_ok", "not_applicable", "duplicate_error", "demo_duplicate_error"];
-/** Final statuses in which the invoice can still be e-mailed. */
-const FINAL_MAILABLE_KSEF_STATUSES = ["ok", "demo_ok", "not_applicable"];
-/** KSeF statuses that mean something is wrong and needs a human. */
-const KSEF_ERROR_STATUSES = new Set(["send_error", "blocked_403_error", "not_connected", "offline_error"]);
-/** Statuses in which Fakturownia lets an invoice be e-mailed (a KSeF number is assigned or not needed). */
-const MAILABLE_KSEF_STATUSES = new Set(["ok", "demo_ok", "not_applicable", "offline", "demo_offline"]);
 
 /** Delay before the next attempt after the given (already counted) failed attempt; null once retries are exhausted. */
 export function invoiceRetryDelayMs(attempts: number): number | null {
@@ -255,6 +253,11 @@ async function recordIssueFailure(
   return "FAILED";
 }
 
+/** Fakturownia answers HTTP 200 with status "error" mentioning KSeF when the invoice has no KSeF number yet. */
+function isWaitingForKsefRefusal(error: unknown): boolean {
+  return error instanceof FakturowniaError && error.code === "VALIDATION" && error.status === 200 && /ksef/i.test(error.message);
+}
+
 /**
  * E-mails an ISSUED invoice that was not e-mailed yet (billingEmail, purchaser in cc when different). A failure
  * is logged and kept in invoiceLastError; it never throws and never changes the invoice status.
@@ -288,6 +291,11 @@ export async function sendInvoiceEmail(
     try {
       await deps.client.sendInvoiceByEmail(invoiceId, { emailTo: [emailTo], emailCc });
     } catch (error) {
+      if (isWaitingForKsefRefusal(error)) {
+        // Expected while the invoice has no KSeF number yet: not an error, nothing is stored, the cron retries.
+        console.info("[INVOICE_EMAIL_WAITING_FOR_KSEF]", { orderId });
+        return false;
+      }
       const message = describeError(error);
       console.error("[INVOICE_EMAIL_ERROR]", { orderId, code: error instanceof FakturowniaError ? error.code : undefined, message });
       await recordEmailOutcome(db, sameInvoice, { error: message });
@@ -344,7 +352,7 @@ export async function refreshKsefStatus(
   const clock = deps.clock ?? systemClock;
   const order = await db.order.findUnique({
     where: { id: orderId },
-    select: { invoiceStatus: true, fakturowniaInvoiceId: true, ksefStatus: true },
+    select: { invoiceStatus: true, fakturowniaInvoiceId: true, ksefStatus: true, invoiceIssuedAt: true },
   });
   const stored = order?.ksefStatus ?? null;
   if (!order || order.invoiceStatus !== "ISSUED" || !order.fakturowniaInvoiceId) return { result: "SKIPPED", ksefStatus: stored };
@@ -352,20 +360,28 @@ export async function refreshKsefStatus(
 
   try {
     const info = await deps.client.getInvoiceKsef(order.fakturowniaInvoiceId);
+    const checkedAt = clock();
     await db.order.update({
       where: { id: orderId },
       data: {
         ksefStatus: info.govStatus,
         ksefId: info.govId,
         ksefVerificationLink: info.verificationLink,
-        ksefCheckedAt: clock(),
+        ksefCheckedAt: checkedAt,
       },
     });
-    if (info.govStatus !== null && KSEF_ERROR_STATUSES.has(info.govStatus)) {
+    // Every refresh that observes a KSeF problem logs it (the log alert is the proactive signal).
+    if (isKsefErrorStatus(info.govStatus)) {
       console.error("[INVOICE_KSEF_ERROR]", {
         orderId,
         govStatus: info.govStatus,
         errors: info.errors.slice(0, 5).map((message) => message.slice(0, 300)),
+      });
+    } else if (ksefProblem({ ...order, ksefStatus: info.govStatus }, checkedAt) === "STALE") {
+      console.error("[INVOICE_KSEF_STALE]", {
+        orderId,
+        govStatus: info.govStatus,
+        issuedAt: order.invoiceIssuedAt?.toISOString(),
       });
     }
     return { result: "REFRESHED", ksefStatus: info.govStatus };
