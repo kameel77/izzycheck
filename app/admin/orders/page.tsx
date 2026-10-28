@@ -12,6 +12,8 @@ interface Filters {
   organizationId: string;
   /** "true" shows only invoices with a KSeF problem. */
   ksefProblem: string;
+  /** "true" shows only invoices not e-mailed 3 days after issuing. */
+  emailOverdue: string;
 }
 
 interface Attention {
@@ -22,7 +24,7 @@ interface Attention {
   lastCronRunAt: string | null;
 }
 
-const NO_FILTERS: Filters = { status: "", invoiceStatus: "", paymentMethod: "", organizationId: "", ksefProblem: "" };
+const NO_FILTERS: Filters = { status: "", invoiceStatus: "", paymentMethod: "", organizationId: "", ksefProblem: "", emailOverdue: "" };
 
 const selectClass =
   "rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white";
@@ -49,6 +51,7 @@ export default function AdminOrdersPage() {
     if (activeFilters.paymentMethod) params.set("paymentMethod", activeFilters.paymentMethod);
     if (activeFilters.organizationId) params.set("organizationId", activeFilters.organizationId);
     if (activeFilters.ksefProblem) params.set("ksefProblem", activeFilters.ksefProblem);
+    if (activeFilters.emailOverdue) params.set("emailOverdue", activeFilters.emailOverdue);
     if (cursor) params.set("cursor", cursor);
 
     // Only the most recent request may commit its result; older ones are stale.
@@ -206,6 +209,13 @@ export default function AdminOrdersPage() {
           <select value={filters.ksefProblem} onChange={(e) => setFilter({ ksefProblem: e.target.value })} className={selectClass}>
             <option value="">Wszystkie</option>
             <option value="true">Problemy KSeF</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className={labelClass}>E-mail faktury</span>
+          <select value={filters.emailOverdue} onChange={(e) => setFilter({ emailOverdue: e.target.value })} className={selectClass}>
+            <option value="">Wszystkie</option>
+            <option value="true">Niewysłane po 3 dniach</option>
           </select>
         </label>
         <label className="flex flex-col gap-1">

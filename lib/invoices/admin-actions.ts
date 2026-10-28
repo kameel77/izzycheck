@@ -11,7 +11,8 @@ export const MAX_MANUAL_INVOICE_NUMBER_LENGTH = 64;
 export type InvoiceAction =
   | { action: "retry" }
   | { action: "markManual"; invoiceNumber: string }
-  | { action: "refreshKsef" };
+  | { action: "refreshKsef" }
+  | { action: "markEmailed" };
 
 export type InvoiceActionParseResult = { ok: true; value: InvoiceAction } | { ok: false; error: string };
 
@@ -23,6 +24,8 @@ export function parseInvoiceAction(body: unknown): InvoiceActionParseResult {
       return { ok: true, value: { action: "retry" } };
     case "refreshKsef":
       return { ok: true, value: { action: "refreshKsef" } };
+    case "markEmailed":
+      return { ok: true, value: { action: "markEmailed" } };
     case "markManual": {
       const invoiceNumber = typeof input.invoiceNumber === "string" ? input.invoiceNumber.trim() : "";
       if (invoiceNumber.length < 1 || invoiceNumber.length > MAX_MANUAL_INVOICE_NUMBER_LENGTH) {
@@ -88,4 +91,23 @@ export async function markInvoiceManual(
     },
   });
   return updated.count === 1 ? { ok: true } : explainRefusal(db, orderId);
+}
+
+const EMAILED_REFUSAL_MESSAGE = "E-mail z tą fakturą jest już oznaczony jako wysłany albo faktura nie jest wystawiona.";
+
+/**
+ * ISSUED + not yet e-mailed -> invoiceEmailedAt = now: the admin sent the invoice by hand from Fakturownia.
+ * The status and the "not e-mailed yet" condition are part of the WHERE, so a click racing the cron's own
+ * e-mail (or a second admin) changes nothing and is reported as a conflict. Needs no Fakturownia access and
+ * leaves invoiceLastError (extra-invoice notes) alone.
+ */
+export async function markInvoiceEmailedManually(db: PrismaClient, orderId: string, now: Date): Promise<InvoiceTransitionResult> {
+  const updated = await db.order.updateMany({
+    where: { id: orderId, invoiceStatus: "ISSUED", invoiceEmailedAt: null },
+    data: { invoiceEmailedAt: now },
+  });
+  if (updated.count === 1) return { ok: true };
+
+  const exists = await db.order.findUnique({ where: { id: orderId }, select: { id: true } });
+  return exists ? { ok: false, status: 409, error: EMAILED_REFUSAL_MESSAGE } : { ok: false, status: 404, error: "Nie znaleziono zamówienia." };
 }

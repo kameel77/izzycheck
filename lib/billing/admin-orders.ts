@@ -1,4 +1,5 @@
 import type { InvoiceStatus, OrderStatus, PaymentMethod, Prisma } from "@prisma/client";
+import { emailOverdueWhere } from "../invoices/attention.ts";
 import { ksefProblemWhere } from "../invoices/ksef.ts";
 import { INVOICE_STATUS_LABELS, ORDER_STATUS_LABELS, PAYMENT_METHOD_LABELS } from "./labels.ts";
 
@@ -47,6 +48,8 @@ export type AdminOrderFilters = {
   organizationId?: string;
   /** Only ISSUED invoices with a KSeF problem (see ksefProblem). */
   ksefProblem?: boolean;
+  /** Only ISSUED invoices not e-mailed after the retry window and not already a KSeF problem (see emailOverdueWhere). */
+  emailOverdue?: boolean;
 };
 
 /** Reads the list filters from the query string; unknown enum values and blank ids are ignored. */
@@ -67,11 +70,15 @@ export function parseAdminOrderFilters(params: URLSearchParams): AdminOrderFilte
   const organizationId = params.get("organizationId")?.trim();
   if (organizationId) filters.organizationId = organizationId;
   if (params.get("ksefProblem") === "true") filters.ksefProblem = true;
+  if (params.get("emailOverdue") === "true") filters.emailOverdue = true;
   return filters;
 }
 
-/** The database filter for the list; the KSeF problem filter is combined with AND so it never clashes with invoiceStatus. */
+/** The database filter for the list; the invoice signal filters are combined with AND so they never clash with invoiceStatus. */
 export function buildAdminOrdersWhere(filters: AdminOrderFilters, now: Date): Prisma.OrderWhereInput {
-  const { ksefProblem, ...simple } = filters;
-  return ksefProblem ? { AND: [simple, ksefProblemWhere(now)] } : simple;
+  const { ksefProblem, emailOverdue, ...simple } = filters;
+  const extra: Prisma.OrderWhereInput[] = [];
+  if (ksefProblem) extra.push(ksefProblemWhere(now));
+  if (emailOverdue) extra.push(emailOverdueWhere(now));
+  return extra.length > 0 ? { AND: [simple, ...extra] } : simple;
 }

@@ -8,6 +8,15 @@ describe("parseInvoiceAction", () => {
     assert.deepEqual(parseInvoiceAction({ action: "refreshKsef" }), { ok: true, value: { action: "refreshKsef" } });
   });
 
+  test("accepts markEmailed and passes no extra fields on", () => {
+    assert.deepEqual(parseInvoiceAction({ action: "markEmailed" }), { ok: true, value: { action: "markEmailed" } });
+    assert.deepEqual(parseInvoiceAction({ action: "markEmailed", invoiceNumber: "FV/1" }), {
+      ok: true,
+      value: { action: "markEmailed" },
+    });
+    assert.equal(parseInvoiceAction({ action: "MARKEMAILED" }).ok, false);
+  });
+
   test("markManual trims the invoice number", () => {
     assert.deepEqual(parseInvoiceAction({ action: "markManual", invoiceNumber: "  FV/12/10/2026 " }), {
       ok: true,

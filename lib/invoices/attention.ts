@@ -3,7 +3,7 @@
  * configuration warnings. The cron writes a heartbeat row after every run; the panel turns a missing or old
  * heartbeat into a red "cron is not running" notice.
  */
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { ksefProblemWhere } from "./ksef.ts";
 import { EMAIL_RETRY_WINDOW_MS, type BillingCronResult } from "./service.ts";
 
@@ -16,24 +16,31 @@ export type OrdersAttention = {
   failedManualOnly: number;
   /** ISSUED invoices with a KSeF problem (error status or no confirmation after 6 h). */
   ksefProblems: number;
-  /** ISSUED invoices still not e-mailed after the whole e-mail retry window: the cron gave up, send them by hand. */
+  /** ISSUED invoices (not already a KSeF problem) still not e-mailed after the whole retry window: the cron gave up, send them by hand. */
   emailOverdue: number;
   lastCronRunAt: string | null;
 };
+
+/**
+ * ISSUED invoices still not e-mailed after the whole e-mail retry window. An invoice that is already a KSeF
+ * problem is left out, so one invoice is never counted twice. Shared by the counter and the admin list filter.
+ */
+export function emailOverdueWhere(now: Date): Prisma.OrderWhereInput {
+  return {
+    invoiceStatus: "ISSUED",
+    fakturowniaInvoiceId: { not: null },
+    invoiceEmailedAt: null,
+    invoiceIssuedAt: { lt: new Date(now.getTime() - EMAIL_RETRY_WINDOW_MS) },
+    NOT: ksefProblemWhere(now),
+  };
+}
 
 export async function getOrdersAttention(db: PrismaClient, now: Date): Promise<OrdersAttention> {
   const [needsAttention, failedManualOnly, ksefProblems, emailOverdue, heartbeat] = await Promise.all([
     db.order.count({ where: { invoiceStatus: "NEEDS_ATTENTION" } }),
     db.order.count({ where: { invoiceStatus: "FAILED", invoiceNextAttemptAt: null } }),
     db.order.count({ where: ksefProblemWhere(now) }),
-    db.order.count({
-      where: {
-        invoiceStatus: "ISSUED",
-        fakturowniaInvoiceId: { not: null },
-        invoiceEmailedAt: null,
-        invoiceIssuedAt: { lt: new Date(now.getTime() - EMAIL_RETRY_WINDOW_MS) },
-      },
-    }),
+    db.order.count({ where: emailOverdueWhere(now) }),
     db.jobHeartbeat.findUnique({ where: { name: BILLING_CRON_JOB }, select: { lastRunAt: true } }),
   ]);
   return {

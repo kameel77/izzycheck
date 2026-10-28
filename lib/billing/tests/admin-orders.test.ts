@@ -32,6 +32,12 @@ describe("parseAdminOrderFilters", () => {
     assert.deepEqual(parse("ksefProblem=1"), {});
   });
 
+  test("emailOverdue is on only for the exact value true", () => {
+    assert.deepEqual(parse("emailOverdue=true"), { emailOverdue: true });
+    assert.deepEqual(parse("emailOverdue=false&status=PAID"), { status: "PAID" });
+    assert.deepEqual(parse("emailOverdue=1"), {});
+  });
+
   test("ignores unknown values, blank ids and inherited property names", () => {
     assert.deepEqual(parse("status=REFUNDED&invoiceStatus=paid&organizationId=%20%20"), {});
     assert.deepEqual(parse("status=toString&invoiceStatus=__proto__&organizationId="), {});

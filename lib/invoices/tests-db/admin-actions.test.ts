@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, describe, test } from "node:test";
 import type { InvoiceStatus, Prisma } from "@prisma/client";
-import { markInvoiceManual, retryInvoice } from "../admin-actions.ts";
+import { markInvoiceEmailedManually, markInvoiceManual, retryInvoice } from "../admin-actions.ts";
 import { processInvoice, type FakturowniaClientLike } from "../service.ts";
 import { withAdminInvoice, withCustomerInvoice } from "../views.ts";
 import { ADMIN_ORDER_SELECT, parseAdminOrderFilters } from "../../billing/admin-orders.ts";
@@ -280,5 +280,60 @@ describe("invoice exposure over the API views", () => {
     assert.equal((await list("")).length, 3);
     assert.equal((await list("status=PENDING_PAYMENT")).length, 0);
     assert.equal((await list("invoiceStatus=bogus")).length, 3);
+  });
+});
+
+describe("markInvoiceEmailedManually", () => {
+  const ALREADY = "E-mail z tą fakturą jest już oznaczony jako wysłany albo faktura nie jest wystawiona.";
+
+  test("an ISSUED invoice that was not e-mailed gets invoiceEmailedAt and nothing else changes", async () => {
+    const now = new Date("2026-10-30T10:00:00.000Z");
+    const order = await createOrder("ISSUED", {
+      invoiceNumber: "FV/1",
+      fakturowniaInvoiceId: "INV-1",
+      invoiceToken: "tok",
+      invoiceLastError: "Dodatkowa faktura: uwaga",
+    });
+
+    assert.deepEqual(await markInvoiceEmailedManually(testPrisma, order.id, now), { ok: true });
+
+    const after = await read(order.id);
+    assert.equal(after.invoiceEmailedAt?.toISOString(), now.toISOString());
+    assert.equal(after.invoiceStatus, "ISSUED");
+    assert.equal(after.invoiceNumber, "FV/1");
+    assert.equal(after.invoiceLastError, "Dodatkowa faktura: uwaga");
+  });
+
+  test("works for a manually issued invoice (no Fakturownia id)", async () => {
+    const order = await createOrder("ISSUED", { invoiceNumber: "FV/ręczna" });
+    assert.deepEqual(await markInvoiceEmailedManually(testPrisma, order.id, new Date()), { ok: true });
+    assert.notEqual((await read(order.id)).invoiceEmailedAt, null);
+  });
+
+  test("an already e-mailed invoice is 409 and the timestamp is not overwritten", async () => {
+    const sentAt = new Date("2026-10-27T08:00:00.000Z");
+    const order = await createOrder("ISSUED", { fakturowniaInvoiceId: "INV-2", invoiceEmailedAt: sentAt });
+
+    const result = await markInvoiceEmailedManually(testPrisma, order.id, new Date("2026-10-30T10:00:00.000Z"));
+
+    assert.deepEqual(result, { ok: false, status: 409, error: ALREADY });
+    assert.equal((await read(order.id)).invoiceEmailedAt?.toISOString(), sentAt.toISOString());
+  });
+
+  test("an invoice that is not ISSUED is 409 and untouched", async () => {
+    for (const status of ["PENDING", "FAILED", "NEEDS_ATTENTION", "NOT_REQUIRED"] as const) {
+      const order = await createOrder(status);
+      const result = await markInvoiceEmailedManually(testPrisma, order.id, new Date());
+      assert.deepEqual(result, { ok: false, status: 409, error: ALREADY }, status);
+      assert.equal((await read(order.id)).invoiceEmailedAt, null, status);
+    }
+  });
+
+  test("an unknown order is 404", async () => {
+    assert.deepEqual(await markInvoiceEmailedManually(testPrisma, randomUUID(), new Date()), {
+      ok: false,
+      status: 404,
+      error: "Nie znaleziono zamówienia.",
+    });
   });
 });

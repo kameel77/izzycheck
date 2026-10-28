@@ -81,7 +81,11 @@ const inputClass =
 const secondaryButtonClass =
   "inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-200 disabled:opacity-50 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700 transition-colors";
 
-type InvoiceActionBody = { action: "retry" } | { action: "refreshKsef" } | { action: "markManual"; invoiceNumber: string };
+type InvoiceActionBody =
+  | { action: "retry" }
+  | { action: "refreshKsef" }
+  | { action: "markManual"; invoiceNumber: string }
+  | { action: "markEmailed" };
 type PaymentActionBody = { action: "markPaid"; paidDate: string; note?: string } | { action: "cancel" };
 type ActionBody = InvoiceActionBody | PaymentActionBody;
 
@@ -356,6 +360,7 @@ function InvoiceActions({
   const busy = feedback?.busy === true;
   const resolvable = isResolvable(order);
   const canRefreshKsef = order.invoiceStatus === "ISSUED" && order.fakturowniaInvoiceId !== null;
+  const canMarkEmailed = order.invoiceStatus === "ISSUED" && order.invoiceEmailedAt === null;
   const notConfiguredTitle = fakturowniaConfigured ? undefined : "Fakturownia nie jest skonfigurowana.";
 
   return (
@@ -388,6 +393,20 @@ function InvoiceActions({
           >
             {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
             Odśwież KSeF
+          </button>
+        )}
+        {canMarkEmailed && (
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm("Potwierdź, że faktura została wysłana klientowi ręcznie z Fakturowni.")) {
+                void onAction(order.id, { action: "markEmailed" });
+              }
+            }}
+            disabled={busy}
+            className={secondaryButtonClass}
+          >
+            Oznacz e-mail jako wysłany
           </button>
         )}
       </div>
@@ -476,9 +495,11 @@ export default function AdminOrdersTable({
               ? "Oznaczono jako opłacone. Faktura jest wystawiana."
               : body.action === "cancel"
                 ? "Zamówienie anulowane."
-                : json?.result === "SKIPPED"
-                  ? "Status KSeF jest już ostateczny."
-                  : "Status KSeF odświeżony.";
+                : body.action === "markEmailed"
+                  ? "Oznaczono e-mail z fakturą jako wysłany."
+                  : json?.result === "SKIPPED"
+                    ? "Status KSeF jest już ostateczny."
+                    : "Status KSeF odświeżony.";
       setFeedback((prev) => ({ ...prev, [orderId]: { busy: false, message } }));
       onChanged();
       return true;
