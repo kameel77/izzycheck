@@ -429,6 +429,33 @@ describe("sendInvoiceEmail", () => {
     assert.equal(calls.emails.length, 1);
   });
 
+  test("a successful e-mail keeps the extra-invoice note and clears only the old e-mail error", async () => {
+    const ctx = await seed();
+    const note = "Wykryto dodatkową fakturę FV/A — sprawdź w Fakturowni.";
+    const order = await issuedOrder(ctx, { invoiceLastError: `${note}\nstary błąd e-mail` });
+    const { client } = stubClient();
+    assert.equal(await sendInvoiceEmail(testPrisma, order.id, { client }), true);
+    const row = await read(order.id);
+    assert.equal(row.invoiceLastError, note);
+    assert.ok(row.invoiceEmailedAt);
+  });
+
+  test("a failed e-mail keeps the extra-invoice note and appends the e-mail error", async () => {
+    const ctx = await seed();
+    const note = "Wykryto dodatkową fakturę FV/A — sprawdź w Fakturowni.";
+    const order = await issuedOrder(ctx, { invoiceLastError: `${note}\npoprzedni błąd e-mail` });
+    const { client } = stubClient({
+      sendInvoiceByEmail: async () => {
+        throw new FakturowniaError("Fakturownia odrzuciła e-mail", { code: "SERVER" });
+      },
+    });
+    const outcome = await captured(() => sendInvoiceEmail(testPrisma, order.id, { client }));
+    assert.equal(outcome.result, false);
+    const row = await read(order.id);
+    assert.equal(row.invoiceLastError, `${note}\nFakturownia odrzuciła e-mail`);
+    assert.equal(row.invoiceEmailedAt, null);
+  });
+
   test("does nothing for an order that is not ISSUED", async () => {
     const ctx = await seed();
     const order = await createOrder(ctx, { invoiceStatus: "FAILED" });
@@ -766,6 +793,33 @@ describe("runBillingCron", () => {
     assert.equal(row.invoiceStatus, "ISSUED");
   });
 
+  test("the PayU sweep has its own 15 s budget and never starves the invoice step", async () => {
+    const ctx = await seed();
+    let t = Date.now();
+    const clock = () => new Date(t);
+    for (let i = 0; i < 3; i++) {
+      await createOrder(ctx, {
+        status: "PENDING_PAYMENT",
+        invoiceStatus: "NOT_REQUIRED",
+        payuOrderId: `PAYU-${randomUUID()}`,
+        extra: { createdAt: new Date(t - 60 * MIN), updatedAt: new Date(t - 60 * MIN) },
+      });
+    }
+    const due = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(t - MIN) } });
+    let polls = 0;
+    const payu = stubPayu(async () => {
+      polls += 1;
+      t += 15_000;
+      return { status: "PENDING", totalAmount: 2460, currencyCode: "PLN", extOrderId: "x" };
+    });
+    const { client } = stubClient();
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: payu, clock }));
+    assert.equal(polls, 1);
+    assert.equal(result.invoicesProcessed, 1);
+    assert.equal(result.budgetExhausted, false);
+    assert.equal((await read(due.id)).invoiceStatus, "ISSUED");
+  });
+
   test("PayU sync still runs when Fakturownia is not configured", async () => {
     const ctx = await seed();
     const lost = await createOrder(ctx, {
@@ -933,6 +987,40 @@ describe("claim ownership", () => {
     } finally {
       s.restore();
     }
+  });
+
+  test("a late success never pulls an order marked ISSUED by hand back to NEEDS_ATTENTION", async () => {
+    const ctx = await seed();
+    const order = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(Date.now() - MIN) } });
+    const gate = deferred<Created>();
+    let started = false;
+    const client: FakturowniaClientLike = {
+      ...stubClient().client,
+      createInvoice: async () => {
+        started = true;
+        return gate.promise;
+      },
+    };
+    const errorLog = mock.method(console, "error", () => {});
+    try {
+      const p = processInvoice(testPrisma, order.id, { client });
+      await waitFor(() => started);
+      // an admin resolves the order by hand while the worker is still in flight
+      await testPrisma.order.update({
+        where: { id: order.id },
+        data: { invoiceStatus: "ISSUED", invoiceNumber: "FV/ręczna/1", invoiceToken: null, invoiceIssuedAt: new Date(), invoiceClaimedAt: null },
+      });
+      gate.resolve({ id: "INV-LATE", number: "FV/LATE", token: "tok-late" });
+      assert.equal(await p, "NEEDS_ATTENTION");
+    } finally {
+      errorLog.mock.restore();
+    }
+    const row = await read(order.id);
+    assert.equal(row.invoiceStatus, "ISSUED");
+    assert.equal(row.invoiceNumber, "FV/ręczna/1");
+    assert.equal(row.fakturowniaInvoiceId, null);
+    assert.equal(row.invoiceToken, null);
+    assert.equal(row.invoiceLastError, "Wykryto dodatkową fakturę FV/LATE — sprawdź w Fakturowni.");
   });
 
   test("a database error after createInvoice logs the invoice and parks the order instead of retrying", async () => {

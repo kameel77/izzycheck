@@ -28,6 +28,8 @@ const MAX_ATTEMPTS = 10;
 const CRON_BATCH_SIZE = 20;
 /** No new unit of work is started once a cron run has taken this long (checked between units). */
 const CRON_BUDGET_MS = 45_000;
+/** The PayU sweep runs first; it gets its own share so it can never starve the invoice and KSeF steps. */
+const CRON_PAYU_BUDGET_MS = 15_000;
 /** Minimum pause between two KSeF refreshes / e-mail retries of one invoice, and the PayU sync grace period. */
 const CRON_RECHECK_MS = 15 * 60_000;
 /** How long after issuing the e-mail is still retried. */
@@ -38,6 +40,8 @@ const PAYU_SYNC_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 
 const MAX_ERROR_LENGTH = 500;
 const DUPLICATE_OID_MESSAGE = "Faktura z tym numerem zamówienia już istnieje w Fakturowni — sprawdź i oznacz ręcznie.";
+/** Lines of invoiceLastError that start with this prefix are never overwritten by e-mail bookkeeping. */
+const EXTRA_INVOICE_NOTE_PREFIX = "Wykryto dodatkową fakturę";
 const GENERIC_ERROR_MESSAGE = "Nieoczekiwany błąd podczas wystawiania faktury.";
 
 /** KSeF statuses that never change any more. */
@@ -164,7 +168,8 @@ export async function processInvoice(
 /** An invoice was created in Fakturownia but could not be recorded: park the order, never overwrite an existing id. */
 async function parkCreatedInvoice(db: PrismaClient, orderId: string, invoiceNumber: string): Promise<void> {
   await db.order.updateMany({
-    where: { id: orderId, fakturowniaInvoiceId: null },
+    // Never pulls an ISSUED order (e.g. marked by hand meanwhile) back to NEEDS_ATTENTION.
+    where: { id: orderId, fakturowniaInvoiceId: null, invoiceStatus: { not: "ISSUED" } },
     data: {
       invoiceStatus: "NEEDS_ATTENTION",
       invoiceLastError: `Faktura ${invoiceNumber} została wystawiona w Fakturowni, ale nie udało się jej zapisać — sprawdź i oznacz ręcznie.`,
@@ -186,10 +191,10 @@ async function noteExtraInvoice(db: PrismaClient, orderId: string, createdInvoic
       select: { invoiceStatus: true, fakturowniaInvoiceId: true, invoiceLastError: true },
     });
     if (!row || row.invoiceStatus !== "ISSUED" || row.fakturowniaInvoiceId === createdInvoiceId) return;
-    const note = `Wykryto dodatkową fakturę ${createdNumber} — sprawdź w Fakturowni.`;
+    const note = `${EXTRA_INVOICE_NOTE_PREFIX} ${createdNumber} — sprawdź w Fakturowni.`;
     await db.order.updateMany({
       where: { id: orderId, invoiceStatus: "ISSUED", invoiceLastError: row.invoiceLastError },
-      data: { invoiceLastError: row.invoiceLastError ? `${row.invoiceLastError} ${note}` : note },
+      data: { invoiceLastError: row.invoiceLastError ? `${row.invoiceLastError}\n${note}` : note },
     });
   } catch (error) {
     console.error("[INVOICE_ISSUE_ERROR]", { orderId, message: describeError(error), createdInvoiceId, createdNumber });
@@ -285,15 +290,43 @@ export async function sendInvoiceEmail(
     } catch (error) {
       const message = describeError(error);
       console.error("[INVOICE_EMAIL_ERROR]", { orderId, code: error instanceof FakturowniaError ? error.code : undefined, message });
-      await db.order.updateMany({ where: sameInvoice, data: { invoiceLastError: message } });
+      await recordEmailOutcome(db, sameInvoice, { error: message });
       return false;
     }
-    await db.order.updateMany({ where: sameInvoice, data: { invoiceEmailedAt: clock(), invoiceLastError: null } });
+    await recordEmailOutcome(db, sameInvoice, { emailedAt: clock() });
     return true;
   } catch (error) {
     console.error("[INVOICE_EMAIL_ERROR]", { orderId, message: describeError(error) });
     return false;
   }
+}
+
+/**
+ * Stores the e-mail result in invoiceLastError without ever dropping an "extra invoice" note: the notes are
+ * kept (one per line) and the latest e-mail error, if any, follows them. Compare-and-set on the text read, so a
+ * note appended in between is not lost; after repeated conflicts only invoiceEmailedAt is written.
+ */
+async function recordEmailOutcome(
+  db: PrismaClient,
+  sameInvoice: Prisma.OrderWhereInput,
+  outcome: { error: string } | { emailedAt: Date },
+): Promise<void> {
+  const emailedAt = "emailedAt" in outcome ? outcome.emailedAt : null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const row = await db.order.findFirst({ where: sameInvoice, select: { invoiceLastError: true } });
+    if (!row) return;
+    const notes = (row.invoiceLastError ?? "").split("\n").filter((line) => line.startsWith(EXTRA_INVOICE_NOTE_PREFIX));
+    const lines = "error" in outcome ? [...notes, outcome.error] : notes;
+    const result = await db.order.updateMany({
+      where: { ...sameInvoice, invoiceLastError: row.invoiceLastError },
+      data: {
+        ...(emailedAt ? { invoiceEmailedAt: emailedAt } : {}),
+        invoiceLastError: lines.length > 0 ? lines.join("\n") : null,
+      },
+    });
+    if (result.count > 0) return;
+  }
+  if (emailedAt) await db.order.updateMany({ where: sameInvoice, data: { invoiceEmailedAt: emailedAt } });
 }
 
 export type RefreshKsefResult = {
@@ -392,7 +425,7 @@ export async function runBillingCron(
       take: CRON_BATCH_SIZE,
     });
     for (const { id } of lost) {
-      if (outOfBudget()) break;
+      if (outOfBudget() || clock().getTime() - startedAt >= CRON_PAYU_BUDGET_MS) break;
       try {
         // Unpaid orders stay PENDING_PAYMENT and would be polled on every pass (starving newer ones): touching
         // updatedAt first both rotates the batch and enforces the 15 min pause between polls of one order.
