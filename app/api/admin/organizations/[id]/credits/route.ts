@@ -1,26 +1,11 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser, getFreshUser } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-admin";
 import { prisma } from "@/lib/db";
 import { adjustCredits, getBalances, InsufficientBalanceError } from "@/lib/billing/credits";
 import { LEDGER_ENTRY_SELECT } from "@/lib/billing/ledger";
 import { parseAdjustment } from "@/lib/billing/admin-validation";
 
 const RECENT_ENTRIES = 20;
-
-async function requireAdmin() {
-  const sessionUser = await getCurrentUser();
-  if (!sessionUser) {
-    return { error: NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 }) };
-  }
-
-  const freshUser = await getFreshUser(sessionUser.userId);
-  if (!freshUser || freshUser.role !== "ADMIN" || !freshUser.isActive) {
-    return {
-      error: NextResponse.json({ error: "Dostęp zabroniony. Wymagane uprawnienia administratora." }, { status: 403 }),
-    };
-  }
-  return { admin: freshUser };
-}
 
 export async function GET(
   req: Request,

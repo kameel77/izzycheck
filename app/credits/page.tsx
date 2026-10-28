@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Coins, Building2, User, Info, Loader2 } from "lucide-react";
+import { Coins, Building2, User, Loader2 } from "lucide-react";
 import { CREDIT_TYPE_LABELS, LEDGER_TYPE_LABELS, formatCreditAmount } from "@/lib/billing/labels";
+import CreditShop from "@/components/billing/CreditShop";
+import OrdersList from "@/components/billing/OrdersList";
 
 interface CurrentUser {
   role: string;
@@ -18,7 +20,7 @@ interface CreditsInfo {
 interface LedgerEntry {
   id: string;
   createdAt: string;
-  type: "USAGE" | "MANUAL_ADJUSTMENT";
+  type: keyof typeof LEDGER_TYPE_LABELS;
   creditType: "VALUATION" | "CLAIM_DETAILS";
   amount: number;
   note: string | null;
@@ -164,10 +166,7 @@ export default function CreditsPage() {
         </div>
       )}
 
-      <div className="flex items-start gap-3 rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 text-sm text-blue-800 dark:text-blue-200">
-        <Info className="h-4 w-4 shrink-0 mt-0.5" />
-        <p>Zakup online pojawi się wkrótce. Aby doładować konto, skontaktuj się z opiekunem Izzy Lease.</p>
-      </div>
+      {credits?.billingMode === "PREPAID" && <CreditShop />}
 
       {canViewOrg && (
         <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
@@ -262,6 +261,8 @@ export default function CreditsPage() {
           </button>
         </div>
       )}
+
+      {credits?.billingMode === "PREPAID" && <OrdersList canViewOrg={canViewOrg} />}
     </div>
   );
 }

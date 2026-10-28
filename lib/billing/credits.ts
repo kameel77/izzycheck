@@ -290,6 +290,55 @@ export async function recordUnlimitedUsage(
   });
 }
 
+/**
+ * Credits an online purchase exactly once per idempotencyKey ("purchase:{orderId}:{creditType}").
+ * The PURCHASE ledger entry is written with ON CONFLICT DO NOTHING; the balance is incremented only when
+ * this call inserted the row, so retries and parallel calls never double-credit. Always type PURCHASE:
+ * other ledger types go through their own functions, so a key outside the purchase namespace is rejected.
+ */
+export async function addCredits(
+  db: Db | PrismaClient,
+  args: {
+    organizationId: string;
+    creditType: CreditType;
+    amount: number;
+    idempotencyKey: string;
+    orderId: string;
+    userId?: string | null;
+    note?: string;
+  },
+): Promise<{ added: boolean }> {
+  const { organizationId, creditType, amount, idempotencyKey, orderId, userId, note } = args;
+  if (!Number.isInteger(amount) || amount <= 0) {
+    throw new Error("Doładowanie musi być dodatnią liczbą całkowitą.");
+  }
+  if (!idempotencyKey.startsWith("purchase:")) {
+    throw new Error("Klucz doładowania musi mieć postać purchase:{orderId}:{creditType}.");
+  }
+
+  return runInTx(db, async (tx) => {
+    const { count } = await tx.creditLedgerEntry.createMany({
+      data: [
+        {
+          organizationId,
+          creditType,
+          amount,
+          type: "PURCHASE",
+          idempotencyKey,
+          orderId,
+          userId: userId ?? null,
+          note,
+        },
+      ],
+      skipDuplicates: true,
+    });
+    if (count === 0) return { added: false };
+
+    await incrementBalance(tx, organizationId, creditType, amount);
+    return { added: true };
+  });
+}
+
 export async function adjustCredits(
   db: PrismaClient,
   args: {
