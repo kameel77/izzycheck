@@ -191,6 +191,7 @@ export async function applyPayuStatus(
       userId: true,
       totalGrossGrosze: true,
       currency: true,
+      payuSandbox: true,
       items: { select: { creditType: true, creditsPerPackage: true, quantity: true }, orderBy: { id: "asc" } },
     },
   });
@@ -222,13 +223,23 @@ export async function applyPayuStatus(
       throw new Error(`Zamówienie ${orderId} nie ma pozycji do zaksięgowania.`);
     }
 
+    // Read at call time so tests (and a staging env) can flip it without a restart.
+    const shouldInvoice = !order.payuSandbox || process.env.INVOICE_SANDBOX_ORDERS === "true";
+
     const outcome = await db.$transaction(async (tx) => {
       // Row lock first: the status read here is exactly the one the guarded update below acts on.
       const locked = await tx.$queryRaw<{ status: OrderStatus }[]>`SELECT status FROM orders WHERE id = ${orderId} FOR UPDATE`;
       const previousStatus = locked[0]?.status;
+      const now = new Date();
       const { count } = await tx.order.updateMany({
         where: { id: orderId, status: { in: PAYABLE_STATUSES } },
-        data: { status: "PAID", paidAt: new Date(), ...(payuOrderId ? { payuOrderId } : {}) },
+        data: {
+          status: "PAID",
+          paidAt: now,
+          invoiceStatus: shouldInvoice ? "PENDING" : "NOT_REQUIRED",
+          invoiceNextAttemptAt: now,
+          ...(payuOrderId ? { payuOrderId } : {}),
+        },
       });
       if (count === 0) return { result: "ALREADY_PAID" as const, previousStatus };
 
