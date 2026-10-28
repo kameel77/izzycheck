@@ -222,7 +222,7 @@ export async function cancelProformaOrder(
   orderId: string,
 ): Promise<{ ok: true } | { ok: false; status: 404 | 409; error: string }> {
   const { count } = await db.order.updateMany({
-    where: { id: orderId, paymentMethod: "PROFORMA", status: "PENDING_PAYMENT" },
+    where: { id: orderId, paymentMethod: "PROFORMA", status: "PENDING_PAYMENT", proformaFakturowniaId: { not: null } },
     data: { status: "CANCELED" },
   });
   if (count === 1) return { ok: true };

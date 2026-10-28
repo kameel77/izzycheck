@@ -13,7 +13,7 @@ after(async () => {
   await testPrisma.$disconnect();
 });
 
-// Warsaw is on CEST (UTC+2) at both instants.
+// Warsaw is on CEST (UTC+2) at CREATED_AT and on CET (UTC+1) at NOW (DST ended on 2026-10-25).
 const CREATED_AT = new Date("2026-10-20T10:00:00.000Z");
 const NOW = new Date("2026-10-30T10:00:00.000Z");
 
@@ -317,6 +317,16 @@ describe("cancelProformaOrder", () => {
   test("a pending PayU order is refused", async () => {
     const ctx = await setup();
     const order = await createProforma(ctx, { paymentMethod: "PAYU", payuOrderId: "PAYU-2" });
+
+    const result = await cancelProformaOrder(testPrisma, order.id);
+
+    assert.deepEqual(result, { ok: false, status: 409, error: "Anulować można tylko proformę oczekującą na wpłatę." });
+    assert.equal((await read(order.id)).status, "PENDING_PAYMENT" satisfies OrderStatus);
+  });
+
+  test("a proforma that is still being created (no Fakturownia id yet) cannot be canceled", async () => {
+    const ctx = await setup();
+    const order = await createProforma(ctx, { proformaFakturowniaId: null, proformaNumber: null, proformaToken: null });
 
     const result = await cancelProformaOrder(testPrisma, order.id);
 
