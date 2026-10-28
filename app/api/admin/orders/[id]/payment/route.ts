@@ -43,7 +43,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     };
 
     if (input.action === "cancel") {
-      const result = await cancelProformaOrder(prisma, id);
+      const result = await cancelProformaOrder(prisma, id, new Date());
       if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
       await audit("ORDER_CANCEL", {});
       return NextResponse.json({ success: true });

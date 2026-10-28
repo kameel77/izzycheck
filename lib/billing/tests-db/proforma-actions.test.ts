@@ -296,10 +296,10 @@ describe("cancelProformaOrder", () => {
     const ctx = await setup();
     const order = await createProforma(ctx);
 
-    assert.deepEqual(await cancelProformaOrder(testPrisma, order.id), { ok: true });
+    assert.deepEqual(await cancelProformaOrder(testPrisma, order.id, NOW), { ok: true });
     assert.equal((await read(order.id)).status, "CANCELED");
 
-    const second = await cancelProformaOrder(testPrisma, order.id);
+    const second = await cancelProformaOrder(testPrisma, order.id, NOW);
     assert.deepEqual(second, { ok: false, status: 409, error: "Anulować można tylko proformę oczekującą na wpłatę." });
   });
 
@@ -308,7 +308,7 @@ describe("cancelProformaOrder", () => {
     const order = await createProforma(ctx);
     await mark(order.id);
 
-    const result = await cancelProformaOrder(testPrisma, order.id);
+    const result = await cancelProformaOrder(testPrisma, order.id, NOW);
 
     assert.deepEqual(result, { ok: false, status: 409, error: "Anulować można tylko proformę oczekującą na wpłatę." });
     assert.equal((await read(order.id)).status, "PAID");
@@ -318,23 +318,61 @@ describe("cancelProformaOrder", () => {
     const ctx = await setup();
     const order = await createProforma(ctx, { paymentMethod: "PAYU", payuOrderId: "PAYU-2" });
 
-    const result = await cancelProformaOrder(testPrisma, order.id);
+    const result = await cancelProformaOrder(testPrisma, order.id, NOW);
 
     assert.deepEqual(result, { ok: false, status: 409, error: "Anulować można tylko proformę oczekującą na wpłatę." });
     assert.equal((await read(order.id)).status, "PENDING_PAYMENT" satisfies OrderStatus);
   });
 
-  test("a proforma that is still being created (no Fakturownia id yet) cannot be canceled", async () => {
+  test("a proforma still being created (no Fakturownia id, 1 minute old) cannot be canceled", async () => {
     const ctx = await setup();
-    const order = await createProforma(ctx, { proformaFakturowniaId: null, proformaNumber: null, proformaToken: null });
+    const order = await createProforma(ctx, {
+      proformaFakturowniaId: null,
+      proformaNumber: null,
+      proformaToken: null,
+      createdAt: new Date(NOW.getTime() - 60_000),
+    });
 
-    const result = await cancelProformaOrder(testPrisma, order.id);
+    const result = await cancelProformaOrder(testPrisma, order.id, NOW);
 
     assert.deepEqual(result, { ok: false, status: 409, error: "Anulować można tylko proformę oczekującą na wpłatę." });
     assert.equal((await read(order.id)).status, "PENDING_PAYMENT" satisfies OrderStatus);
+  });
+
+  test("a stuck proforma (no Fakturownia id, 11 minutes old) can be canceled", async () => {
+    const ctx = await setup();
+    const order = await createProforma(ctx, {
+      proformaFakturowniaId: null,
+      proformaNumber: null,
+      proformaToken: null,
+      createdAt: new Date(NOW.getTime() - 11 * 60_000),
+    });
+
+    assert.deepEqual(await cancelProformaOrder(testPrisma, order.id, NOW), { ok: true });
+    assert.equal((await read(order.id)).status, "CANCELED" satisfies OrderStatus);
+  });
+
+  test("the stuck-order boundary is 10 minutes, and a stuck PayU or FAILED order is still refused", async () => {
+    const ctx = await setup();
+    const at = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000);
+    const noProforma = { proformaFakturowniaId: null, proformaNumber: null, proformaToken: null };
+
+    const justUnder = await createProforma(ctx, { ...noProforma, createdAt: at(9.9) });
+    assert.equal((await cancelProformaOrder(testPrisma, justUnder.id, NOW)).ok, false);
+
+    const justOver = await createProforma(ctx, { ...noProforma, createdAt: at(10.1) });
+    assert.deepEqual(await cancelProformaOrder(testPrisma, justOver.id, NOW), { ok: true });
+
+    const payu = await createProforma(ctx, { ...noProforma, paymentMethod: "PAYU", payuOrderId: "PAYU-3", createdAt: at(60) });
+    assert.equal((await cancelProformaOrder(testPrisma, payu.id, NOW)).ok, false);
+    assert.equal((await read(payu.id)).status, "PENDING_PAYMENT" satisfies OrderStatus);
+
+    const failed = await createProforma(ctx, { ...noProforma, status: "FAILED", createdAt: at(60) });
+    assert.equal((await cancelProformaOrder(testPrisma, failed.id, NOW)).ok, false);
+    assert.equal((await read(failed.id)).status, "FAILED" satisfies OrderStatus);
   });
 
   test("an unknown order is 404", async () => {
-    assert.deepEqual(await cancelProformaOrder(testPrisma, randomUUID()), { ok: false, status: 404, error: "Nie znaleziono zamówienia." });
+    assert.deepEqual(await cancelProformaOrder(testPrisma, randomUUID(), NOW), { ok: false, status: 404, error: "Nie znaleziono zamówienia." });
   });
 });

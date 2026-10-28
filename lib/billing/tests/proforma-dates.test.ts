@@ -5,6 +5,7 @@ import {
   addDaysToDate,
   dbDateToYmd,
   isProformaExpired,
+  isStuckProforma,
   isValidYmd,
   warsawDate,
   ymdToDbDate,
@@ -71,4 +72,14 @@ test("isProformaExpired: never for paid, canceled, failed, PayU or undated order
   }
   assert.equal(isProformaExpired({ paymentMethod: "PAYU", status: "PENDING_PAYMENT", proformaDueDate: due }, late), false);
   assert.equal(isProformaExpired({ paymentMethod: "PROFORMA", status: "PENDING_PAYMENT", proformaDueDate: null }, late), false);
+});
+
+test("isStuckProforma: pending proforma without a Fakturownia document, older than 10 minutes", () => {
+  const now = new Date("2026-10-30T10:00:00.000Z");
+  const order = { paymentMethod: "PROFORMA", status: "PENDING_PAYMENT", proformaFakturowniaId: null, createdAt: "2026-10-30T09:49:00.000Z" };
+  assert.equal(isStuckProforma(order, now), true);
+  assert.equal(isStuckProforma({ ...order, createdAt: new Date("2026-10-30T09:51:00.000Z") }, now), false);
+  assert.equal(isStuckProforma({ ...order, proformaFakturowniaId: "PF-1" }, now), false);
+  assert.equal(isStuckProforma({ ...order, status: "FAILED" }, now), false);
+  assert.equal(isStuckProforma({ ...order, paymentMethod: "PAYU" }, now), false);
 });

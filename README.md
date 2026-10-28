@@ -157,7 +157,7 @@ Faktura proforma to płatność przelewem dla zamówień, których klient nie ch
 2. Przy zamówieniu kliknij „Oznacz jako opłacone”, podaj datę wpłaty (nie z przyszłości i nie wcześniejszą niż data zamówienia) i opcjonalnie notatkę (do 500 znaków). Kredyty są księgowane od razu.
 3. Fakturę VAT wystawia automatycznie istniejący outbox faktur: forma płatności przelew, data sprzedaży i zapłaty równa dacie wpłaty, powiązana z proformą przez `from_invoice_id`. Dalej obowiązuje zwykły obieg (e-mail, KSeF, sygnały „Wymaga uwagi”).
 4. Oznaczenie wpłaty jest dozwolone także po terminie i po anulowaniu zamówienia (wpłata przyszła, więc kredyty się należą).
-5. „Anuluj” działa tylko dla nieopłaconych proform i nie dotyka dokumentu w Fakturowni.
+5. „Anuluj” działa tylko dla nieopłaconych proform i nie dotyka dokumentu w Fakturowni. Zamówienie, któremu nie udało się zapisać dokumentu proformy (brak numeru), można anulować dopiero po 10 minutach od złożenia.
 
 **Konto bankowe na proformie** pochodzi z ustawień działu sprzedawcy w Fakturowni (`FAKTUROWNIA_DEPARTMENT_ID` albo dział domyślny): musi być tam ustawiony numer konta, inaczej klient dostanie proformę bez danych do przelewu.
 

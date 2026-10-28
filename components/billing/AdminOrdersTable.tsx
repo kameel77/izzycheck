@@ -11,7 +11,7 @@ import {
   formatYmdPl,
   invoiceStatusLabel,
 } from "@/lib/billing/labels";
-import { isProformaExpired, warsawDate } from "@/lib/billing/proforma-dates";
+import { isProformaExpired, isStuckProforma, warsawDate } from "@/lib/billing/proforma-dates";
 
 export interface AdminOrderRow {
   id: string;
@@ -287,17 +287,21 @@ function MarkPaidForm({
 
 function PaymentActions({
   order,
+  now,
   feedback,
   onAction,
 }: {
   order: AdminOrderRow;
+  now: Date;
   feedback: RowFeedback | undefined;
   onAction: (orderId: string, body: ActionBody) => Promise<boolean>;
 }) {
   const [markPaidOpen, setMarkPaidOpen] = useState(false);
-  if (!hasProforma(order)) return null;
+  // A stuck order (creation crashed before the document was saved) can only be canceled, never marked paid.
+  const stuck = isStuckProforma(order, now);
+  if (!hasProforma(order) && !stuck) return null;
   const busy = feedback?.busy === true;
-  const canMarkPaid = order.status === "PENDING_PAYMENT" || order.status === "CANCELED";
+  const canMarkPaid = hasProforma(order) && (order.status === "PENDING_PAYMENT" || order.status === "CANCELED");
   const canCancel = order.status === "PENDING_PAYMENT";
   if (!canMarkPaid && !canCancel) return null;
 
@@ -577,7 +581,7 @@ export default function AdminOrdersTable({
               </td>
               <td className="px-5 py-4">
                 <div className="flex flex-col items-start gap-1.5">
-                  <PaymentActions order={order} feedback={feedback[order.id]} onAction={runAction} />
+                  <PaymentActions order={order} now={now} feedback={feedback[order.id]} onAction={runAction} />
                   <InvoiceActions
                     order={order}
                     fakturowniaConfigured={fakturowniaConfigured}

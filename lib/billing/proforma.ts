@@ -10,7 +10,14 @@ import type { OrderStatus, PrismaClient } from "@prisma/client";
 import { buildProformaPayload, getFakturowniaConfig } from "../invoices/fakturownia.ts";
 import type { FakturowniaClient } from "../invoices/fakturownia.ts";
 import { CheckoutError, bookOrderCredits, prepareOrder } from "./orders.ts";
-import { PROFORMA_VALIDITY_DAYS, addDaysToDate, isValidYmd, warsawDate, ymdToDbDate } from "./proforma-dates.ts";
+import {
+  PROFORMA_VALIDITY_DAYS,
+  STUCK_PROFORMA_CANCEL_AFTER_MS,
+  addDaysToDate,
+  isValidYmd,
+  warsawDate,
+  ymdToDbDate,
+} from "./proforma-dates.ts";
 
 export type ProformaFakturowniaClient = Pick<FakturowniaClient, "createProforma" | "sendInvoiceByEmail">;
 
@@ -225,13 +232,24 @@ export async function markProformaPaid(
   });
 }
 
-/** PROFORMA + PENDING_PAYMENT -> CANCELED. Fakturownia is not touched; a late transfer can still be marked paid. */
+/**
+ * PROFORMA + PENDING_PAYMENT -> CANCELED. Fakturownia is not touched; a late transfer can still be marked paid.
+ * An order with no Fakturownia document is cancelable only once it is clearly stuck (older than
+ * STUCK_PROFORMA_CANCEL_AFTER_MS), so a creation still in flight is never canceled under its feet.
+ */
 export async function cancelProformaOrder(
   db: PrismaClient,
   orderId: string,
+  now: Date,
 ): Promise<{ ok: true } | { ok: false; status: 404 | 409; error: string }> {
+  const stuckBefore = new Date(now.getTime() - STUCK_PROFORMA_CANCEL_AFTER_MS);
   const { count } = await db.order.updateMany({
-    where: { id: orderId, paymentMethod: "PROFORMA", status: "PENDING_PAYMENT", proformaFakturowniaId: { not: null } },
+    where: {
+      id: orderId,
+      paymentMethod: "PROFORMA",
+      status: "PENDING_PAYMENT",
+      OR: [{ proformaFakturowniaId: { not: null } }, { proformaFakturowniaId: null, createdAt: { lt: stuckBefore } }],
+    },
     data: { status: "CANCELED" },
   });
   if (count === 1) return { ok: true };

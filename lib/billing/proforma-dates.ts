@@ -52,3 +52,15 @@ export function isProformaExpired(
   const dueDate = typeof order.proformaDueDate === "string" ? order.proformaDueDate.slice(0, 10) : dbDateToYmd(order.proformaDueDate);
   return warsawDate(now) > dueDate;
 }
+
+/** A proforma order that never got its Fakturownia document (creation crashed) can be canceled after this long. */
+export const STUCK_PROFORMA_CANCEL_AFTER_MS = 10 * 60_000;
+
+/** True for a pending proforma order with no Fakturownia document that is older than the cancel threshold. */
+export function isStuckProforma(
+  order: { paymentMethod: string; status: string; proformaFakturowniaId: string | null; createdAt: Date | string },
+  now: Date,
+): boolean {
+  if (order.paymentMethod !== "PROFORMA" || order.status !== "PENDING_PAYMENT" || order.proformaFakturowniaId !== null) return false;
+  return now.getTime() - new Date(order.createdAt).getTime() > STUCK_PROFORMA_CANCEL_AFTER_MS;
+}
