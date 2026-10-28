@@ -6,7 +6,7 @@
  * the credits and credits never exist without PAID; the guarded updateMany is the serialization point for
  * parallel notifications. Amount and currency from PayU must match the stored order before ANY status change.
  */
-import type { CreditType, OrderStatus, PrismaClient } from "@prisma/client";
+import type { CreditType, OrderStatus, Prisma, PrismaClient } from "@prisma/client";
 import { addCredits, isPrepaid } from "./credits.ts";
 import { priceCart, type CartPackage, type PricedCart } from "./pricing.ts";
 import { parsePayuSignatureHeader, verifyPayuSignature, type createPayuClient } from "../payments/payu.ts";
@@ -205,6 +205,43 @@ export async function createCheckout(
   return { orderId: order.id, redirectUri: created.redirectUri };
 }
 
+/**
+ * Books the credits of an order inside the caller's transaction, one ledger entry per credit type with the
+ * idempotency key purchase:{orderId}:{creditType}. Throws when the order has no lines.
+ */
+export async function bookOrderCredits(
+  tx: Prisma.TransactionClient,
+  order: {
+    id: string;
+    organizationId: string;
+    userId: string;
+    items: Array<{ creditType: CreditType; creditsPerPackage: number; quantity: number }>;
+  },
+  note: string,
+): Promise<void> {
+  const creditsByType = new Map<CreditType, number>();
+  for (const item of order.items) {
+    creditsByType.set(item.creditType, (creditsByType.get(item.creditType) ?? 0) + item.creditsPerPackage * item.quantity);
+  }
+  if (creditsByType.size === 0) {
+    throw new Error(`Zamówienie ${order.id} nie ma pozycji do zaksięgowania.`);
+  }
+
+  // Fixed credit type order: concurrent payments of one organization lock the balance rows in the same
+  // order whatever the cart order was, so they cannot deadlock.
+  for (const [creditType, amount] of [...creditsByType].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
+    await addCredits(tx, {
+      organizationId: order.organizationId,
+      creditType,
+      amount,
+      idempotencyKey: `purchase:${order.id}:${creditType}`,
+      userId: order.userId,
+      orderId: order.id,
+      note,
+    });
+  }
+}
+
 export type ApplyPayuStatusResult =
   | "PAID_NOW"
   | "ALREADY_PAID"
@@ -263,14 +300,6 @@ export async function applyPayuStatus(
   }
 
   if (status === "COMPLETED") {
-    const creditsByType = new Map<CreditType, number>();
-    for (const item of order.items) {
-      creditsByType.set(item.creditType, (creditsByType.get(item.creditType) ?? 0) + item.creditsPerPackage * item.quantity);
-    }
-    if (creditsByType.size === 0) {
-      throw new Error(`Zamówienie ${orderId} nie ma pozycji do zaksięgowania.`);
-    }
-
     // Read at call time so tests (and a staging env) can flip it without a restart.
     const shouldInvoice = !order.payuSandbox || process.env.INVOICE_SANDBOX_ORDERS === "true";
 
@@ -291,19 +320,7 @@ export async function applyPayuStatus(
       });
       if (count === 0) return { result: "ALREADY_PAID" as const, previousStatus };
 
-      // Fixed credit type order: concurrent payments of one organization lock the balance rows in the same
-      // order whatever the cart order was, so they cannot deadlock.
-      for (const [creditType, amount] of [...creditsByType].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
-        await addCredits(tx, {
-          organizationId: order.organizationId,
-          creditType,
-          amount,
-          idempotencyKey: `purchase:${orderId}:${creditType}`,
-          userId: order.userId,
-          orderId,
-          note: "Zakup online (PayU)",
-        });
-      }
+      await bookOrderCredits(tx, order, "Zakup online (PayU)");
       return { result: "PAID_NOW" as const, previousStatus };
     });
 

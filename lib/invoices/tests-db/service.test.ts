@@ -423,6 +423,52 @@ describe("processInvoice", () => {
     assert.equal(await processInvoice(testPrisma, order.id, { client: null }), "NOT_CONFIGURED");
     assert.deepEqual(await read(order.id), before);
   });
+
+  test("a proforma order: transfer payment, from_invoice_id, the payer's date and the ordered total", async () => {
+    const ctx = await seed();
+    const order = await createOrder(ctx, {
+      paidAt: new Date("2026-10-28T12:00:00.000Z"),
+      extra: {
+        paymentMethod: "PROFORMA",
+        proformaFakturowniaId: "9001",
+        proformaNumber: "PRO/7/10/2026",
+        invoiceNextAttemptAt: new Date(Date.now() - MIN),
+      },
+    });
+    // The price list changes after the order: the invoice must still match the proforma.
+    await testPrisma.creditPackage.updateMany({ data: { priceNetGrosze: 99_900 } });
+    const { client, calls } = stubClient();
+
+    assert.equal(await processInvoice(testPrisma, order.id, { client, clock: () => new Date("2026-10-30T10:00:00.000Z") }), "ISSUED");
+
+    assert.equal(calls.created.length, 1);
+    const invoice = calls.created[0];
+    assert.equal(invoice.payment_type, "transfer");
+    assert.equal(invoice.from_invoice_id, 9001);
+    assert.equal(invoice.oid, order.id);
+    assert.equal(invoice.oid_unique, "yes");
+    assert.equal(invoice.status, "paid");
+    assert.equal(invoice.paid_date, "2026-10-28");
+    assert.equal(invoice.sell_date, "2026-10-28");
+    assert.equal(invoice.issue_date, "2026-10-30");
+    assert.equal(invoice.paid, "24.60");
+    assert.deepEqual(
+      invoice.positions.map((p) => p.total_price_gross),
+      ["24.60"],
+    );
+    assert.equal((await read(order.id)).invoiceStatus, "ISSUED");
+  });
+
+  test("a PayU order still gets payment_type payu and no from_invoice_id", async () => {
+    const ctx = await seed();
+    const order = await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(Date.now() - MIN) } });
+    const { client, calls } = stubClient();
+
+    await processInvoice(testPrisma, order.id, { client, clock: () => new Date() });
+
+    assert.equal(calls.created[0].payment_type, "payu");
+    assert.equal("from_invoice_id" in calls.created[0], false);
+  });
 });
 
 async function issuedOrder(ctx: Seed, extra: Partial<Prisma.OrderUncheckedCreateInput> = {}) {
@@ -701,6 +747,39 @@ describe("runBillingCron", () => {
     for (const o of [tooYoung, tooOld, recentlyTouched, noPayuId]) {
       assert.equal((await read(o.id)).status, "PENDING_PAYMENT", o.id);
     }
+  });
+
+  test("a pending PROFORMA order is never polled at PayU, however old it is", async () => {
+    const ctx = await seed();
+    const now = new Date();
+    const old = (minutes: number) => new Date(now.getTime() - minutes * MIN);
+    // Inside the PayU sync window (older than the recheck pause, younger than a week) and untouched for a while.
+    const proforma = await createOrder(ctx, {
+      status: "PENDING_PAYMENT",
+      invoiceStatus: "NOT_REQUIRED",
+      extra: {
+        paymentMethod: "PROFORMA",
+        proformaFakturowniaId: "9001",
+        proformaNumber: "PRO/7/10/2026",
+        createdAt: old(60),
+        updatedAt: old(60),
+      },
+    });
+    const polled: string[] = [];
+    const payu = stubPayu(async (payuOrderId) => {
+      polled.push(payuOrderId);
+      throw new Error("getOrder must not be called for a proforma order");
+    });
+    const { client, calls } = stubClient();
+
+    const { result } = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: payu, clock: () => now }));
+
+    assert.deepEqual(polled, []);
+    assert.equal(result.ordersSynced, 0);
+    assert.equal(calls.created.length, 0);
+    const row = await read(proforma.id);
+    assert.equal(row.status, "PENDING_PAYMENT");
+    assert.equal(row.updatedAt.getTime(), old(60).getTime());
   });
 
   test("NOT_REQUIRED orders are never picked", async () => {

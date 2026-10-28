@@ -107,6 +107,8 @@ export async function processInvoice(
       select: {
         id: true,
         paidAt: true,
+        paymentMethod: true,
+        proformaFakturowniaId: true,
         totalGrossGrosze: true,
         items: {
           select: { packageName: true, quantity: true, vatRate: true, lineGrossGrosze: true },
@@ -118,7 +120,12 @@ export async function processInvoice(
       },
     });
     const departmentId = deps.departmentId !== undefined ? deps.departmentId : (getFakturowniaConfig()?.departmentId ?? null);
-    const payload = buildInvoicePayload(order, order.organization, departmentId, clock());
+    // An order paid against a proforma is settled by transfer and linked to the proforma in Fakturownia.
+    const options =
+      order.paymentMethod === "PROFORMA"
+        ? { paymentType: "transfer" as const, fromInvoiceId: order.proformaFakturowniaId }
+        : undefined;
+    const payload = buildInvoicePayload(order, order.organization, departmentId, clock(), options);
     created = await client.createInvoice(payload);
   } catch (error) {
     return recordIssueFailure(db, orderId, owned, error, clock);
