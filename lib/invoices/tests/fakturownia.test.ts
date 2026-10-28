@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import {
   FakturowniaError,
   buildInvoicePayload,
@@ -54,7 +54,7 @@ const order = {
 
 const issueDate = new Date("2026-10-29T08:00:00.000Z");
 
-const validInvoice = buildInvoicePayload(order, organization, "jan@example.com", null, issueDate);
+const validInvoice = buildInvoicePayload(order, organization, null, issueDate);
 
 // --- getFakturowniaConfig ---
 
@@ -86,24 +86,64 @@ test("getFakturowniaConfig: null when domain or token is missing or blank", () =
   assert.equal(getFakturowniaConfig({ ...fullEnv, FAKTUROWNIA_API_TOKEN: "" }), null);
 });
 
+test("getFakturowniaConfig: lowercases the domain before validation", () => {
+  assert.equal(getFakturowniaConfig({ ...fullEnv, FAKTUROWNIA_DOMAIN: " Izzy-Test " })?.domain, "izzy-test");
+});
+
 test("getFakturowniaConfig: rejects domains that are not a bare subdomain", () => {
-  for (const bad of [
-    "izzy.fakturownia.pl",
-    "evil.com/x",
-    "evil.com#",
-    "a b",
-    "izzy_test",
-    "https://izzy",
-    "izzy@evil.com",
-    "izzy:443",
-  ]) {
-    assert.equal(getFakturowniaConfig({ ...fullEnv, FAKTUROWNIA_DOMAIN: bad }), null, bad);
+  const errorLog = mock.method(console, "error", () => {});
+  try {
+    for (const bad of [
+      "izzy.fakturownia.pl",
+      "evil.com/x",
+      "evil.com#",
+      "a b",
+      "izzy_test",
+      "https://izzy",
+      "izzy@evil.com",
+      "izzy:443",
+    ]) {
+      assert.equal(getFakturowniaConfig({ ...fullEnv, FAKTUROWNIA_DOMAIN: bad }), null, bad);
+    }
+  } finally {
+    errorLog.mock.restore();
   }
 });
 
 test("getFakturowniaConfig: an invalid department id disables the config (fail closed)", () => {
-  for (const bad of ["abc", "1.5", "-3", "0", "4 2"]) {
-    assert.equal(getFakturowniaConfig({ ...fullEnv, FAKTUROWNIA_DEPARTMENT_ID: bad }), null, bad);
+  const errorLog = mock.method(console, "error", () => {});
+  try {
+    for (const bad of ["abc", "1.5", "-3", "0", "4 2"]) {
+      assert.equal(getFakturowniaConfig({ ...fullEnv, FAKTUROWNIA_DEPARTMENT_ID: bad }), null, bad);
+    }
+  } finally {
+    errorLog.mock.restore();
+  }
+});
+
+test("getFakturowniaConfig: logs a set-but-invalid domain or department id once, without the value", () => {
+  const errorLog = mock.method(console, "error", () => {});
+  try {
+    const badDomain = { ...fullEnv, FAKTUROWNIA_DOMAIN: "log-test.evil.com/secret-part" };
+    getFakturowniaConfig(badDomain);
+    getFakturowniaConfig(badDomain);
+    const badDepartment = { ...fullEnv, FAKTUROWNIA_DEPARTMENT_ID: "dept-log-test" };
+    getFakturowniaConfig(badDepartment);
+    getFakturowniaConfig(badDepartment);
+    assert.deepEqual(
+      errorLog.mock.calls.map((c) => c.arguments),
+      [
+        ["[FAKTUROWNIA_CONFIG_INVALID]", { field: "FAKTUROWNIA_DOMAIN" }],
+        ["[FAKTUROWNIA_CONFIG_INVALID]", { field: "FAKTUROWNIA_DEPARTMENT_ID" }],
+      ],
+    );
+    // Missing/blank values are "not configured", not "invalid": no log.
+    errorLog.mock.resetCalls();
+    getFakturowniaConfig({});
+    getFakturowniaConfig({ ...fullEnv, FAKTUROWNIA_DOMAIN: " " });
+    assert.equal(errorLog.mock.callCount(), 0);
+  } finally {
+    errorLog.mock.restore();
   }
 });
 
@@ -156,24 +196,24 @@ test("buildInvoicePayload: position gross sum equals the order gross", () => {
 
 test("buildInvoicePayload: sell_date uses the Europe/Warsaw calendar day of paidAt", () => {
   // 23:30 UTC on 28 Oct is already 00:30 on 29 Oct in Warsaw (CET, UTC+1).
-  const late = buildInvoicePayload({ ...order, paidAt: new Date("2026-10-28T23:30:00.000Z") }, organization, "a@b.pl", null, issueDate);
+  const late = buildInvoicePayload({ ...order, paidAt: new Date("2026-10-28T23:30:00.000Z") }, organization, null, issueDate);
   assert.equal(late.sell_date, "2026-10-29");
   // 22:30 UTC on 28 Oct is 23:30 in Warsaw: still the 28th.
-  const early = buildInvoicePayload({ ...order, paidAt: new Date("2026-10-28T22:30:00.000Z") }, organization, "a@b.pl", null, issueDate);
+  const early = buildInvoicePayload({ ...order, paidAt: new Date("2026-10-28T22:30:00.000Z") }, organization, null, issueDate);
   assert.equal(early.sell_date, "2026-10-28");
   // Summer time (CEST, UTC+2): 22:30 UTC on 30 Jun is 00:30 on 1 Jul.
-  const summer = buildInvoicePayload({ ...order, paidAt: new Date("2026-06-30T22:30:00.000Z") }, organization, "a@b.pl", null, issueDate);
+  const summer = buildInvoicePayload({ ...order, paidAt: new Date("2026-06-30T22:30:00.000Z") }, organization, null, issueDate);
   assert.equal(summer.sell_date, "2026-07-01");
 });
 
 test("buildInvoicePayload: issue_date uses the Europe/Warsaw calendar day of issueDate", () => {
-  const inv = buildInvoicePayload(order, organization, "a@b.pl", null, new Date("2026-10-29T23:30:00.000Z"));
+  const inv = buildInvoicePayload(order, organization, null, new Date("2026-10-29T23:30:00.000Z"));
   assert.equal(inv.issue_date, "2026-10-30");
 });
 
 test("buildInvoicePayload: department_id only when set", () => {
   assert.equal("department_id" in validInvoice, false);
-  const withDept = buildInvoicePayload(order, organization, "a@b.pl", 42, issueDate);
+  const withDept = buildInvoicePayload(order, organization, 42, issueDate);
   assert.equal(withDept.department_id, 42);
 });
 
@@ -190,7 +230,6 @@ test("buildInvoicePayload: formats grosze with integer arithmetic", () => {
       ],
     },
     organization,
-    "a@b.pl",
     null,
     issueDate,
   );
@@ -202,11 +241,11 @@ test("buildInvoicePayload: formats grosze with integer arithmetic", () => {
 });
 
 test("buildInvoicePayload: refuses an order whose items do not add up to its gross total", () => {
-  assert.throws(() => buildInvoicePayload({ ...order, totalGrossGrosze: 51661 }, organization, "a@b.pl", null, issueDate), /51661/);
+  assert.throws(() => buildInvoicePayload({ ...order, totalGrossGrosze: 51661 }, organization, null, issueDate), /51661/);
 });
 
 test("buildInvoicePayload: refuses an order without paidAt", () => {
-  assert.throws(() => buildInvoicePayload({ ...order, paidAt: null }, organization, "a@b.pl", null, issueDate), /paidAt|płatno/);
+  assert.throws(() => buildInvoicePayload({ ...order, paidAt: null }, organization, null, issueDate), /paidAt|płatno/);
 });
 
 // --- createInvoice ---
@@ -431,10 +470,17 @@ test("getInvoiceKsef: missing fields become null and error messages are listed",
   assert.equal(result.govStatus, "send_error");
   assert.equal(result.govId, null);
   assert.equal(result.verificationLink, null);
-  assert.equal(result.errors.length, 2);
-  assert.equal(result.errors[0], "Błąd NIP");
-  assert.match(result.errors[1], /21405/);
-  assert.match(result.errors[1], /Zły format/);
+  assert.deepEqual(result.errors, ["Błąd NIP", "21405", "Zły format"]);
+});
+
+test("getInvoiceKsef: gov_error_messages as an object of arrays/strings is flattened", async () => {
+  const { fetchImpl } = mockFetch(() =>
+    json({ gov_status: "send_error", gov_error_messages: { buyer_tax_no: ["zły NIP", "brak"], base: "ogólny błąd", empty: [], none: null } }),
+  );
+  const client = createFakturowniaClient(config, fetchImpl);
+  assert.deepEqual((await client.getInvoiceKsef("1")).errors, ["zły NIP", "brak", "ogólny błąd"]);
+  const single = createFakturowniaClient(config, mockFetch(() => json({ gov_error_messages: "jeden błąd" })).fetchImpl);
+  assert.deepEqual((await single.getInvoiceKsef("1")).errors, ["jeden błąd"]);
 });
 
 test("getInvoiceKsef: an empty object maps to all nulls", async () => {
@@ -459,4 +505,146 @@ test("invoicePdfUrl: builds the public token link", () => {
   const client = createFakturowniaClient(config, mockFetch(() => json({})).fetchImpl);
   assert.equal(client.invoicePdfUrl("HBO3Npx2OzSW79RQL7XV2"), "https://izzy-test.fakturownia.pl/invoice/HBO3Npx2OzSW79RQL7XV2.pdf");
   assert.equal(client.invoicePdfUrl("a/b c"), "https://izzy-test.fakturownia.pl/invoice/a%2Fb%20c.pdf");
+});
+
+// --- fix round 1 ---
+
+test("429 and 408 are retryable SERVER errors for every operation", async () => {
+  for (const status of [429, 408]) {
+    const { fetchImpl } = mockFetch(() => json({ message: "slow down" }, status));
+    const client = createFakturowniaClient(config, fetchImpl);
+    const ops: Array<() => Promise<unknown>> = [
+      () => client.createInvoice(validInvoice),
+      () => client.sendInvoiceByEmail("1", { emailTo: ["a@b.pl"], emailCc: [] }),
+      () => client.getInvoiceKsef("1"),
+    ];
+    for (const op of ops) {
+      await assert.rejects(op(), (err: unknown) => {
+        assert.ok(err instanceof FakturowniaError);
+        assert.equal(err.code, "SERVER");
+        assert.equal(err.status, status);
+        return true;
+      });
+    }
+  }
+});
+
+test("429 mentioning oid is still SERVER, not DUPLICATE_OID", async () => {
+  const { fetchImpl } = mockFetch(() => json({ message: "oid rate limit" }, 429));
+  const client = createFakturowniaClient(config, fetchImpl);
+  await assert.rejects(client.createInvoice(validInvoice), (err: unknown) => {
+    assert.ok(err instanceof FakturowniaError);
+    assert.equal(err.code, "SERVER");
+    return true;
+  });
+});
+
+test("DUPLICATE_OID is only detected by createInvoice", async () => {
+  const { fetchImpl } = mockFetch(() => json({ message: { oid: ["has already been taken"] } }, 422));
+  const client = createFakturowniaClient(config, fetchImpl);
+  const others: Array<() => Promise<unknown>> = [
+    () => client.sendInvoiceByEmail("1", { emailTo: ["a@b.pl"], emailCc: [] }),
+    () => client.getInvoiceKsef("1"),
+  ];
+  for (const op of others) {
+    await assert.rejects(op(), (err: unknown) => {
+      assert.ok(err instanceof FakturowniaError);
+      assert.equal(err.code, "VALIDATION");
+      return true;
+    });
+  }
+  for (const status of [401, 403]) {
+    const { fetchImpl: authFetch } = mockFetch(() => json({ message: "oid" }, status));
+    await assert.rejects(
+      createFakturowniaClient(config, authFetch).getInvoiceKsef("1"),
+      (err: unknown) => err instanceof FakturowniaError && err.code === "AUTH",
+    );
+  }
+});
+
+test("every request uses redirect: error", async () => {
+  const { calls, fetchImpl } = mockFetch(() => json({ id: 1, number: "FV/1", token: "t" }, 201));
+  const client = createFakturowniaClient(config, fetchImpl);
+  await client.createInvoice(validInvoice);
+  await client.sendInvoiceByEmail("1", { emailTo: ["a@b.pl"], emailCc: [] });
+  await client.getInvoiceKsef("1");
+  assert.equal(calls.length, 3);
+  for (const call of calls) assert.equal(call.init.redirect, "error");
+});
+
+test("a rejected redirect (undici TypeError) is a SERVER error without the URL or token", async () => {
+  const { fetchImpl } = mockFetch((call) => {
+    throw new TypeError("fetch failed", { cause: new Error(`unexpected redirect ${call.url}?api_token=${TOKEN}`) });
+  });
+  const client = createFakturowniaClient(config, fetchImpl);
+  const ops: Array<() => Promise<unknown>> = [
+    () => client.createInvoice(validInvoice),
+    () => client.sendInvoiceByEmail("1", { emailTo: ["a@b.pl"], emailCc: [] }),
+    () => client.getInvoiceKsef("1"),
+  ];
+  for (const op of ops) {
+    await assert.rejects(op(), (err: unknown) => {
+      assert.ok(err instanceof FakturowniaError);
+      assert.equal(err.code, "SERVER");
+      assert.equal(err.message, "Nieoczekiwane przekierowanie z Fakturowni.");
+      assert.equal(err.message.includes(TOKEN), false);
+      assert.equal((err as { cause?: unknown }).cause, undefined);
+      return true;
+    });
+  }
+});
+
+test("a 3xx response is also reported as an unexpected redirect", async () => {
+  const { fetchImpl } = mockFetch(() => new Response(null, { status: 302 }));
+  const client = createFakturowniaClient(config, fetchImpl);
+  await assert.rejects(client.createInvoice(validInvoice), (err: unknown) => {
+    assert.ok(err instanceof FakturowniaError);
+    assert.equal(err.code, "SERVER");
+    assert.equal(err.message, "Nieoczekiwane przekierowanie z Fakturowni.");
+    return true;
+  });
+});
+
+test("sendInvoiceByEmail: de-duplicates case-insensitively and drops cc already in to", async () => {
+  const { calls, fetchImpl } = mockFetch(() => json({}, 200));
+  const client = createFakturowniaClient(config, fetchImpl);
+  await client.sendInvoiceByEmail("1", {
+    emailTo: [" A@b.pl ", "a@B.PL", "c@d.pl"],
+    emailCc: ["C@D.pl", "e@f.pl", "E@f.pl", ""],
+  });
+  assert.equal(calls[0].url, `https://izzy-test.fakturownia.pl/invoices/1/send_by_email.json?api_token=${TOKEN}&email_to=A%40b.pl,c%40d.pl&email_cc=e%40f.pl`);
+});
+
+test("sendInvoiceByEmail: caps to+cc at 5 addresses, to first", async () => {
+  const { calls, fetchImpl } = mockFetch(() => json({}, 200));
+  const client = createFakturowniaClient(config, fetchImpl);
+  await client.sendInvoiceByEmail("1", {
+    emailTo: ["1@x.pl", "2@x.pl", "3@x.pl"],
+    emailCc: ["4@x.pl", "5@x.pl", "6@x.pl"],
+  });
+  const query = new URL(calls[0].url).searchParams;
+  assert.equal(query.get("email_to"), "1@x.pl,2@x.pl,3@x.pl");
+  assert.equal(query.get("email_cc"), "4@x.pl,5@x.pl");
+
+  const many = mockFetch(() => json({}, 200));
+  await createFakturowniaClient(config, many.fetchImpl).sendInvoiceByEmail("1", {
+    emailTo: ["1@x.pl", "2@x.pl", "3@x.pl", "4@x.pl", "5@x.pl", "6@x.pl"],
+    emailCc: ["7@x.pl"],
+  });
+  const manyQuery = new URL(many.calls[0].url).searchParams;
+  assert.equal(manyQuery.get("email_to"), "1@x.pl,2@x.pl,3@x.pl,4@x.pl,5@x.pl");
+  assert.equal(manyQuery.get("email_cc"), null);
+});
+
+test("sendInvoiceByEmail: empty recipients throw VALIDATION without calling the API", async () => {
+  const { calls, fetchImpl } = mockFetch(() => json({}, 200));
+  const client = createFakturowniaClient(config, fetchImpl);
+  for (const emailTo of [[], ["  "], [""]]) {
+    await assert.rejects(client.sendInvoiceByEmail("1", { emailTo, emailCc: ["x@y.pl"] }), (err: unknown) => {
+      assert.ok(err instanceof FakturowniaError);
+      assert.equal(err.code, "VALIDATION");
+      return true;
+    });
+  }
+  assert.equal(calls.length, 0);
 });

@@ -5,22 +5,40 @@ export type FakturowniaConfig = {
   departmentId: number | null;
 };
 
+const loggedInvalidConfig = new Set<string>();
+
+function logInvalidConfig(field: string, value: string): void {
+  const key = `${field}:${value}`;
+  if (loggedInvalidConfig.has(key)) return;
+  loggedInvalidConfig.add(key);
+  // Field name only: the value may be (part of) a secret or mistyped credential.
+  console.error("[FAKTUROWNIA_CONFIG_INVALID]", { field });
+}
+
 /**
  * Reads Fakturownia settings from env; null when the domain or token is missing/blank, the domain is not a
  * bare subdomain (so the token can never be sent to another host), or FAKTUROWNIA_DEPARTMENT_ID is set but
- * invalid (fails closed rather than issuing invoices under the wrong department).
+ * invalid (fails closed rather than issuing invoices under the wrong department). A set-but-invalid domain
+ * or department id is logged once (field name only).
  */
 export function getFakturowniaConfig(env: Record<string, string | undefined> = process.env): FakturowniaConfig | null {
   const read = (name: string) => (env[name] ?? "").trim();
-  const domain = read("FAKTUROWNIA_DOMAIN");
+  const domain = read("FAKTUROWNIA_DOMAIN").toLowerCase();
   const apiToken = read("FAKTUROWNIA_API_TOKEN");
-  if (!domain || !apiToken || !/^[a-z0-9-]+$/.test(domain)) return null;
+  if (domain && !/^[a-z0-9-]+$/.test(domain)) {
+    logInvalidConfig("FAKTUROWNIA_DOMAIN", domain);
+    return null;
+  }
   const rawDepartment = read("FAKTUROWNIA_DEPARTMENT_ID");
   let departmentId: number | null = null;
   if (rawDepartment) {
     departmentId = /^\d+$/.test(rawDepartment) ? Number(rawDepartment) : NaN;
-    if (!Number.isSafeInteger(departmentId) || departmentId <= 0) return null;
+    if (!Number.isSafeInteger(departmentId) || departmentId <= 0) {
+      logInvalidConfig("FAKTUROWNIA_DEPARTMENT_ID", rawDepartment);
+      return null;
+    }
   }
+  if (!domain || !apiToken) return null;
   return { domain, apiToken, departmentId };
 }
 
@@ -116,7 +134,6 @@ export type InvoiceOrganizationInput = {
 export function buildInvoicePayload(
   order: InvoiceOrderInput,
   organization: InvoiceOrganizationInput,
-  _purchaserEmail: string,
   departmentId: number | null,
   issueDate: Date,
 ): FakturowniaInvoiceInput {
@@ -167,7 +184,38 @@ export type FakturowniaKsefInfo = {
 
 const REQUEST_TIMEOUT_MS = 20000;
 const MAX_MESSAGE_LENGTH = 500;
+const REDIRECT_MESSAGE = "Nieoczekiwane przekierowanie z Fakturowni.";
 const OID_PATTERN = /(^|[^a-z0-9])oid([^a-z0-9]|$)/i;
+
+const MAX_EMAIL_RECIPIENTS = 5;
+
+/** Trims and de-duplicates (case-insensitive), drops cc addresses already in to, caps to+cc at 5 (to first). */
+function normalizeRecipients(recipients: { emailTo: string[]; emailCc: string[] }): { emailTo: string[]; emailCc: string[] } {
+  const seen = new Set<string>();
+  const take = (list: string[], limit: number) => {
+    const out: string[] = [];
+    for (const raw of list) {
+      const address = raw.trim();
+      const key = address.toLowerCase();
+      if (!address || seen.has(key) || out.length >= limit) continue;
+      seen.add(key);
+      out.push(address);
+    }
+    return out;
+  };
+  const emailTo = take(recipients.emailTo, MAX_EMAIL_RECIPIENTS);
+  const emailCc = take(recipients.emailCc, MAX_EMAIL_RECIPIENTS - emailTo.length);
+  return { emailTo, emailCc };
+}
+
+/** Flattens strings, numbers, arrays and objects of those into a list of non-empty strings. */
+function flattenMessages(value: unknown): string[] {
+  if (typeof value === "string") return value.trim() ? [value] : [];
+  if (typeof value === "number" || typeof value === "boolean") return [String(value)];
+  if (Array.isArray(value)) return value.flatMap(flattenMessages);
+  if (value && typeof value === "object") return Object.values(value).flatMap(flattenMessages);
+  return [];
+}
 
 const asString = (value: unknown): string | null => (typeof value === "string" && value !== "" ? value : null);
 
@@ -182,11 +230,15 @@ export function createFakturowniaClient(config: FakturowniaConfig, fetchImpl: ty
   /** fetch with a hard timeout; timeouts and network failures surface as FakturowniaError without the URL. */
   async function send(url: string, init: RequestInit): Promise<Response> {
     try {
-      return await fetchImpl(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      return await fetchImpl(url, { ...init, redirect: "error", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
     } catch (err) {
       const name = (err as { name?: string } | null)?.name;
       if (name === "TimeoutError" || name === "AbortError") {
         throw new FakturowniaError("Fakturownia nie odpowiedziała w czasie.", { code: "TIMEOUT" });
+      }
+      const cause = (err as { cause?: { message?: string } } | null)?.cause;
+      if (/redirect/i.test(`${(err as Error | null)?.message ?? ""} ${cause?.message ?? ""}`)) {
+        throw new FakturowniaError(REDIRECT_MESSAGE, { code: "SERVER" });
       }
       throw new FakturowniaError("Fakturownia: błąd połączenia.", { code: "SERVER" });
     }
@@ -217,16 +269,20 @@ export function createFakturowniaClient(config: FakturowniaConfig, fetchImpl: ty
     return redact((out ?? "").trim()).slice(0, MAX_MESSAGE_LENGTH);
   }
 
-  async function failure(res: Response, fallback: string): Promise<FakturowniaError> {
+  /** Maps a non-ok response to an error. DUPLICATE_OID is only meaningful when issuing an invoice. */
+  async function failure(res: Response, fallback: string, detectDuplicateOid = false): Promise<FakturowniaError> {
     const text = await readText(res);
     const details = describeBody(text);
     const suffix = `(HTTP ${res.status})${details ? `: ${details}` : ""}`;
     const status = res.status;
+    if (status >= 300 && status < 400) return new FakturowniaError(REDIRECT_MESSAGE, { status, code: "SERVER" });
     if (status === 401 || status === 403) {
       return new FakturowniaError(`Fakturownia: odmowa dostępu, sprawdź token API ${suffix}`, { status, code: "AUTH" });
     }
+    // Throttling and request timeouts are transient: retryable like a server error.
+    if (status === 408 || status === 429) return new FakturowniaError(`${fallback} ${suffix}`, { status, code: "SERVER" });
     if (status >= 400 && status < 500) {
-      if (OID_PATTERN.test(text)) {
+      if (detectDuplicateOid && OID_PATTERN.test(text)) {
         return new FakturowniaError(`Fakturownia: faktura dla tego zamówienia (oid) już istnieje ${suffix}`, {
           status,
           code: "DUPLICATE_OID",
@@ -243,7 +299,7 @@ export function createFakturowniaClient(config: FakturowniaConfig, fetchImpl: ty
       headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify({ api_token: config.apiToken, invoice }),
     });
-    if (!res.ok) throw await failure(res, "Fakturownia: nie udało się wystawić faktury");
+    if (!res.ok) throw await failure(res, "Fakturownia: nie udało się wystawić faktury", true);
     const data = readJson(await readText(res));
     const id = typeof data?.id === "number" || typeof data?.id === "string" ? String(data.id) : null;
     const number = asString(data?.number);
@@ -255,9 +311,12 @@ export function createFakturowniaClient(config: FakturowniaConfig, fetchImpl: ty
   }
 
   async function sendInvoiceByEmail(id: string, recipients: { emailTo: string[]; emailCc: string[] }): Promise<void> {
-    const query = [`api_token=${encodeURIComponent(config.apiToken)}`];
-    if (recipients.emailTo.length > 0) query.push(`email_to=${recipients.emailTo.map(encodeURIComponent).join(",")}`);
-    if (recipients.emailCc.length > 0) query.push(`email_cc=${recipients.emailCc.map(encodeURIComponent).join(",")}`);
+    const { emailTo, emailCc } = normalizeRecipients(recipients);
+    if (emailTo.length === 0) {
+      throw new FakturowniaError("Fakturownia: brak adresata e-maila z fakturą.", { code: "VALIDATION" });
+    }
+    const query = [`api_token=${encodeURIComponent(config.apiToken)}`, `email_to=${emailTo.map(encodeURIComponent).join(",")}`];
+    if (emailCc.length > 0) query.push(`email_cc=${emailCc.map(encodeURIComponent).join(",")}`);
     const res = await send(`${baseUrl}/invoices/${encodeURIComponent(id)}/send_by_email.json?${query.join("&")}`, {
       method: "POST",
       headers: { Accept: "application/json" },
@@ -276,11 +335,7 @@ export function createFakturowniaClient(config: FakturowniaConfig, fetchImpl: ty
     const raw = readJson(await readText(res));
     const data = raw?.invoice && typeof raw.invoice === "object" ? raw.invoice : raw;
     const rawErrors: unknown = data?.gov_error_messages;
-    const errors = Array.isArray(rawErrors)
-      ? rawErrors.map((e) => (typeof e === "string" ? e : JSON.stringify(e)))
-      : asString(rawErrors)
-        ? [rawErrors as string]
-        : [];
+    const errors = flattenMessages(rawErrors);
     return {
       govStatus: asString(data?.gov_status),
       govId: asString(data?.gov_id),
