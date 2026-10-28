@@ -69,12 +69,10 @@ export default function NewReportPage() {
   const prepaidBalances = credits?.billingMode === "PREPAID" ? credits.balances : null;
   const valuationNoCredits = prepaidBalances !== null && prepaidBalances.VALUATION < 1;
   const claimDetailsNoCredits = prepaidBalances !== null && prepaidBalances.CLAIM_DETAILS < 1;
-  const effectiveValuation = includeValuation && !valuationNoCredits;
-  const effectiveClaimDetails = includeClaimDetails && !claimDetailsNoCredits;
 
-  useEffect(() => {
+  const loadCredits = () => {
     // A failed balance fetch must not block the form; the server still enforces credits.
-    fetch("/api/credits/balance")
+    return fetch("/api/credits/balance")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && (data.billingMode === "PREPAID" || data.billingMode === "UNLIMITED")) {
@@ -82,7 +80,23 @@ export default function NewReportPage() {
         }
       })
       .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadCredits();
   }, []);
+
+  // Keep the visible selection equal to what gets submitted: modules without credits are cleared.
+  // Depends on currentUser too, because the /api/auth/me defaults may arrive after the balance.
+  useEffect(() => {
+    if (!currentUser) return;
+    if (valuationNoCredits) {
+      setIncludeValuation(false);
+      // Claim check was only implied by valuation; drop it when the user may not order it alone.
+      if (!currentUser.canGenerateClaimCheck) setIncludeClaimCheck(false);
+    }
+    if (claimDetailsNoCredits) setIncludeClaimDetails(false);
+  }, [currentUser, valuationNoCredits, claimDetailsNoCredits]);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -128,7 +142,7 @@ export default function NewReportPage() {
   };
 
   const handleClaimCheckToggle = (val: boolean) => {
-    if (effectiveValuation) {
+    if (includeValuation) {
       // Locked when valuation is active
       return;
     }
@@ -162,22 +176,22 @@ export default function NewReportPage() {
       return;
     }
 
-    if (effectiveValuation && !canValuation) {
+    if (includeValuation && !canValuation) {
       setError("Brak uprawnień do generowania modułu wyceny.");
       return;
     }
 
-    if (includeClaimCheck && !effectiveValuation && !canClaimCheck) {
+    if (includeClaimCheck && !includeValuation && !canClaimCheck) {
       setError("Brak uprawnień do sprawdzania obecności wpisów szkód.");
       return;
     }
 
-    if (effectiveClaimDetails && !canClaimDetails) {
+    if (includeClaimDetails && !canClaimDetails) {
       setError("Brak uprawnień do pobierania szczegółowych danych szkód.");
       return;
     }
 
-    if (!effectiveValuation && !includeClaimCheck && !effectiveClaimDetails) {
+    if (!includeValuation && !includeClaimCheck && !includeClaimDetails) {
       setError("Wybierz co najmniej jeden moduł zapytania.");
       return;
     }
@@ -194,9 +208,9 @@ export default function NewReportPage() {
           mileage: mileage ? parseInt(mileage, 10) : undefined,
           valuationDate,
           modules: {
-            includeValuation: effectiveValuation,
+            includeValuation,
             includeClaimCheck,
-            includeClaimDetails: effectiveClaimDetails,
+            includeClaimDetails,
           },
         }),
       });
@@ -204,6 +218,7 @@ export default function NewReportPage() {
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Nie udało się wygenerować raportu.");
+        if (res.status === 402) await loadCredits();
       } else {
         router.push(`/reports/${data.reportId}`);
       }
@@ -337,7 +352,7 @@ export default function NewReportPage() {
               <input
                 type="checkbox"
                 disabled={!canValuation || valuationNoCredits}
-                checked={effectiveValuation}
+                checked={includeValuation}
                 onChange={(e) => handleValuationToggle(e.target.checked)}
                 className="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 disabled:opacity-40"
               />
@@ -360,16 +375,16 @@ export default function NewReportPage() {
             {/* Module 2 */}
             <label
               className={`flex items-start gap-4 rounded-xl border p-4 transition-colors ${
-                !canClaimCheck && !effectiveValuation
+                !canClaimCheck && !includeValuation
                   ? "border-slate-100 bg-slate-50/30 opacity-60 cursor-not-allowed dark:border-slate-850 dark:bg-slate-950/30"
-                  : effectiveValuation
+                  : includeValuation
                   ? "border-blue-200/60 bg-blue-50/30 dark:border-blue-900/40 dark:bg-blue-950/20 cursor-default"
                   : "border-slate-200 bg-slate-50/70 cursor-pointer hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:hover:border-slate-700"
               }`}
             >
               <input
                 type="checkbox"
-                disabled={effectiveValuation || !canClaimCheck}
+                disabled={includeValuation || !canClaimCheck}
                 checked={includeClaimCheck}
                 onChange={(e) => handleClaimCheckToggle(e.target.checked)}
                 className="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 disabled:opacity-40"
@@ -377,7 +392,7 @@ export default function NewReportPage() {
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold text-slate-900 dark:text-white">Sprawdzenie obecności historii szkód</span>
-                  {effectiveValuation ? (
+                  {includeValuation ? (
                     <span className="rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 border border-blue-500/20">
                       Dołączane automatycznie do wyceny pojazdu
                     </span>
@@ -404,7 +419,7 @@ export default function NewReportPage() {
               <input
                 type="checkbox"
                 disabled={!includeClaimCheck || !canClaimDetails || claimDetailsNoCredits}
-                checked={effectiveClaimDetails}
+                checked={includeClaimDetails}
                 onChange={(e) => setIncludeClaimDetails(e.target.checked)}
                 className="mt-1 h-4 w-4 rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 disabled:opacity-40"
               />
