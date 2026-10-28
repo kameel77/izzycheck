@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Minus, Plus, ShoppingCart } from "lucide-react";
+import { CheckCircle2, Loader2, Minus, Plus, ShoppingCart } from "lucide-react";
 import { CREDIT_TYPE_LABELS, formatCreditCount, formatGrosze } from "@/lib/billing/labels";
 import { MAX_LINE_QUANTITY, priceCart } from "@/lib/billing/pricing";
 
@@ -20,9 +20,25 @@ interface ShopPackage {
 interface PackagesResponse {
   packages: ShopPackage[];
   paymentsEnabled: boolean;
+  proformaEnabled?: boolean;
+}
+
+type PaymentMethod = "PAYU" | "PROFORMA";
+
+interface ProformaResult {
+  proformaNumber: string;
+  proformaPdfUrl: string | null;
+  proformaDueDate: string;
+  emailed: boolean;
 }
 
 const CREDIT_TYPE_ORDER: CreditType[] = ["VALUATION", "CLAIM_DETAILS"];
+
+/** YYYY-MM-DD to DD.MM.RRRR. */
+function formatDueDate(ymd: string): string {
+  const [year, month, day] = ymd.split("-");
+  return year && month && day ? `${day}.${month}.${year}` : ymd;
+}
 
 function clampQuantity(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -35,6 +51,8 @@ export default function CreditShop() {
   const [loadError, setLoadError] = useState(false);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [submittingMethod, setSubmittingMethod] = useState<PaymentMethod | null>(null);
+  const [proformaResult, setProformaResult] = useState<ProformaResult | null>(null);
   const [submitError, setSubmitError] = useState("");
   // The ref closes the gap between a click and the re-render that disables the button.
   const submittingRef = useRef(false);
@@ -68,6 +86,7 @@ export default function CreditShop() {
       if (event.persisted) {
         submittingRef.current = false;
         setSubmitting(false);
+        setSubmittingMethod(null);
       }
     };
     window.addEventListener("pageshow", onPageShow);
@@ -123,12 +142,13 @@ export default function CreditShop() {
     }
   };
 
-  const handlePay = async () => {
+  const handleOrder = async (paymentMethod: PaymentMethod) => {
     if (submittingRef.current || cartItems.length === 0) return;
     // The total the buyer is looking at; the server refuses the order when its own price differs.
     const displayedTotal = cart && !("error" in cart) ? cart.totalGrossGrosze : undefined;
     submittingRef.current = true;
     setSubmitting(true);
+    setSubmittingMethod(paymentMethod);
     setSubmitError("");
     try {
       const res = await fetch("/api/orders", {
@@ -136,11 +156,29 @@ export default function CreditShop() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           items: cartItems,
+          paymentMethod,
           ...(displayedTotal !== undefined ? { expectedTotalGrossGrosze: displayedTotal } : {}),
         }),
       });
       const json = await res.json().catch(() => ({}));
       if (res.status === 409) await refreshPackages();
+      if (paymentMethod === "PROFORMA") {
+        if (!res.ok || typeof json.proformaNumber !== "string" || typeof json.proformaDueDate !== "string") {
+          throw new Error(json.error || "Nie udało się utworzyć zamówienia.");
+        }
+        setProformaResult({
+          proformaNumber: json.proformaNumber,
+          proformaPdfUrl: typeof json.proformaPdfUrl === "string" ? json.proformaPdfUrl : null,
+          proformaDueDate: json.proformaDueDate,
+          emailed: json.emailed === true,
+        });
+        setQuantities({});
+        window.dispatchEvent(new Event("orders:changed"));
+        submittingRef.current = false;
+        setSubmitting(false);
+        setSubmittingMethod(null);
+        return;
+      }
       if (!res.ok || typeof json.redirectUri !== "string") {
         throw new Error(json.error || "Nie udało się utworzyć zamówienia.");
       }
@@ -149,6 +187,7 @@ export default function CreditShop() {
     } catch (err) {
       submittingRef.current = false;
       setSubmitting(false);
+      setSubmittingMethod(null);
       setSubmitError(err instanceof Error && err.message ? err.message : "Nie udało się utworzyć zamówienia.");
     }
   };
@@ -174,9 +213,49 @@ export default function CreditShop() {
   }
 
   const paymentsEnabled = data.paymentsEnabled;
+  const proformaEnabled = data.proformaEnabled === true;
+  const canOrder = paymentsEnabled || proformaEnabled;
   const cartError = cart && "error" in cart ? cart.error : null;
   const pricedCart = cart && !("error" in cart) ? cart : null;
   const vatRates = pricedCart ? Array.from(new Set(pricedCart.lines.map((l) => l.vatRate))) : [];
+
+  if (proformaResult) {
+    return (
+      <section className="space-y-5">
+        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-5 text-sm text-emerald-900 dark:text-emerald-200">
+          <p className="flex items-center gap-2 text-base font-bold">
+            <CheckCircle2 className="h-5 w-5" /> Proforma {proformaResult.proformaNumber} wystawiona
+          </p>
+          {proformaResult.proformaPdfUrl && (
+            <p className="mt-3">
+              <a
+                href={proformaResult.proformaPdfUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold underline"
+              >
+                Pobierz proformę (PDF)
+              </a>
+            </p>
+          )}
+          <p className="mt-3">Termin płatności: {formatDueDate(proformaResult.proformaDueDate)}</p>
+          <p className="mt-1">
+            {proformaResult.emailed
+              ? "Wysłaliśmy ją e-mailem na adres firmy."
+              : "Nie udało się jej wysłać e-mailem, pobierz PDF powyżej."}
+          </p>
+          <p className="mt-1">Kredyty pojawią się po zaksięgowaniu wpłaty.</p>
+          <button
+            type="button"
+            onClick={() => setProformaResult(null)}
+            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-500 transition-colors"
+          >
+            Nowe zamówienie
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-5">
@@ -186,7 +265,9 @@ export default function CreditShop() {
 
       {!paymentsEnabled && (
         <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 text-sm text-blue-800 dark:text-blue-200">
-          Płatności online są chwilowo niedostępne. Skontaktuj się z opiekunem Izzy Lease.
+          {proformaEnabled
+            ? "Płatności online są chwilowo niedostępne. Możesz zamówić proformę."
+            : "Płatności online są chwilowo niedostępne. Skontaktuj się z opiekunem Izzy Lease."}
         </div>
       )}
 
@@ -245,7 +326,7 @@ export default function CreditShop() {
                         type="button"
                         aria-label={`Zmniejsz ilość: ${pkg.name}`}
                         onClick={() => setQuantity(pkg.id, quantity - 1)}
-                        disabled={quantity <= 0 || submitting || !paymentsEnabled}
+                        disabled={quantity <= 0 || submitting || !canOrder}
                         className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-40 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700 transition-colors"
                       >
                         <Minus className="h-4 w-4" />
@@ -257,7 +338,7 @@ export default function CreditShop() {
                         max={MAX_LINE_QUANTITY}
                         aria-label={`Ilość: ${pkg.name}`}
                         value={quantity}
-                        disabled={submitting || !paymentsEnabled}
+                        disabled={submitting || !canOrder}
                         onChange={(e) => setQuantity(pkg.id, e.target.valueAsNumber)}
                         className="h-9 w-16 rounded-xl border border-slate-200 bg-white text-center text-sm font-semibold text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                       />
@@ -265,7 +346,7 @@ export default function CreditShop() {
                         type="button"
                         aria-label={`Zwiększ ilość: ${pkg.name}`}
                         onClick={() => setQuantity(pkg.id, quantity + 1)}
-                        disabled={quantity >= MAX_LINE_QUANTITY || submitting || !paymentsEnabled}
+                        disabled={quantity >= MAX_LINE_QUANTITY || submitting || !canOrder}
                         className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-40 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700 transition-colors"
                       >
                         <Plus className="h-4 w-4" />
@@ -279,7 +360,7 @@ export default function CreditShop() {
         );
       })}
 
-      {paymentsEnabled && (pricedCart || cartError) && (
+      {canOrder && (pricedCart || cartError) && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Podsumowanie
@@ -314,17 +395,34 @@ export default function CreditShop() {
             </>
           )}
 
-          {paymentsEnabled && (
-            <button
-              type="button"
-              onClick={handlePay}
-              disabled={submitting || !pricedCart}
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-500 disabled:opacity-50 transition-colors"
-            >
-              {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              Zapłać online
-            </button>
-          )}
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            {paymentsEnabled && (
+              <button
+                type="button"
+                onClick={() => handleOrder("PAYU")}
+                disabled={submitting || !pricedCart}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-500 disabled:opacity-50 transition-colors"
+              >
+                {submittingMethod === "PAYU" && <Loader2 className="h-4 w-4 animate-spin" />}
+                Zapłać online
+              </button>
+            )}
+            {proformaEnabled && (
+              <button
+                type="button"
+                onClick={() => handleOrder("PROFORMA")}
+                disabled={submitting || !pricedCart}
+                className={
+                  paymentsEnabled
+                    ? "inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:hover:bg-slate-800 transition-colors"
+                    : "inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-blue-500/20 hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                }
+              >
+                {submittingMethod === "PROFORMA" && <Loader2 className="h-4 w-4 animate-spin" />}
+                Zamów proformę
+              </button>
+            )}
+          </div>
           {submitError && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{submitError}</p>}
         </div>
       )}

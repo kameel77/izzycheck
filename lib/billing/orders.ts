@@ -8,7 +8,7 @@
  */
 import type { CreditType, OrderStatus, PrismaClient } from "@prisma/client";
 import { addCredits, isPrepaid } from "./credits.ts";
-import { priceCart, type CartPackage } from "./pricing.ts";
+import { priceCart, type CartPackage, type PricedCart } from "./pricing.ts";
 import { parsePayuSignatureHeader, verifyPayuSignature, type createPayuClient } from "../payments/payu.ts";
 
 export type PayuClientLike = Pick<ReturnType<typeof createPayuClient>, "createOrder" | "getOrder">;
@@ -28,21 +28,34 @@ export class CheckoutError extends Error {
   }
 }
 
-export async function createCheckout(
+export type PreparedOrder = {
+  organizationId: string;
+  organization: {
+    name: string;
+    nip: string;
+    street: string;
+    postalCode: string;
+    city: string;
+    country: string;
+    billingEmail: string;
+  };
+  priced: Exclude<PricedCart, { error: string }>;
+};
+
+/**
+ * Everything both payment paths check before an order row exists: prepaid organization with complete company
+ * data, prices from the database, the amount limit and the total the buyer saw. Throws CheckoutError.
+ */
+export async function prepareOrder(
   db: PrismaClient,
   args: {
-    user: { id: string; email: string; name: string; organizationId: string | null };
+    user: { organizationId: string | null };
     items: Array<{ packageId: string; quantity: number }>;
-    customerIp: string;
-    payu: PayuClientLike;
-    appUrl: string;
-    /** True when PayU runs against its sandbox; recorded on the order so test payments are recognizable. */
-    sandbox: boolean;
-    /** Gross total the buyer saw; when it differs from the freshly priced cart the checkout is refused. */
+    /** Gross total the buyer saw; when it differs from the freshly priced cart the order is refused. */
     expectedTotalGrossGrosze?: number;
   },
-): Promise<{ orderId: string; redirectUri: string }> {
-  const { user, items, customerIp, payu, appUrl, sandbox, expectedTotalGrossGrosze } = args;
+): Promise<PreparedOrder> {
+  const { user, items, expectedTotalGrossGrosze } = args;
 
   const organization = user.organizationId
     ? await db.organization.findUnique({
@@ -50,10 +63,12 @@ export async function createCheckout(
         select: {
           billingMode: true,
           isActive: true,
+          name: true,
           nip: true,
           street: true,
           postalCode: true,
           city: true,
+          country: true,
           billingEmail: true,
         },
       })
@@ -98,10 +113,43 @@ export async function createCheckout(
     throw new CheckoutError(409, "Ceny zostały zaktualizowane. Sprawdź podsumowanie i spróbuj ponownie.");
   }
 
+  return {
+    organizationId: user.organizationId,
+    organization: {
+      name: organization.name,
+      nip: organization.nip,
+      street: organization.street,
+      postalCode: organization.postalCode,
+      city: organization.city,
+      country: organization.country,
+      billingEmail: organization.billingEmail,
+    },
+    priced,
+  };
+}
+
+export async function createCheckout(
+  db: PrismaClient,
+  args: {
+    user: { id: string; email: string; name: string; organizationId: string | null };
+    items: Array<{ packageId: string; quantity: number }>;
+    customerIp: string;
+    payu: PayuClientLike;
+    appUrl: string;
+    /** True when PayU runs against its sandbox; recorded on the order so test payments are recognizable. */
+    sandbox: boolean;
+    /** Gross total the buyer saw; when it differs from the freshly priced cart the checkout is refused. */
+    expectedTotalGrossGrosze?: number;
+  },
+): Promise<{ orderId: string; redirectUri: string }> {
+  const { user, items, customerIp, payu, appUrl, sandbox, expectedTotalGrossGrosze } = args;
+
+  const { organizationId, priced } = await prepareOrder(db, { user, items, expectedTotalGrossGrosze });
+
   // Nested create: the order and its lines are written atomically.
   const order = await db.order.create({
     data: {
-      organizationId: user.organizationId,
+      organizationId,
       userId: user.id,
       status: "PENDING_PAYMENT",
       paymentMethod: "PAYU",

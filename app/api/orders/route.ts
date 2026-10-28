@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getCurrentUser, getFreshUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { CheckoutError, createCheckout } from "@/lib/billing/orders";
+import { createProformaOrder } from "@/lib/billing/proforma";
+import { getFakturowniaConfig, getSharedFakturowniaClient } from "@/lib/invoices/fakturownia";
 import { getPayuConfig, getSharedPayuClient } from "@/lib/payments/payu";
 import { isRateLimited } from "@/lib/rate-limit";
 import { sharedPdfUrlBuilder, withCustomerInvoice } from "@/lib/invoices/views";
@@ -40,9 +42,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Konto użytkownika jest nieaktywne lub nie istnieje." }, { status: 401 });
     }
 
+    let body: unknown;
+    let bodyParsed = true;
+    try {
+      body = await request.json();
+    } catch {
+      bodyParsed = false;
+    }
+
+    // Absent means PayU, as before the proforma existed.
+    const rawMethod = bodyParsed ? (body as { paymentMethod?: unknown } | null)?.paymentMethod : undefined;
+    if (rawMethod !== undefined && rawMethod !== null && rawMethod !== "PAYU" && rawMethod !== "PROFORMA") {
+      return NextResponse.json({ error: "Nieprawidłowe dane zamówienia." }, { status: 400 });
+    }
+    const paymentMethod = rawMethod === "PROFORMA" ? "PROFORMA" : "PAYU";
+
     const config = getPayuConfig();
     const payu = getSharedPayuClient();
-    if (!config || !payu) {
+    const fakturownia = getSharedFakturowniaClient();
+    if (paymentMethod === "PROFORMA") {
+      if (!fakturownia) {
+        return NextResponse.json({ error: "Proformy są chwilowo niedostępne." }, { status: 503 });
+      }
+    } else if (!config || !payu) {
       return NextResponse.json({ error: "Płatności online są chwilowo niedostępne." }, { status: 503 });
     }
 
@@ -54,10 +76,7 @@ export async function POST(request: Request) {
       );
     }
 
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
+    if (!bodyParsed) {
       return NextResponse.json({ error: "Nieprawidłowe dane zamówienia." }, { status: 400 });
     }
     const items = (body as { items?: unknown } | null)?.items;
@@ -68,9 +87,54 @@ export async function POST(request: Request) {
     if (expected !== undefined && expected !== null && !Number.isInteger(expected)) {
       return NextResponse.json({ error: "Nieprawidłowe dane zamówienia." }, { status: 400 });
     }
+    const expectedTotalGrossGrosze = typeof expected === "number" ? expected : undefined;
+
+    const recordAudit = async (orderId: string) => {
+      try {
+        await prisma.auditEvent.create({
+          data: {
+            userId: freshUser.id,
+            userEmail: freshUser.email,
+            action: "CREATE_ORDER",
+            resource: `Order:${orderId}`,
+            metadataJson: JSON.stringify({ orderId, lines: items.length, paymentMethod }),
+          },
+        });
+      } catch (auditError) {
+        // The order already exists; a failed audit entry must not hide the result from the buyer.
+        console.error("[ORDERS_POST_AUDIT_ERROR]", auditError);
+      }
+    };
+
+    if (paymentMethod === "PROFORMA" && fakturownia) {
+      const created = await createProformaOrder(prisma, {
+        user: { id: freshUser.id, email: freshUser.email, organizationId: freshUser.organizationId },
+        items: items as Array<{ packageId: string; quantity: number }>,
+        expectedTotalGrossGrosze,
+        fakturownia,
+        departmentId: getFakturowniaConfig()?.departmentId ?? null,
+      });
+      await recordAudit(created.orderId);
+      // The token never leaves the server; the customer gets the ready PDF link.
+      return NextResponse.json(
+        {
+          orderId: created.orderId,
+          proformaNumber: created.proformaNumber,
+          proformaPdfUrl: sharedPdfUrlBuilder()(created.proformaToken),
+          proformaDueDate: created.proformaDueDate,
+          emailed: created.emailed,
+        },
+        { status: 201 },
+      );
+    }
 
     const forwarded = request.headers.get("x-forwarded-for");
     const customerIp = forwarded?.split(",")[0].trim() || "127.0.0.1";
+
+    // Narrowing only: the PayU path was verified as configured above.
+    if (!config || !payu) {
+      return NextResponse.json({ error: "Płatności online są chwilowo niedostępne." }, { status: 503 });
+    }
 
     const { orderId, redirectUri } = await createCheckout(prisma, {
       user: {
@@ -84,23 +148,11 @@ export async function POST(request: Request) {
       payu,
       appUrl: config.appUrl,
       sandbox: config.isSandbox,
-      expectedTotalGrossGrosze: typeof expected === "number" ? expected : undefined,
+      expectedTotalGrossGrosze,
     });
 
-    try {
-      await prisma.auditEvent.create({
-        data: {
-          userId: freshUser.id,
-          userEmail: freshUser.email,
-          action: "CREATE_ORDER",
-          resource: `Order:${orderId}`,
-          metadataJson: JSON.stringify({ orderId, lines: items.length }),
-        },
-      });
-    } catch (auditError) {
-      // The order already exists at PayU; a failed audit entry must not hide the payment link.
-      console.error("[ORDERS_POST_AUDIT_ERROR]", auditError);
-    }
+    // The order already exists at PayU; recordAudit never throws, so a failed audit entry cannot hide the payment link.
+    await recordAudit(orderId);
 
     return NextResponse.json({ orderId, redirectUri }, { status: 201 });
   } catch (error) {
