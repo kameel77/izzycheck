@@ -148,7 +148,7 @@ Przebieg ma łączny budżet 45 s: po jego wyczerpaniu nie startuje nowych jedno
 
 ### Proformy
 
-Faktura proforma to płatność przelewem dla zamówień, których klient nie chce opłacać przez PayU. Wymaga skonfigurowanej Fakturowni (te same zmienne co faktury, żadnych nowych): bez niej przycisk „Zamów proformę” jest ukryty, a `POST /api/orders` z metodą `PROFORMA` zwraca 503.
+Faktura proforma to płatność przelewem dla zamówień, których klient nie chce opłacać przez PayU. Wymaga skonfigurowanej Fakturowni (te same zmienne co faktury) oraz jawnego włącznika `PROFORMA_ENABLED="true"` (domyślnie wyłączony). Gdy któregoś brakuje, przycisk „Zamów proformę” jest ukryty, a `POST /api/orders` z metodą `PROFORMA` zwraca 503. Włącz dopiero po sprawdzeniu punktów z „Do potwierdzenia” na prawdziwym koncie Fakturowni. Włącznik dotyczy tylko nowych zamówień: oznaczanie wpłaty i anulowanie istniejących zamówień z proformą działa niezależnie od niego.
 
 **Przepływ klienta:** na **/credits** klient wybiera pakiety i klika „Zamów proformę”. Aplikacja od razu wystawia w Fakturowni dokument typu proforma (forma płatności: przelew, termin 14 dni od dnia wystawienia). PDF proformy jest w historii zamówień (numer, „Pobierz proformę” i termin płatności), a Fakturownia wysyła go e-mailem na adres do faktur organizacji, z osobą zamawiającą w kopii (gdy jej adres jest inny). Jeśli wystawienie w Fakturowni się nie uda, zamówienie dostaje status „Nieudane”, a klient może spróbować jeszcze raz. Nieudana wysyłka e-maila nie psuje zamówienia (PDF jest w aplikacji); admin widzi wtedy plakietkę „Proforma niewysłana e-mailem”. Po upływie 14 dni klient widzi „Wygasło”; zamówienie nie zmienia statusu.
 
@@ -171,6 +171,7 @@ Faktura proforma to płatność przelewem dla zamówień, których klient nie ch
   - seria numeracji proform,
   - numer konta bankowego widoczny na PDF proformy,
   - `payment_to` (termin płatności) widoczny na proformie.
+  - czy Fakturownia wysyła proformę e-mailem na koncie z włączonym KSeF.
 
 ### Lista kontrolna wdrożenia
 

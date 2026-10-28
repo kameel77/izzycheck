@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser, getFreshUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { CheckoutError, createCheckout } from "@/lib/billing/orders";
-import { createProformaOrder } from "@/lib/billing/proforma";
+import { createProformaOrder, isProformaEnabled } from "@/lib/billing/proforma";
 import { getFakturowniaConfig, getSharedFakturowniaClient } from "@/lib/invoices/fakturownia";
 import { getPayuConfig, getSharedPayuClient } from "@/lib/payments/payu";
 import { isRateLimited } from "@/lib/rate-limit";
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
     const payu = getSharedPayuClient();
     const fakturownia = getSharedFakturowniaClient();
     if (paymentMethod === "PROFORMA") {
-      if (!fakturownia) {
+      if (!isProformaEnabled() || !fakturownia) {
         return NextResponse.json({ error: "Proformy są chwilowo niedostępne." }, { status: 503 });
       }
     } else if (!config || !payu) {

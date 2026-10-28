@@ -7,12 +7,21 @@
  * (markProformaPaid books the credits exactly once and queues the VAT invoice) or cancels the order.
  */
 import type { OrderStatus, PrismaClient } from "@prisma/client";
-import { buildProformaPayload } from "../invoices/fakturownia.ts";
+import { buildProformaPayload, getFakturowniaConfig } from "../invoices/fakturownia.ts";
 import type { FakturowniaClient } from "../invoices/fakturownia.ts";
 import { CheckoutError, bookOrderCredits, prepareOrder } from "./orders.ts";
 import { PROFORMA_VALIDITY_DAYS, addDaysToDate, isValidYmd, warsawDate, ymdToDbDate } from "./proforma-dates.ts";
 
 export type ProformaFakturowniaClient = Pick<FakturowniaClient, "createProforma" | "sendInvoiceByEmail">;
+
+/**
+ * Release gate for ordering proformas: PROFORMA_ENABLED must be exactly "true" (trimmed) AND Fakturownia must be
+ * configured. Read at call time. It only guards new orders: marking paid / canceling existing proforma orders
+ * keeps working when it is off.
+ */
+export function isProformaEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return (env.PROFORMA_ENABLED ?? "").trim() === "true" && getFakturowniaConfig(env) !== null;
+}
 
 const PROFORMA_CREATE_FAILED = "Nie udało się wystawić proformy. Spróbuj ponownie.";
 

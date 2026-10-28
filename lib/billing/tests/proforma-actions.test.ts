@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { parseOrderPaymentAction } from "../proforma.ts";
+import { isProformaEnabled, parseOrderPaymentAction } from "../proforma.ts";
 
 describe("parseOrderPaymentAction", () => {
   test("markPaid: date and trimmed note", () => {
@@ -51,6 +51,46 @@ describe("parseOrderPaymentAction", () => {
   test("unknown action and non-object bodies are refused", () => {
     for (const body of [{ action: "refund" }, {}, null, undefined, "markPaid", 5, []]) {
       assert.deepEqual(parseOrderPaymentAction(body), { ok: false, error: "Nieprawidłowa akcja." });
+    }
+  });
+});
+
+describe("isProformaEnabled", () => {
+  const fakturownia = { FAKTUROWNIA_DOMAIN: "mojafirma", FAKTUROWNIA_API_TOKEN: "token" };
+
+  test("off when the switch is unset, empty or anything but true", () => {
+    assert.equal(isProformaEnabled({ ...fakturownia }), false);
+    assert.equal(isProformaEnabled({ ...fakturownia, PROFORMA_ENABLED: "" }), false);
+    assert.equal(isProformaEnabled({ ...fakturownia, PROFORMA_ENABLED: "false" }), false);
+    assert.equal(isProformaEnabled({ ...fakturownia, PROFORMA_ENABLED: "1" }), false);
+    assert.equal(isProformaEnabled({ ...fakturownia, PROFORMA_ENABLED: "TRUE" }), false);
+  });
+
+  test("on for true (trimmed) when Fakturownia is configured", () => {
+    assert.equal(isProformaEnabled({ ...fakturownia, PROFORMA_ENABLED: "true" }), true);
+    assert.equal(isProformaEnabled({ ...fakturownia, PROFORMA_ENABLED: " true " }), true);
+  });
+
+  test("off when the switch is true but Fakturownia is not configured", () => {
+    assert.equal(isProformaEnabled({ PROFORMA_ENABLED: "true" }), false);
+    assert.equal(isProformaEnabled({ PROFORMA_ENABLED: "true", FAKTUROWNIA_DOMAIN: "mojafirma" }), false);
+    assert.equal(isProformaEnabled({ PROFORMA_ENABLED: "true", FAKTUROWNIA_DOMAIN: "a.b.c", FAKTUROWNIA_API_TOKEN: "token" }), false);
+  });
+
+  test("reads process.env at call time by default", () => {
+    const saved = { ...process.env };
+    try {
+      process.env.FAKTUROWNIA_DOMAIN = "mojafirma";
+      process.env.FAKTUROWNIA_API_TOKEN = "token";
+      delete process.env.PROFORMA_ENABLED;
+      assert.equal(isProformaEnabled(), false);
+      process.env.PROFORMA_ENABLED = "true";
+      assert.equal(isProformaEnabled(), true);
+    } finally {
+      for (const key of ["FAKTUROWNIA_DOMAIN", "FAKTUROWNIA_API_TOKEN", "PROFORMA_ENABLED"]) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
     }
   });
 });

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { isPrepaid } from "@/lib/billing/credits";
 import { isPaymentsConfigured } from "@/lib/billing/payments-config";
 import { unitGrossFromNet } from "@/lib/billing/pricing";
-import { getFakturowniaConfig } from "@/lib/invoices/fakturownia";
+import { isProformaEnabled } from "@/lib/billing/proforma";
 
 export async function GET() {
   try {
@@ -41,7 +41,7 @@ export async function GET() {
     return NextResponse.json({
       packages: packages.map((p) => ({ ...p, unitGrossGrosze: unitGrossFromNet(p.priceNetGrosze, p.vatRate) })),
       paymentsEnabled: isPaymentsConfigured(),
-      proformaEnabled: getFakturowniaConfig() !== null,
+      proformaEnabled: isProformaEnabled(),
     });
   } catch (error) {
     console.error("[CREDIT_PACKAGES_GET_ERROR]", error);
