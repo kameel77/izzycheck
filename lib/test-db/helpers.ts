@@ -6,6 +6,10 @@ import {
   type ReportModuleId,
   type Role,
 } from "@prisma/client";
+import { assertTestDatabaseUrl } from "./guard.ts";
+
+// Przed utworzeniem klienta: resetDb() robi TRUNCATE, nigdy na bazie innej niż *_test.
+assertTestDatabaseUrl(process.env.DATABASE_URL);
 
 export const testPrisma = new PrismaClient();
 
