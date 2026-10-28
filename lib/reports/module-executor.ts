@@ -39,6 +39,18 @@ export class ModuleExecutionError extends Error {
   }
 }
 
+/** Internal sentinel: the final status write matched no RUNNING row, so another execution owns or finished the module. */
+class ModuleTakenOverError extends Error {
+  constructor() {
+    super("Moduł został przejęty przez inne żądanie.");
+    this.name = "ModuleTakenOverError";
+  }
+}
+
+function takenOverError(): ModuleExecutionError {
+  return new ModuleExecutionError("Moduł został przejęty przez inne żądanie.", 409);
+}
+
 // Same env parsing/defaults as the Audatex adapters (cleanEnv + parseInt).
 function parseAdapterEnvInt(raw: string | undefined, defaultVal: number): number {
   const cleaned = raw ? raw.trim().replace(/^["']|["']$/g, "") : "";
@@ -296,6 +308,25 @@ export async function executeReportModule(
   };
   const hasCreditOps = Boolean(creditType && organization);
 
+  // Final status write + credit settlement in one transaction. The write is conditional on status RUNNING: a
+  // stale execution whose lock was taken over (and possibly finished) by another request must not overwrite the
+  // result or settle credit. count === 0 rolls the whole transaction back via the sentinel.
+  const settleModule = async (
+    data: Record<string, unknown>,
+    chargeable: boolean,
+    extra?: (tx: any) => Promise<void>
+  ) => {
+    await db.$transaction(async (tx: any) => {
+      const { count } = await tx.reportModuleResult.updateMany({
+        where: { id: targetModule.id, status: "RUNNING" },
+        data,
+      });
+      if (count === 0) throw new ModuleTakenOverError();
+      if (extra) await extra(tx);
+      if (hasCreditOps) await settleCredit(tx, chargeable);
+    });
+  };
+
   // 6. Execute Specific Module Logic
   let executionSuccess = false;
   let executedStatus: "SUCCEEDED" | "NO_DATA" | "FAILED" = "FAILED";
@@ -344,58 +375,30 @@ export async function executeReportModule(
         },
       });
 
-      executedStatus = "SUCCEEDED";
-      executionSuccess = true;
-
-      const valuationUpdate = {
-        where: { id: targetModule.id },
-        data: {
+      await settleModule(
+        {
           status: "SUCCEEDED",
           isNonRetryable: false,
           errorMessage: null,
           responseMetadata: JSON.stringify({ ibsCode: valRes.ibsCode, make: valRes.make, model: valRes.model }),
         },
-      };
-      if (hasCreditOps) {
-        await db.$transaction(async (tx: any) => {
-          await tx.reportModuleResult.update(valuationUpdate);
-          await settleCredit(tx, true);
-        });
-      } else {
-        await db.reportModuleResult.update(valuationUpdate);
-      }
+        true
+      );
+      executedStatus = "SUCCEEDED";
+      executionSuccess = true;
     } else if (moduleId === "CLAIM_CHECK") {
       const checkRes = await histAdapter.checkClaimHistory({
         vin: report.vin,
         firstRegistration: report.firstRegistrationDate,
       });
 
-      executedStatus = checkRes.hasHistory ? "SUCCEEDED" : "NO_DATA";
-      executionSuccess = true;
-
-      // Cascade Invalidation on CLAIM_CHECK execution/retry (D-6):
-      // Clean up previous damage claims if any exist
-      await db.damageClaim.deleteMany({ where: { reportId: report.id } });
-
-      // Update or reset dependent CLAIM_DETAILS module
+      const checkStatus = checkRes.hasHistory ? "SUCCEEDED" : "NO_DATA";
       const detailsModule = report.moduleResults.find((m: any) => m.moduleId === "CLAIM_DETAILS");
-      if (detailsModule && detailsModule.status !== "NOT_REQUESTED") {
-        await db.reportModuleResult.update({
-          where: { id: detailsModule.id },
-          data: {
-            status: checkRes.hasHistory ? "PENDING" : "NO_DATA",
-            errorMessage: null,
-            responseMetadata: checkRes.hasHistory
-              ? null
-              : JSON.stringify({ message: "Brak historii szkód w CLAIM_CHECK (getDetails pominięty)" }),
-          },
-        });
-      }
 
-      await db.reportModuleResult.update({
-        where: { id: targetModule.id },
-        data: {
-          status: executedStatus,
+      // Guarded status write first; the cascade below only runs if this execution still owns the module.
+      await settleModule(
+        {
+          status: checkStatus,
           isNonRetryable: false,
           errorMessage: null,
           responseMetadata: JSON.stringify({
@@ -404,7 +407,29 @@ export async function executeReportModule(
             advice: checkRes.advice,
           }),
         },
-      });
+        false,
+        async (tx: any) => {
+          // Cascade Invalidation on CLAIM_CHECK execution/retry (D-6):
+          // Clean up previous damage claims if any exist
+          await tx.damageClaim.deleteMany({ where: { reportId: report.id } });
+
+          // Update or reset dependent CLAIM_DETAILS module
+          if (detailsModule && detailsModule.status !== "NOT_REQUESTED") {
+            await tx.reportModuleResult.update({
+              where: { id: detailsModule.id },
+              data: {
+                status: checkRes.hasHistory ? "PENDING" : "NO_DATA",
+                errorMessage: null,
+                responseMetadata: checkRes.hasHistory
+                  ? null
+                  : JSON.stringify({ message: "Brak historii szkód w CLAIM_CHECK (getDetails pominięty)" }),
+              },
+            });
+          }
+        }
+      );
+      executedStatus = checkStatus;
+      executionSuccess = true;
     } else if (moduleId === "CLAIM_DETAILS") {
       const detailsRes = await histAdapter.getClaimDetails({
         vin: report.vin,
@@ -436,47 +461,37 @@ export async function executeReportModule(
         });
       }
 
-      executedStatus = "SUCCEEDED";
-      executionSuccess = true;
-
-      const detailsUpdate = {
-        where: { id: targetModule.id },
-        data: {
+      // Zero claims is a free result: the reservation is released instead of captured.
+      await settleModule(
+        {
           status: "SUCCEEDED",
           isNonRetryable: false,
           errorMessage: null,
           responseMetadata: JSON.stringify({ claimsCount: detailsRes.claims.length }),
         },
-      };
-      if (hasCreditOps) {
-        await db.$transaction(async (tx: any) => {
-          await tx.reportModuleResult.update(detailsUpdate);
-          // Zero claims is a free result: the reservation is released instead of captured.
-          await settleCredit(tx, detailsRes.claims.length > 0);
-        });
-      } else {
-        await db.reportModuleResult.update(detailsUpdate);
-      }
+        detailsRes.claims.length > 0
+      );
+      executedStatus = "SUCCEEDED";
+      executionSuccess = true;
     }
   } catch (err: any) {
+    if (err instanceof ModuleTakenOverError) throw takenOverError();
+
     executionError = err;
     const isNonRetryable = err instanceof NonRetryableError || Boolean(err.isNonRetryable);
 
-    const failureUpdate = {
-      where: { id: targetModule.id },
-      data: {
-        status: "FAILED",
-        isNonRetryable,
-        errorMessage: err.message || "Błąd wykonania modułu Audatex.",
-      },
-    };
-    if (hasCreditOps) {
-      await db.$transaction(async (tx: any) => {
-        await tx.reportModuleResult.update(failureUpdate);
-        await settleCredit(tx, false);
-      });
-    } else {
-      await db.reportModuleResult.update(failureUpdate);
+    try {
+      await settleModule(
+        {
+          status: "FAILED",
+          isNonRetryable,
+          errorMessage: err.message || "Błąd wykonania modułu Audatex.",
+        },
+        false
+      );
+    } catch (settleErr: any) {
+      if (settleErr instanceof ModuleTakenOverError) throw takenOverError();
+      throw settleErr;
     }
   }
 

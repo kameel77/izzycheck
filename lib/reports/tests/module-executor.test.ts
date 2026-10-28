@@ -322,7 +322,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
         role: "ADMIN",
       });
       assert.strictEqual(res.success, true);
-      assert.strictEqual(calls.updateMany, 1);
+      assert.strictEqual(calls.updateMany, 2, "lock + guarded final write");
     });
 
     test("Owner OPERATOR proceeds", async () => {
@@ -334,7 +334,7 @@ describe("Module Executor, Concurrency Lock & Server-Side Dependencies", () => {
         role: "OPERATOR",
       });
       assert.strictEqual(res.success, true);
-      assert.strictEqual(calls.updateMany, 1);
+      assert.strictEqual(calls.updateMany, 2, "lock + guarded final write");
     });
   });
 

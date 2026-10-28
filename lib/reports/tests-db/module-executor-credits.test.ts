@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
-import { executeReportModule, ModuleExecutionError } from "../module-executor.ts";
+import { executeReportModule, ModuleExecutionError, STALE_LOCK_MS } from "../module-executor.ts";
 import { createOrg, createReport, createUser, resetDb, setBalance, testPrisma } from "../../test-db/helpers.ts";
 
 beforeEach(async () => {
@@ -283,4 +283,121 @@ test("CLAIM_CHECK is free on PREPAID", async () => {
 
   assert.equal(await testPrisma.creditHold.count(), 0);
   assert.equal(await testPrisma.creditLedgerEntry.count(), 0);
+});
+
+/** Adapter whose call stays pending until release() is called; started resolves once evaluateVehicle was entered. */
+function makeGatedValuationAdapter(outcome: "succeed" | "fail") {
+  let release!: () => void;
+  let markStarted!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  return {
+    release,
+    started,
+    adapter: {
+      evaluateVehicle: async () => {
+        markStarted();
+        await gate;
+        if (outcome === "fail") throw new Error("Audatex niedostępny (późna awaria)");
+        return valuationResult();
+      },
+    },
+  };
+}
+
+/** Makes the running module and its hold look older than STALE_LOCK_MS, so the next execution takes over. */
+async function makeLockStale(reportId: string) {
+  const old = new Date(Date.now() - STALE_LOCK_MS - 5000);
+  await testPrisma.$executeRaw`UPDATE report_module_results SET "updatedAt" = ${old} WHERE "reportId" = ${reportId} AND "moduleId" = 'VALUATION'`;
+  await testPrisma.$executeRaw`UPDATE credit_holds SET "updatedAt" = ${old} WHERE "reportId" = ${reportId}`;
+}
+
+async function ledgerAmounts(organizationId: string): Promise<number[]> {
+  const entries = await testPrisma.creditLedgerEntry.findMany({ where: { organizationId } });
+  return entries.map((e) => e.amount);
+}
+
+test("late failure after takeover does not overwrite a succeeded module", async () => {
+  const { org, user, report } = await setupValuation({ balance: 1 });
+  const slow = makeGatedValuationAdapter("fail");
+  const fast = makeValuationAdapter();
+
+  const first = executeReportModule(
+    report.id,
+    "VALUATION",
+    runOptions(user.id, { customValuationAdapter: slow.adapter }),
+  );
+  const firstSettled = first.then(
+    () => ({ ok: true as const }),
+    (error: any) => ({ ok: false as const, error }),
+  );
+  await slow.started;
+  await makeLockStale(report.id);
+
+  const second = await executeReportModule(
+    report.id,
+    "VALUATION",
+    runOptions(user.id, { customValuationAdapter: fast.adapter }),
+  );
+  assert.equal(second.success, true);
+  assert.equal(await readBalance(org.id, "VALUATION"), 0);
+  assert.deepEqual(await ledgerAmounts(org.id), [-1]);
+
+  slow.release();
+  const outcome = await firstSettled;
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) {
+    assert.ok(outcome.error instanceof ModuleExecutionError);
+    assert.equal(outcome.error.statusCode, 409);
+  }
+
+  const state = await moduleState(report.id, "VALUATION");
+  assert.equal(state.status, "SUCCEEDED");
+  assert.equal(state.errorMessage, null);
+  const hold = await testPrisma.creditHold.findFirstOrThrow({ where: { reportId: report.id } });
+  assert.equal(hold.status, "CAPTURED");
+  assert.deepEqual(await ledgerAmounts(org.id), [-1]);
+  assert.equal(await readBalance(org.id, "VALUATION"), 0);
+  const finished = await testPrisma.report.findUniqueOrThrow({ where: { id: report.id } });
+  assert.equal(finished.status, "COMPLETED");
+});
+
+test("late success after takeover does not double-capture", async () => {
+  const { org, user, report } = await setupValuation({ balance: 2 });
+  const slow = makeGatedValuationAdapter("succeed");
+  const fast = makeValuationAdapter();
+
+  const first = executeReportModule(
+    report.id,
+    "VALUATION",
+    runOptions(user.id, { customValuationAdapter: slow.adapter }),
+  );
+  const firstSettled = first.then(
+    () => ({ ok: true as const }),
+    (error: any) => ({ ok: false as const, error }),
+  );
+  await slow.started;
+  await makeLockStale(report.id);
+
+  await executeReportModule(report.id, "VALUATION", runOptions(user.id, { customValuationAdapter: fast.adapter }));
+  assert.equal(await readBalance(org.id, "VALUATION"), 1);
+
+  slow.release();
+  const outcome = await firstSettled;
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) {
+    assert.ok(outcome.error instanceof ModuleExecutionError);
+    assert.equal(outcome.error.statusCode, 409);
+  }
+
+  const state = await moduleState(report.id, "VALUATION");
+  assert.equal(state.status, "SUCCEEDED");
+  assert.deepEqual(await ledgerAmounts(org.id), [-1]);
+  assert.equal(await readBalance(org.id, "VALUATION"), 1);
+  const hold = await testPrisma.creditHold.findFirstOrThrow({ where: { reportId: report.id } });
+  assert.equal(hold.status, "CAPTURED");
 });
