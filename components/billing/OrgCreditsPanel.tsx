@@ -10,7 +10,7 @@ type CreditType = "VALUATION" | "CLAIM_DETAILS";
 interface LedgerEntry {
   id: string;
   createdAt: string;
-  type: "USAGE" | "MANUAL_ADJUSTMENT";
+  type: keyof typeof LEDGER_TYPE_LABELS;
   creditType: CreditType;
   amount: number;
   note: string | null;
