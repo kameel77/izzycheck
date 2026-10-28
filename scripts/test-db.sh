@@ -6,12 +6,13 @@ set -e
 cd "$(dirname "$0")/.."
 
 if [ -z "$TEST_DATABASE_URL" ]; then
+  docker compose -f docker-compose.test.yml down -v
   docker compose -f docker-compose.test.yml up -d --wait
 fi
 
 export DATABASE_URL="${TEST_DATABASE_URL:-postgresql://izzy:izzy@localhost:54329/izzycheck_test}"
 
-npx prisma migrate reset --force --skip-seed
+npx prisma migrate deploy
 
 FILES=$(find lib/test-db lib/billing/tests-db lib/reports/tests-db -name '*.test.ts' 2>/dev/null | sort)
 if [ -z "$FILES" ]; then
