@@ -37,3 +37,18 @@ test("credit_balances enforces one row per organization and credit type", async 
       err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002",
   );
 });
+
+test("credit_balances rejects a negative balance", async () => {
+  const org = await createOrg();
+  await setBalance(org.id, "VALUATION", 1);
+
+  await assert.rejects(
+    testPrisma.$executeRaw`UPDATE credit_balances SET "balance" = -1 WHERE "organizationId" = ${org.id}`,
+    /credit_balances_balance_non_negative/,
+  );
+
+  const row = await testPrisma.creditBalance.findUniqueOrThrow({
+    where: { organizationId_creditType: { organizationId: org.id, creditType: "VALUATION" } },
+  });
+  assert.equal(row.balance, 1);
+});

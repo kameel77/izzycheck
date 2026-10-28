@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Coins, Loader2 } from "lucide-react";
+import { CREDIT_TYPE_LABELS, LEDGER_TYPE_LABELS, formatCreditAmount } from "@/lib/billing/labels";
 
 type BillingMode = "PREPAID" | "UNLIMITED";
 type CreditType = "VALUATION" | "CLAIM_DETAILS";
@@ -23,25 +24,10 @@ interface CreditsData {
   entries: LedgerEntry[];
 }
 
-const CREDIT_TYPE_LABELS: Record<CreditType, string> = {
-  VALUATION: "Wycena",
-  CLAIM_DETAILS: "Szczegóły szkód",
-};
-
-const ENTRY_TYPE_LABELS: Record<LedgerEntry["type"], string> = {
-  USAGE: "Zużycie",
-  MANUAL_ADJUSTMENT: "Korekta",
-};
-
 const BILLING_MODE_LABELS: Record<BillingMode, string> = {
   PREPAID: "Prepaid (kredyty)",
   UNLIMITED: "Bez limitu",
 };
-
-function formatAmount(amount: number): string {
-  if (amount === 0) return "0 (bez opłaty)";
-  return amount > 0 ? `+${amount}` : `${amount}`;
-}
 
 const inputClass =
   "rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white";
@@ -243,14 +229,14 @@ export default function OrgCreditsPanel({ organizationId }: { organizationId: st
                           {new Date(entry.createdAt).toLocaleString("pl-PL")}
                         </td>
                         <td className="py-2 pr-3 font-medium text-slate-900 dark:text-white">
-                          {ENTRY_TYPE_LABELS[entry.type]}
+                          {LEDGER_TYPE_LABELS[entry.type]}
                           {entry.note && (
                             <span className="block text-[10px] font-normal text-slate-400">{entry.note}</span>
                           )}
                         </td>
                         <td className="py-2 pr-3">{CREDIT_TYPE_LABELS[entry.creditType]}</td>
                         <td className="py-2 pr-3 font-bold whitespace-nowrap text-slate-900 dark:text-white">
-                          {formatAmount(entry.amount)}
+                          {formatCreditAmount(entry.amount)}
                         </td>
                         <td className="py-2 pr-3 font-mono text-[11px]">
                           {entry.report?.publicReference ?? "—"}

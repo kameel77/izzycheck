@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Coins, Building2, User, Info, Loader2 } from "lucide-react";
+import { CREDIT_TYPE_LABELS, LEDGER_TYPE_LABELS, formatCreditAmount } from "@/lib/billing/labels";
 
 interface CurrentUser {
   role: string;
@@ -26,21 +27,6 @@ interface LedgerEntry {
 }
 
 type Scope = "mine" | "org";
-
-const CREDIT_TYPE_LABELS: Record<LedgerEntry["creditType"], string> = {
-  VALUATION: "Wycena",
-  CLAIM_DETAILS: "Szczegóły szkód",
-};
-
-const ENTRY_TYPE_LABELS: Record<LedgerEntry["type"], string> = {
-  USAGE: "Zużycie",
-  MANUAL_ADJUSTMENT: "Korekta",
-};
-
-function formatAmount(amount: number): string {
-  if (amount === 0) return "0 (bez opłaty)";
-  return amount > 0 ? `+${amount}` : `${amount}`;
-}
 
 function BalanceTile({ label, value }: { label: string; value: number }) {
   return (
@@ -228,14 +214,14 @@ export default function CreditsPage() {
                         {new Date(entry.createdAt).toLocaleString("pl-PL")}
                       </td>
                       <td className="px-5 py-4 font-medium text-slate-900 dark:text-white">
-                        {ENTRY_TYPE_LABELS[entry.type]}
+                        {LEDGER_TYPE_LABELS[entry.type]}
                         {entry.note && (
                           <span className="block text-[10px] font-normal text-slate-400">{entry.note}</span>
                         )}
                       </td>
                       <td className="px-5 py-4">{CREDIT_TYPE_LABELS[entry.creditType]}</td>
                       <td className="px-5 py-4 font-bold text-slate-900 dark:text-white whitespace-nowrap">
-                        {formatAmount(entry.amount)}
+                        {formatCreditAmount(entry.amount)}
                       </td>
                       <td className="px-5 py-4">
                         {entry.report ? (

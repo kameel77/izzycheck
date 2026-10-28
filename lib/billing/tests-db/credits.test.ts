@@ -5,6 +5,7 @@ import {
   NoCreditsError,
   adjustCredits,
   captureCredit,
+  releaseStaleHolds,
   recordUnlimitedUsage,
   releaseCredit,
   reserveCredit,
@@ -425,4 +426,54 @@ test("adjustCredits rejects zero and non-integer amounts", async () => {
   }
   assert.equal(await readBalance(org.id, "VALUATION"), 2);
   assert.equal(await testPrisma.creditLedgerEntry.count({ where: { organizationId: org.id } }), 0);
+});
+
+test("stale hold detection does not depend on the session time zone", async () => {
+  for (const zone of ["Europe/Warsaw", "America/New_York"]) {
+    await resetDb();
+    const { org, user } = await setup(0);
+    const fresh = await newReport(org.id, user.id);
+    const stale = await newReport(org.id, user.id);
+    await createHold(org.id, fresh.id, "HELD");
+    await createHold(org.id, stale.id, "HELD");
+    const old = new Date(Date.now() - 10 * 60_000);
+    await testPrisma.$executeRaw`UPDATE credit_holds SET "updatedAt" = ${old} WHERE "reportId" = ${stale.id}`;
+
+    const released = await testPrisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SET LOCAL TimeZone = '${zone}'`);
+      return releaseStaleHolds(tx, org.id, new Date(Date.now() - 5 * 60_000));
+    });
+
+    assert.equal(released, 1, zone);
+    assert.equal((await holdOf(stale.id)).status, "RELEASED", zone);
+    assert.equal((await holdOf(fresh.id)).status, "HELD", zone);
+    assert.equal(await readBalance(org.id, "VALUATION"), 1, zone);
+  }
+});
+
+test("capture refuses to run when the usage entry already exists and rolls back", async () => {
+  const { org, user } = await setup(1);
+  const report = await newReport(org.id, user.id);
+  await reserveCredit(testPrisma, reserveArgs(org.id, report.id));
+  await testPrisma.creditLedgerEntry.create({
+    data: {
+      organizationId: org.id,
+      creditType: "VALUATION",
+      amount: -1,
+      type: "USAGE",
+      idempotencyKey: `usage:${report.id}:VALUATION`,
+      reportId: report.id,
+      moduleId: "VALUATION",
+      userId: user.id,
+    },
+  });
+
+  await assert.rejects(
+    captureCredit(testPrisma, captureArgsFor(org.id, report.id, user.id)),
+    /Wpis zużycia już istnieje dla tego modułu\./,
+  );
+
+  assert.equal((await holdOf(report.id)).status, "HELD");
+  assert.equal(await testPrisma.creditLedgerEntry.count({ where: { organizationId: org.id } }), 1);
+  assert.equal(await readBalance(org.id, "VALUATION"), 0);
 });

@@ -144,7 +144,8 @@ export async function releaseStaleHolds(
       const rows = await tx.$queryRaw<{ id: string; organizationId: string; creditType: CreditType }[]>`
         SELECT id, "organizationId", "creditType"
         FROM credit_holds
-        WHERE id = ${id} AND status = 'HELD' AND "updatedAt" < ${staleBefore}
+        WHERE id = ${id} AND status = 'HELD'
+          AND "updatedAt" < (${staleBefore}::timestamptz AT TIME ZONE 'UTC')
         FOR UPDATE SKIP LOCKED`;
       const hold = rows[0];
       if (!hold) continue;
@@ -213,13 +214,16 @@ export async function captureCredit(
 
     if (hold.status === "CAPTURED") return "ALREADY_CAPTURED";
 
-    const writeUsage = (amount: number, note?: string) =>
-      tx.creditLedgerEntry.createMany({
+    // The hold lock serializes captures, so an existing usage entry here is an invariant violation, not a retry.
+    const writeUsage = async (amount: number, note?: string) => {
+      const { count } = await tx.creditLedgerEntry.createMany({
         data: [
           { organizationId, creditType, amount, type: "USAGE", idempotencyKey, reportId, moduleId, userId, note },
         ],
         skipDuplicates: true,
       });
+      if (count === 0) throw new Error("Wpis zużycia już istnieje dla tego modułu.");
+    };
 
     if (hold.status === "HELD") {
       await tx.creditHold.update({ where: { id: hold.id }, data: { status: "CAPTURED" } });
