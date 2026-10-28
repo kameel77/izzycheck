@@ -38,18 +38,37 @@ export async function createCheckout(
     appUrl: string;
     /** True when PayU runs against its sandbox; recorded on the order so test payments are recognizable. */
     sandbox: boolean;
+    /** Gross total the buyer saw; when it differs from the freshly priced cart the checkout is refused. */
+    expectedTotalGrossGrosze?: number;
   },
 ): Promise<{ orderId: string; redirectUri: string }> {
-  const { user, items, customerIp, payu, appUrl, sandbox } = args;
+  const { user, items, customerIp, payu, appUrl, sandbox, expectedTotalGrossGrosze } = args;
 
   const organization = user.organizationId
     ? await db.organization.findUnique({
         where: { id: user.organizationId },
-        select: { billingMode: true, isActive: true },
+        select: {
+          billingMode: true,
+          isActive: true,
+          nip: true,
+          street: true,
+          postalCode: true,
+          city: true,
+          billingEmail: true,
+        },
       })
     : null;
   if (!user.organizationId || !organization || !organization.isActive || !isPrepaid(organization)) {
     throw new CheckoutError(409, "Twoja organizacja nie jest rozliczana kredytami.");
+  }
+
+  // Invoices (phase 3) need complete company data; refuse before any money moves.
+  const companyData = [organization.nip, organization.street, organization.postalCode, organization.city, organization.billingEmail];
+  if (companyData.some((value) => !value || value.trim() === "")) {
+    throw new CheckoutError(
+      409,
+      "Uzupełnij dane firmy (NIP, adres, e-mail do faktur), aby kupić kredyty. Skontaktuj się z opiekunem Izzy Lease.",
+    );
   }
 
   // Prices always come from the database; the client only names packages and quantities.
@@ -73,6 +92,10 @@ export async function createCheckout(
   if ("error" in priced) throw new CheckoutError(400, priced.error);
   if (priced.totalGrossGrosze > MAX_ORDER_GROSS_GROSZE) {
     throw new CheckoutError(400, "Kwota zamówienia jest zbyt wysoka.");
+  }
+  // Before the order row and before PayU: the buyer must pay exactly what they were shown.
+  if (expectedTotalGrossGrosze !== undefined && expectedTotalGrossGrosze !== priced.totalGrossGrosze) {
+    throw new CheckoutError(409, "Ceny zostały zaktualizowane. Sprawdź podsumowanie i spróbuj ponownie.");
   }
 
   // Nested create: the order and its lines are written atomically.

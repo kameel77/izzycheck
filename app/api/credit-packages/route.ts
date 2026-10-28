@@ -24,9 +24,10 @@ export async function GET() {
 
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { billingMode: true },
+      select: { billingMode: true, isActive: true },
     });
-    if (!isPrepaid(organization)) {
+    // Same rule as checkout: an inactive organization cannot buy.
+    if (!organization?.isActive || !isPrepaid(organization)) {
       return NextResponse.json({ packages: [], paymentsEnabled: false });
     }
 

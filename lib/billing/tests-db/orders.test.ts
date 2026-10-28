@@ -278,6 +278,47 @@ describe("createCheckout", () => {
     );
   });
 
+  test("incomplete company data is rejected with 409 before any order or PayU call", async () => {
+    for (const field of ["nip", "street", "postalCode", "city", "billingEmail"] as const) {
+      for (const value of ["", "   "]) {
+        const ctx = await setup();
+        await testPrisma.organization.update({ where: { id: ctx.org.id }, data: { [field]: value } });
+        const payu = stubPayu();
+        await expectCheckoutError(
+          createCheckout(testPrisma, checkoutArgs(ctx, payu)),
+          409,
+          "Uzupełnij dane firmy (NIP, adres, e-mail do faktur), aby kupić kredyty. Skontaktuj się z opiekunem Izzy Lease.",
+        );
+        assert.equal(payu.created.length, 0, `${field}="${value}"`);
+        assert.equal(await testPrisma.order.count(), 0, `${field}="${value}"`);
+        await resetDb();
+      }
+    }
+  });
+
+  test("expectedTotalGrossGrosze mismatch is rejected with 409 before any order or PayU call", async () => {
+    const ctx = await setup();
+    const payu = stubPayu();
+    const args = checkoutArgs(ctx, payu);
+    const priced = priceCart(
+      [ctx.claims, ctx.valuation],
+      args.items,
+    );
+    assert.ok(!("error" in priced));
+
+    await expectCheckoutError(
+      createCheckout(testPrisma, { ...args, expectedTotalGrossGrosze: priced.totalGrossGrosze - 1 }),
+      409,
+      "Ceny zostały zaktualizowane. Sprawdź podsumowanie i spróbuj ponownie.",
+    );
+    assert.equal(payu.created.length, 0);
+    assert.equal(await testPrisma.order.count(), 0);
+
+    const { orderId } = await createCheckout(testPrisma, { ...args, expectedTotalGrossGrosze: priced.totalGrossGrosze });
+    assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: orderId } })).totalGrossGrosze, priced.totalGrossGrosze);
+    assert.equal(payu.created.length, 1);
+  });
+
   test("sandbox flag is stored on the order", async () => {
     const ctx = await setup();
     const real = await createCheckout(testPrisma, checkoutArgs(ctx, stubPayu()));

@@ -57,6 +57,10 @@ export async function POST(request: Request) {
     if (!Array.isArray(items)) {
       return NextResponse.json({ error: "Nieprawidłowe dane zamówienia." }, { status: 400 });
     }
+    const expected = (body as { expectedTotalGrossGrosze?: unknown }).expectedTotalGrossGrosze;
+    if (expected !== undefined && expected !== null && !Number.isInteger(expected)) {
+      return NextResponse.json({ error: "Nieprawidłowe dane zamówienia." }, { status: 400 });
+    }
 
     const forwarded = request.headers.get("x-forwarded-for");
     const customerIp = forwarded?.split(",")[0].trim() || "127.0.0.1";
@@ -73,6 +77,7 @@ export async function POST(request: Request) {
       payu,
       appUrl: config.appUrl,
       sandbox: config.isSandbox,
+      expectedTotalGrossGrosze: typeof expected === "number" ? expected : undefined,
     });
 
     try {

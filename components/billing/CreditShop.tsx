@@ -106,8 +106,22 @@ export default function CreditShop() {
     setQuantities((prev) => ({ ...prev, [packageId]: clampQuantity(value) }));
   };
 
+  // Silent refresh (no loading state), used after the server reports changed prices.
+  const refreshPackages = async () => {
+    try {
+      const res = await fetch("/api/credit-packages");
+      if (!res.ok) return;
+      const json = await res.json();
+      if (Array.isArray(json?.packages)) setData(json);
+    } catch {
+      // The old price list stays; the next order attempt reports any difference again.
+    }
+  };
+
   const handlePay = async () => {
     if (submittingRef.current || cartItems.length === 0) return;
+    // The total the buyer is looking at; the server refuses the order when its own price differs.
+    const displayedTotal = cart && !("error" in cart) ? cart.totalGrossGrosze : undefined;
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError("");
@@ -115,9 +129,13 @@ export default function CreditShop() {
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: cartItems }),
+        body: JSON.stringify({
+          items: cartItems,
+          ...(displayedTotal !== undefined ? { expectedTotalGrossGrosze: displayedTotal } : {}),
+        }),
       });
       const json = await res.json().catch(() => ({}));
+      if (res.status === 409) await refreshPackages();
       if (!res.ok || typeof json.redirectUri !== "string") {
         throw new Error(json.error || "Nie udało się utworzyć zamówienia.");
       }
