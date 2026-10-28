@@ -165,7 +165,7 @@ export async function applyPayuStatus(
       userId: true,
       totalGrossGrosze: true,
       currency: true,
-      items: { select: { creditType: true, creditsPerPackage: true, quantity: true } },
+      items: { select: { creditType: true, creditsPerPackage: true, quantity: true }, orderBy: { id: "asc" } },
     },
   });
   if (!order) {
@@ -206,7 +206,9 @@ export async function applyPayuStatus(
       });
       if (count === 0) return { result: "ALREADY_PAID" as const, previousStatus };
 
-      for (const [creditType, amount] of creditsByType) {
+      // Fixed credit type order: concurrent payments of one organization lock the balance rows in the same
+      // order whatever the cart order was, so they cannot deadlock.
+      for (const [creditType, amount] of [...creditsByType].sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0))) {
         await addCredits(tx, {
           organizationId: order.organizationId,
           creditType,

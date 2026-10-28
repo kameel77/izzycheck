@@ -13,7 +13,7 @@ import {
 import { priceCart } from "../pricing.ts";
 import type { CreateOrderInput } from "../../payments/payu.ts";
 import { PayuError } from "../../payments/payu.ts";
-import { createOrg, createUser, resetDb, testPrisma } from "../../test-db/helpers.ts";
+import { createOrg, createUser, resetDb, setBalance, testPrisma } from "../../test-db/helpers.ts";
 
 const SECOND_KEY = "test-second-key";
 const APP_URL = "https://app.example.test";
@@ -478,6 +478,31 @@ describe("applyPayuStatus COMPLETED", () => {
       await applyPayuStatus(testPrisma, completed(order));
     });
     assert.equal(errors.filter((a) => a[0] === "[PAYU_PAID_AFTER_CANCEL]").length, 0);
+  });
+
+  test("concurrent payments with reversed line order don't deadlock", async () => {
+    const ctx = await setup();
+    // Existing balance rows, so every payment locks the same two rows (the deadlock-prone case).
+    await setBalance(ctx.org.id, "VALUATION", 0);
+    await setBalance(ctx.org.id, "CLAIM_DETAILS", 0);
+
+    const forward = [
+      { packageId: ctx.valuation.id, quantity: 2 },
+      { packageId: ctx.claims.id, quantity: 1 },
+    ];
+    const reversed = [...forward].reverse();
+    const orders = [];
+    for (let i = 0; i < 40; i += 1) {
+      const { orderId } = await createCheckout(testPrisma, checkoutArgs(ctx, stubPayu(), i % 2 === 0 ? forward : reversed));
+      orders.push(await testPrisma.order.findUniqueOrThrow({ where: { id: orderId } }));
+    }
+
+    const settled = await Promise.allSettled(orders.map((order) => applyPayuStatus(testPrisma, completed(order))));
+    const failures = settled.filter((r) => r.status === "rejected");
+    assert.equal(failures.length, 0, `failed: ${failures.map((f) => String((f as PromiseRejectedResult).reason)).slice(0, 2).join(" | ")}`);
+    assert.ok(settled.every((r) => r.status === "fulfilled" && r.value === "PAID_NOW"));
+    assert.equal(await readBalance(ctx.org.id, "VALUATION"), 40 * 2);
+    assert.equal(await readBalance(ctx.org.id, "CLAIM_DETAILS"), 40 * 10);
   });
 
   test("a failure while crediting rolls back the PAID status (no PAID without credits)", async () => {
