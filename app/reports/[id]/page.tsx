@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Lock,
   Loader2,
+  Coins,
 } from "lucide-react";
 import { getClaimsHistoryPresentation } from "@/lib/report-claims-summary";
 import { DamageClaimVisualization } from "@/components/report/DamageClaimVisualization";
@@ -97,6 +98,9 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
   const [freezeModalOpen, setFreezeModalOpen] = useState(false);
   const [freezeReason, setFreezeReason] = useState("");
   const [freezing, setFreezing] = useState(false);
+  // Modules the API refused with 402 NO_CREDITS: no automatic re-dispatch until the user resumes or skips them
+  const [creditBlocked, setCreditBlocked] = useState<Record<string, { creditType: string; message: string }>>({});
+  const [skippingModules, setSkippingModules] = useState<Record<string, boolean>>({});
 
   // Tracks whether a report was already loaded (readable inside stable callbacks without stale closures)
   const reportLoadedRef = useRef(false);
@@ -146,7 +150,15 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
         if (res.ok) {
           delete failedAtRef.current[moduleId];
         } else {
-          failedAtRef.current[moduleId] = Date.now();
+          const data = await res.json().catch(() => null);
+          if (res.status === 402 && data?.code === "NO_CREDITS") {
+            setCreditBlocked((prev) => ({
+              ...prev,
+              [moduleId]: { creditType: data.creditType, message: data.error },
+            }));
+          } else {
+            failedAtRef.current[moduleId] = Date.now();
+          }
         }
       } catch (e) {
         failedAtRef.current[moduleId] = Date.now();
@@ -174,6 +186,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
     // Parallel execution of initial independent modules
     const shouldDispatch = (mod: any) => {
       if (!mod) return false;
+      if (creditBlocked[mod.moduleId]) return false; // waiting for the user to buy credits or skip the module
       if (Date.now() - (failedAtRef.current[mod.moduleId] ?? 0) < 15000) return false; // back off after a failed dispatch
       return mod.status === "PENDING" || mod.isStaleLock === true;
     };
@@ -195,7 +208,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
     ) {
       executeModule("CLAIM_DETAILS");
     }
-  }, [report, executingModules, executeModule]);
+  }, [report, executingModules, executeModule, creditBlocked]);
 
   // Polling: while the report is PROCESSING and a requested module is PENDING/RUNNING without a local
   // execution (running in another tab/session, stale lock, or waiting in dispatch backoff), refresh every
@@ -204,7 +217,10 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
     report?.status === "PROCESSING" &&
     Boolean(
       report.moduleResults?.some(
-        (m: any) => (m.status === "PENDING" || m.status === "RUNNING") && !executingModules[m.moduleId]
+        (m: any) =>
+          (m.status === "PENDING" || m.status === "RUNNING") &&
+          !executingModules[m.moduleId] &&
+          !creditBlocked[m.moduleId]
       )
     );
 
@@ -235,6 +251,41 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
       alert("Wystąpił błąd połączenia podczas zatwierdzania raportu.");
     } finally {
       setFreezing(false);
+    }
+  };
+
+  const handleResumeModule = (moduleId: string) => {
+    setCreditBlocked((prev) => {
+      const next = { ...prev };
+      delete next[moduleId];
+      return next;
+    });
+    delete failedAtRef.current[moduleId];
+    executeModule(moduleId);
+  };
+
+  const handleSkipModule = async (moduleId: string) => {
+    if (!window.confirm("Pominąć ten moduł? Raport zostanie ukończony bez niego, a kredyt nie zostanie pobrany.")) {
+      return;
+    }
+    setSkippingModules((prev) => ({ ...prev, [moduleId]: true }));
+    try {
+      const res = await fetch(`/api/reports/${reportId}/modules/${moduleId}/skip`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.error || "Nie udało się pominąć modułu.");
+      } else {
+        setCreditBlocked((prev) => {
+          const next = { ...prev };
+          delete next[moduleId];
+          return next;
+        });
+      }
+      await fetchReport();
+    } catch {
+      alert("Wystąpił błąd połączenia podczas pomijania modułu.");
+    } finally {
+      setSkippingModules((prev) => ({ ...prev, [moduleId]: false }));
     }
   };
 
@@ -292,6 +343,13 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
     { label: "Szczegółowy wykaz szkód", mod: detailsModule, id: "CLAIM_DETAILS" },
   ].filter((item) => item.mod?.status === "FAILED");
 
+  const creditBlockedModules = [
+    { label: "Wycena i wyposażenie pojazdu", mod: valModule, id: "VALUATION" },
+    { label: "Szczegółowy wykaz szkód", mod: detailsModule, id: "CLAIM_DETAILS" },
+  ].filter(
+    (item) => creditBlocked[item.id] && (item.mod?.status === "PENDING" || item.mod?.status === "FAILED")
+  );
+
   const claimsHistoryPresentation = getClaimsHistoryPresentation({
     claimCount: claims.length,
     claimCheckStatus: checkModule?.status,
@@ -348,6 +406,57 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
           <DownloadReportPdfButton reportId={report.id} vin={report.vin} />
         </div>
       </div>
+
+      {/* No-credits banner: the module waits for purchased credits (resume) or is skipped */}
+      {creditBlockedModules.length > 0 && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 flex items-start gap-3">
+          <div className="p-2 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 shrink-0">
+            <Coins className="h-5 w-5" />
+          </div>
+          <div className="space-y-3 flex-1">
+            <h3 className="text-sm font-bold text-amber-800 dark:text-amber-300">Brak kredytów</h3>
+            <ul className="space-y-3 text-xs text-amber-900/90 dark:text-amber-200/90">
+              {creditBlockedModules.map(({ label, id }) => {
+                const isExecuting = executingModules[id];
+                const isSkipping = skippingModules[id];
+                return (
+                  <li key={id} className="space-y-2">
+                    <p>
+                      <strong className="font-semibold">{label}:</strong> {creditBlocked[id].message}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href="/credits"
+                        className="inline-flex items-center gap-1 rounded-lg bg-amber-600 hover:bg-amber-500 px-3 py-1.5 text-[11px] font-bold text-white transition"
+                      >
+                        <Coins className="h-3 w-3" /> Dokup kredyty
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => handleResumeModule(id)}
+                        disabled={isExecuting || isSkipping}
+                        className="inline-flex items-center gap-1 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 px-3 py-1.5 text-[11px] font-bold text-amber-900 dark:text-amber-200 transition disabled:opacity-50"
+                      >
+                        {isExecuting ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                        Wznów
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSkipModule(id)}
+                        disabled={isExecuting || isSkipping}
+                        className="inline-flex items-center gap-1 rounded-lg border border-amber-600/30 hover:bg-amber-600/10 px-3 py-1.5 text-[11px] font-bold text-amber-900 dark:text-amber-200 transition disabled:opacity-50"
+                      >
+                        {isSkipping && <Loader2 className="h-3 w-3 animate-spin" />}
+                        Pomiń ten moduł
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {/* User-Friendly Notification Banner when Report is Partially Failed or Failed */}
       {(report.status === "PARTIALLY_FAILED" || report.status === "FAILED") && (
@@ -1053,7 +1162,12 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                               <Loader2 className="h-4 w-4 animate-spin" /> RUNNING (Przetwarzanie...)
                             </span>
                           )}
-                          {status === "PENDING" && !isExecuting && (
+                          {status === "PENDING" && !isExecuting && creditBlocked[id] && (
+                            <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                              <Coins className="h-4 w-4" /> Brak kredytów
+                            </span>
+                          )}
+                          {status === "PENDING" && !isExecuting && !creditBlocked[id] && (
                             <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
                               <Clock className="h-4 w-4" /> PENDING (Oczekuje)
                             </span>
