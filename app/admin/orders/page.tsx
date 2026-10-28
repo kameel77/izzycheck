@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2, Receipt, RefreshCw } from "lucide-react";
 import AdminOrdersTable, { type AdminOrderRow } from "@/components/billing/AdminOrdersTable";
-import { INVOICE_STATUS_LABELS, ORDER_STATUS_LABELS } from "@/lib/billing/labels";
+import { INVOICE_STATUS_LABELS, ORDER_STATUS_LABELS, describeCronAge } from "@/lib/billing/labels";
 
 interface Filters {
   status: string;
@@ -11,6 +11,13 @@ interface Filters {
   organizationId: string;
   /** "true" shows only invoices with a KSeF problem. */
   ksefProblem: string;
+}
+
+interface Attention {
+  needsAttention: number;
+  failedManualOnly: number;
+  ksefProblems: number;
+  lastCronRunAt: string | null;
 }
 
 const NO_FILTERS: Filters = { status: "", invoiceStatus: "", organizationId: "", ksefProblem: "" };
@@ -24,6 +31,8 @@ export default function AdminOrdersPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [organizations, setOrganizations] = useState<Array<{ id: string; name: string }>>([]);
   const [fakturowniaConfigured, setFakturowniaConfigured] = useState(true);
+  const [attention, setAttention] = useState<Attention | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -64,6 +73,8 @@ export default function AdminOrdersPage() {
         setNextCursor(data.nextCursor ?? null);
         setFakturowniaConfigured(data.fakturowniaConfigured !== false);
         if (Array.isArray(data.organizations)) setOrganizations(data.organizations);
+        if (data.attention && typeof data.attention === "object") setAttention(data.attention);
+        if (Array.isArray(data.warnings)) setWarnings(data.warnings.filter((w: unknown): w is string => typeof w === "string"));
       })
       .catch((err) => {
         if (!isCurrent()) return;
@@ -85,6 +96,9 @@ export default function AdminOrdersPage() {
   }, [filters, load]);
 
   const setFilter = (patch: Partial<Filters>) => setFilters((prev) => ({ ...prev, ...patch }));
+
+  const attentionTotal = attention ? attention.needsAttention + attention.failedManualOnly + attention.ksefProblems : 0;
+  const cronAge = attention ? describeCronAge(attention.lastCronRunAt, Date.now()) : null;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-6">
@@ -108,6 +122,30 @@ export default function AdminOrdersPage() {
           Odśwież
         </button>
       </div>
+
+      {attention && cronAge && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs font-semibold">
+          <span
+            className={attentionTotal > 0 ? "text-red-600 dark:text-red-400" : "text-slate-600 dark:text-slate-300"}
+            title={`Wymaga sprawdzenia: ${attention.needsAttention}, błąd tylko ręcznie: ${attention.failedManualOnly}, problemy KSeF: ${attention.ksefProblems}`}
+          >
+            Wymaga uwagi: {attentionTotal}
+          </span>
+          <span className={cronAge.stale ? "text-red-600 dark:text-red-400" : "text-slate-600 dark:text-slate-300"}>
+            Ostatni przebieg crona: {cronAge.text}
+          </span>
+        </div>
+      )}
+
+      {warnings.map((warning) => (
+        <div
+          key={warning}
+          className="flex items-center gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-xs font-medium text-red-600 dark:text-red-400"
+        >
+          <AlertCircle className="h-5 w-5 shrink-0" />
+          <span>{warning}</span>
+        </div>
+      ))}
 
       {!fakturowniaConfigured && (
         <div className="flex items-center gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs font-medium text-amber-700 dark:text-amber-400">

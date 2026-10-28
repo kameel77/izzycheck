@@ -43,6 +43,18 @@ export function invoiceStatusLabel(status: InvoiceStatus, nextAttemptAt: Date | 
   return INVOICE_STATUS_LABELS[status];
 }
 
+/** A cron that has not run for longer than this is considered stopped (it is scheduled every few minutes). */
+export const CRON_STALE_AFTER_MS = 15 * 60_000;
+
+/** "5 min temu" for the admin header; stale when the cron never ran or the last run is older than 15 min. */
+export function describeCronAge(lastRunAt: string | null, nowMs: number): { text: string; stale: boolean } {
+  if (lastRunAt === null) return { text: "brak (cron nie uruchomił się)", stale: true };
+  const ageMs = Math.max(0, nowMs - new Date(lastRunAt).getTime());
+  const minutes = Math.floor(ageMs / 60_000);
+  const text = minutes < 120 ? `${minutes} min temu` : `${Math.floor(minutes / 60)} h temu`;
+  return { text, stale: ageMs > CRON_STALE_AFTER_MS };
+}
+
 /** Polish plural forms (one, few, many) of what a single credit of each type buys. */
 const CREDIT_NOUNS: Record<CreditType, [string, string, string]> = {
   VALUATION: ["wycena pojazdu", "wyceny pojazdu", "wycen pojazdu"],

@@ -10,6 +10,7 @@
  * over cannot overwrite the new owner's state.
  */
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { getInvoiceConfigWarnings, recordCronHeartbeat } from "./attention.ts";
 import { syncOrderWithPayu, type PayuClientLike } from "../billing/orders.ts";
 import { buildInvoicePayload, FakturowniaError, getFakturowniaConfig, type FakturowniaClient } from "./fakturownia.ts";
 import {
@@ -420,6 +421,8 @@ export async function runBillingCron(
   const clock = deps.clock ?? systemClock;
   const startedAt = clock().getTime();
   const result: BillingCronResult = { invoicesProcessed: 0, ksefRefreshed: 0, emailsSent: 0, ordersSynced: 0, budgetExhausted: false };
+  // Logs a dangerous production configuration (once per process) even when nobody opens the admin panel.
+  getInvoiceConfigWarnings();
 
   /** True (and remembered) once the budget is used up; checked between units of work, across all steps. */
   const outOfBudget = (): boolean => {
@@ -526,5 +529,6 @@ export async function runBillingCron(
     }
   }
 
+  await recordCronHeartbeat(db, result, clock());
   return result;
 }

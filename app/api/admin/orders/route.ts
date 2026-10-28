@@ -7,6 +7,7 @@ import {
   buildAdminOrdersWhere,
   parseAdminOrderFilters,
 } from "@/lib/billing/admin-orders";
+import { getInvoiceConfigWarnings, getOrdersAttention } from "@/lib/invoices/attention";
 import { getFakturowniaConfig } from "@/lib/invoices/fakturownia";
 import { ksefProblem } from "@/lib/invoices/ksef";
 import { sharedPdfUrlBuilder, withAdminInvoice } from "@/lib/invoices/views";
@@ -45,6 +46,8 @@ export async function GET(request: Request) {
       orders,
       nextCursor: hasMore ? page[page.length - 1].id : null,
       fakturowniaConfigured: getFakturowniaConfig() !== null,
+      attention: await getOrdersAttention(prisma, now),
+      warnings: getInvoiceConfigWarnings(),
       ...(organizations ? { organizations } : {}),
     });
   } catch (error) {

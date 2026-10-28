@@ -1298,6 +1298,25 @@ describe("cron safety", () => {
     assert.deepEqual([...calls.ksef].sort(), problems.map((o) => o.fakturowniaInvoiceId).sort());
   });
 
+  test("every run records a heartbeat with the counters", async () => {
+    const ctx = await seed();
+    const { client } = stubClient();
+    const first = new Date("2026-10-29T10:00:00.000Z");
+    const one = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => first }));
+    let beat = await testPrisma.jobHeartbeat.findUniqueOrThrow({ where: { name: "billing-cron" } });
+    assert.equal(beat.lastRunAt.getTime(), first.getTime());
+    assert.deepEqual(JSON.parse(beat.lastResultJson ?? "null"), one.result);
+
+    await createOrder(ctx, { extra: { invoiceNextAttemptAt: new Date(first.getTime() - MIN) } });
+    const second = new Date(first.getTime() + 5 * MIN);
+    const two = await captured(() => runBillingCron(testPrisma, { invoiceClient: client, payuClient: null, clock: () => second }));
+    assert.equal(two.result.invoicesProcessed, 1);
+    beat = await testPrisma.jobHeartbeat.findUniqueOrThrow({ where: { name: "billing-cron" } });
+    assert.equal(beat.lastRunAt.getTime(), second.getTime());
+    assert.deepEqual(JSON.parse(beat.lastResultJson ?? "null"), two.result);
+    assert.equal(await testPrisma.jobHeartbeat.count(), 1);
+  });
+
   test("invoices with a final non-mailable KSeF status never crowd out other candidates", async () => {
     const ctx = await seed();
     const now = new Date();

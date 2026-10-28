@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, beforeEach, describe, test } from "node:test";
 import type { InvoiceStatus, Prisma } from "@prisma/client";
 import { buildAdminOrdersWhere, parseAdminOrderFilters } from "../../billing/admin-orders.ts";
+import { getOrdersAttention, recordCronHeartbeat } from "../attention.ts";
 import { ksefProblem } from "../ksef.ts";
 import { createOrg, createUser, resetDb, testPrisma } from "../../test-db/helpers.ts";
 
@@ -85,5 +86,41 @@ describe("ksefProblem filter", () => {
     assert.equal(await testPrisma.order.count({ where: where(`ksefProblem=true&organizationId=${cases.ok.organizationId}`) }), 0);
     assert.equal(await testPrisma.order.count({ where: where("ksefProblem=false") }), 12);
     assert.equal(await testPrisma.order.count({ where: where("") }), 12);
+  });
+});
+
+describe("getOrdersAttention and the cron heartbeat", () => {
+  test("counts the three kinds separately and reports the last cron run", async () => {
+    await seedKsefCases();
+    await createOrder("NEEDS_ATTENTION");
+    await createOrder("NEEDS_ATTENTION");
+    await createOrder("FAILED", { invoiceNextAttemptAt: null });
+    await createOrder("FAILED", { invoiceNextAttemptAt: hoursAgo(-1) });
+    await createOrder("PENDING", { invoiceNextAttemptAt: now });
+
+    assert.deepEqual(await getOrdersAttention(testPrisma, now), {
+      needsAttention: 2,
+      // The FAILED order with a stale ksefStatus from seedKsefCases also has no next attempt.
+      failedManualOnly: 2,
+      ksefProblems: 5,
+      lastCronRunAt: null,
+    });
+
+    const ranAt = new Date("2026-10-29T11:55:00.000Z");
+    await recordCronHeartbeat(
+      testPrisma,
+      { invoicesProcessed: 1, ksefRefreshed: 2, emailsSent: 3, ordersSynced: 4, budgetExhausted: false },
+      ranAt,
+    );
+    assert.equal((await getOrdersAttention(testPrisma, now)).lastCronRunAt, ranAt.toISOString());
+  });
+
+  test("nothing to report on an empty database", async () => {
+    assert.deepEqual(await getOrdersAttention(testPrisma, now), {
+      needsAttention: 0,
+      failedManualOnly: 0,
+      ksefProblems: 0,
+      lastCronRunAt: null,
+    });
   });
 });

@@ -6,6 +6,7 @@ import {
   LEDGER_TYPE_LABELS,
   ORDER_STATUS_LABELS,
   formatCreditAmount,
+  describeCronAge,
   formatCreditCount,
   formatGrosze,
   formatOrderItem,
@@ -95,5 +96,26 @@ describe("invoiceStatusLabel", () => {
       assert.equal(invoiceStatusLabel(status, null), INVOICE_STATUS_LABELS[status], status);
       assert.equal(invoiceStatusLabel(status, new Date()), INVOICE_STATUS_LABELS[status], status);
     }
+  });
+});
+
+describe("describeCronAge", () => {
+  const now = new Date("2026-10-29T12:00:00.000Z").getTime();
+  const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
+
+  test("a cron that never ran is stale", () => {
+    assert.deepEqual(describeCronAge(null, now), { text: "brak (cron nie uruchomił się)", stale: true });
+  });
+
+  test("minutes ago, stale only beyond 15 minutes", () => {
+    assert.deepEqual(describeCronAge(ago(0), now), { text: "0 min temu", stale: false });
+    assert.deepEqual(describeCronAge(ago(5), now), { text: "5 min temu", stale: false });
+    assert.deepEqual(describeCronAge(ago(15), now), { text: "15 min temu", stale: false });
+    assert.deepEqual(describeCronAge(ago(16), now), { text: "16 min temu", stale: true });
+  });
+
+  test("long gaps are shown in hours and a clock slightly ahead does not go negative", () => {
+    assert.deepEqual(describeCronAge(ago(180), now), { text: "3 h temu", stale: true });
+    assert.deepEqual(describeCronAge(ago(-2), now), { text: "0 min temu", stale: false });
   });
 });

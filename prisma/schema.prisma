@@ -347,6 +347,16 @@ model Order {
   @@map("orders")
 }
 
+/// Last run of a background job (e.g. the billing cron), so the admin panel can tell when it stopped running.
+model JobHeartbeat {
+  name           String   @id
+  lastRunAt      DateTime
+  lastResultJson String?  @db.Text
+  updatedAt      DateTime @updatedAt
+
+  @@map("job_heartbeats")
+}
+
 model OrderItem {
   id                String        @id @default(uuid())
   orderId           String
