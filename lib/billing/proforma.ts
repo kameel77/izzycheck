@@ -56,9 +56,11 @@ export async function createProformaOrder(
     select: { id: true },
   });
 
-  // Conditional: never overwrites a status that something else already moved on.
+  // Conditional: never overwrites a status that something else already moved on. Best effort: never throws.
   const markFailed = () =>
-    db.order.updateMany({ where: { id: order.id, status: "PENDING_PAYMENT" }, data: { status: "FAILED" } });
+    db.order
+      .updateMany({ where: { id: order.id, status: "PENDING_PAYMENT" }, data: { status: "FAILED" } })
+      .catch((markError) => console.error("[PROFORMA_CREATE_ERROR]", order.id, markError));
 
   let created: { id: string; number: string; token: string };
   try {
@@ -71,7 +73,7 @@ export async function createProformaOrder(
     created = await fakturownia.createProforma(payload);
   } catch (error) {
     console.error("[PROFORMA_CREATE_ERROR]", order.id, error);
-    await markFailed().catch((markError) => console.error("[PROFORMA_CREATE_ERROR]", order.id, markError));
+    await markFailed();
     throw new CheckoutError(502, PROFORMA_CREATE_FAILED);
   }
 
@@ -88,7 +90,7 @@ export async function createProformaOrder(
   } catch (error) {
     // The proforma exists in Fakturownia but is not recorded: log it so it can be found and ignored.
     console.error("[PROFORMA_SAVE_ERROR]", { orderId: order.id, proformaId: created.id, proformaNumber: created.number, error });
-    await markFailed().catch(() => {});
+    await markFailed();
     throw new CheckoutError(502, PROFORMA_CREATE_FAILED);
   }
 
@@ -100,16 +102,19 @@ export async function createProformaOrder(
   try {
     await fakturownia.sendInvoiceByEmail(created.id, { emailTo: [emailTo], emailCc });
     emailed = true;
-    await db.order.update({ where: { id: order.id }, data: { proformaEmailedAt: clock() } });
   } catch (error) {
     console.error("[PROFORMA_EMAIL_ERROR]", { orderId: order.id, message: describeError(error) });
-    if (emailed) {
-      // Sent, only the bookkeeping failed: the customer did get the e-mail.
-      return { orderId: order.id, proformaNumber: created.number, proformaToken: created.token, proformaDueDate, emailed: true };
-    }
     await db.order
       .update({ where: { id: order.id }, data: { proformaLastError: describeError(error) } })
       .catch((writeError) => console.error("[PROFORMA_EMAIL_ERROR]", { orderId: order.id, message: describeError(writeError) }));
+  }
+  if (emailed) {
+    try {
+      await db.order.update({ where: { id: order.id }, data: { proformaEmailedAt: clock() } });
+    } catch (error) {
+      // Sent, only the bookkeeping failed: the customer did get the e-mail, so this is not an e-mail error.
+      console.error("[PROFORMA_SAVE_ERROR]", { orderId: order.id, step: "emailedAt", message: describeError(error) });
+    }
   }
 
   return { orderId: order.id, proformaNumber: created.number, proformaToken: created.token, proformaDueDate, emailed };

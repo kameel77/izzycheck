@@ -169,7 +169,9 @@ describe("createProformaOrder", () => {
     const orders = await testPrisma.order.findMany();
     assert.equal(orders.length, 1);
     assert.equal(orders[0].status, "FAILED");
+    assert.equal(orders[0].invoiceStatus, "NOT_REQUIRED");
     assert.equal(orders[0].proformaFakturowniaId, null);
+    assert.equal(orders[0].proformaNumber, null);
     assert.deepEqual(await creditRows(), { ledger: 0, balances: 0 });
     assert.equal(calls.emails.length, 0);
   });
@@ -207,6 +209,37 @@ describe("createProformaOrder", () => {
     const orders = await testPrisma.order.findMany();
     assert.equal(orders.length, 1);
     assert.equal(orders[0].status, "FAILED");
+    assert.equal(orders[0].invoiceStatus, "NOT_REQUIRED");
+    assert.equal(orders[0].proformaNumber, null);
+  });
+
+  test("failure to save the proforma AND to mark the order FAILED: the second failure is logged too", async () => {
+    const ctx = await setup();
+    const { client } = stubFakturownia();
+    const order = new Proxy(testPrisma.order, {
+      get(target, prop, receiver) {
+        if (prop === "update") return () => Promise.reject(new Error("db write failed"));
+        if (prop === "updateMany") return () => Promise.reject(new Error("db mark failed"));
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    const failingDb = new Proxy(testPrisma, {
+      get: (target, prop, receiver) => (prop === "order" ? order : Reflect.get(target, prop, receiver)),
+    });
+
+    const { result, errors } = await silenced(() =>
+      createProformaOrder(failingDb, orderArgs(ctx, client)).then(
+        () => null,
+        (error: unknown) => error,
+      ),
+    );
+
+    assert.ok(result instanceof CheckoutError);
+    assert.equal(result.status, 502);
+    assert.ok(errors.some((args) => args[0] === "[PROFORMA_SAVE_ERROR]"));
+    const markLog = errors.find((args) => args[0] === "[PROFORMA_CREATE_ERROR]");
+    assert.ok(markLog);
+    assert.match((markLog[2] as Error).message, /db mark failed/);
   });
 
   test("e-mail failure: order unchanged, proformaLastError set, emailed false", async () => {
@@ -226,6 +259,35 @@ describe("createProformaOrder", () => {
     assert.equal(order.proformaNumber, "PRO/1/10/2026");
     assert.equal(order.proformaEmailedAt, null);
     assert.match(order.proformaLastError ?? "", /smtp refused/);
+  });
+
+  test("e-mail sent but proformaEmailedAt not saved: logged as a save error, not an e-mail error, emailed stays true", async () => {
+    const ctx = await setup();
+    const { client, calls } = stubFakturownia();
+    const order = new Proxy(testPrisma.order, {
+      get(target, prop, receiver) {
+        if (prop !== "update") return Reflect.get(target, prop, receiver);
+        return (args: { data: Record<string, unknown> }) =>
+          "proformaEmailedAt" in args.data ? Promise.reject(new Error("db write failed")) : target.update(args as never);
+      },
+    });
+    const failingDb = new Proxy(testPrisma, {
+      get: (target, prop, receiver) => (prop === "order" ? order : Reflect.get(target, prop, receiver)),
+    });
+
+    const { result, errors } = await silenced(() => createProformaOrder(failingDb, orderArgs(ctx, client)));
+
+    assert.equal(result.emailed, true);
+    assert.equal(calls.emails.length, 1);
+    assert.ok(!errors.some((args) => args[0] === "[PROFORMA_EMAIL_ERROR]"));
+    const saveLog = errors.find((args) => args[0] === "[PROFORMA_SAVE_ERROR]");
+    assert.ok(saveLog);
+    assert.equal((saveLog[1] as { step: string }).step, "emailedAt");
+    assert.equal((saveLog[1] as { orderId: string }).orderId, result.orderId);
+    const row = await testPrisma.order.findUniqueOrThrow({ where: { id: result.orderId } });
+    assert.equal(row.status, "PENDING_PAYMENT");
+    assert.equal(row.proformaEmailedAt, null);
+    assert.equal(row.proformaLastError, null);
   });
 
   test("incomplete company data: same CheckoutError as PayU, nothing sent to Fakturownia", async () => {
