@@ -49,6 +49,27 @@ async function createApiClient(opts: { isActive?: boolean; orgActive?: boolean }
   return { org, client, token, authorization: `Bearer ${token}` };
 }
 
+/** Kopia klienta Prisma, w której wskazana metoda delegata (np. apiClient.update) rzuca błąd. */
+function failingDelegate(delegate: "apiClient" | "apiUsage", method: string): typeof testPrisma {
+  return new Proxy(testPrisma, {
+    get(target, prop) {
+      if (prop !== delegate) return Reflect.get(target, prop);
+      const real = target[delegate] as unknown as Record<string, unknown>;
+      return new Proxy(real, {
+        get(inner, innerProp) {
+          if (innerProp === method) {
+            return async () => {
+              throw new Error(`${delegate}.${method} padło`);
+            };
+          }
+          const value = Reflect.get(inner, innerProp);
+          return typeof value === "function" ? value.bind(inner) : value;
+        },
+      });
+    },
+  }) as typeof testPrisma;
+}
+
 const usageRows = (apiClientId: string) => testPrisma.apiUsage.findMany({ where: { apiClientId }, orderBy: { createdAt: "asc" } });
 
 describe("handleVinIdentification: 200 i cache", () => {
@@ -323,20 +344,119 @@ describe("handleVinIdentification: walidacja i limity", () => {
   test("błąd zapisu ApiUsage nie zmienia odpowiedzi, ale jest logowany", async () => {
     const { client, authorization } = await createApiClient();
     const { identify } = stubIdentify();
-    const failingDb = new Proxy(testPrisma, {
-      get(target, prop, receiver) {
-        if (prop === "$transaction") return async () => { throw new Error("db padła"); };
-        return Reflect.get(target, prop, receiver);
-      },
-    });
     const errorLog = mock.method(console, "error", () => {});
     try {
-      const res = await handleVinIdentification({ db: failingDb, identify }, { authorization, body: { vin: VIN } });
+      const res = await handleVinIdentification(
+        { db: failingDelegate("apiUsage", "create"), identify },
+        { authorization, body: { vin: VIN } },
+      );
       assert.equal(res.status, 200);
       assert.equal(errorLog.mock.calls.some((call) => String(call.arguments[0]).includes("API_USAGE_LOG_ERROR")), true);
     } finally {
       mock.restoreAll();
     }
     assert.equal((await usageRows(client.id)).length, 0);
+  });
+
+  test("błąd aktualizacji lastUsedAt nie odbiera wpisu rozliczeniowego ApiUsage", async () => {
+    const { client, authorization } = await createApiClient();
+    const { identify } = stubIdentify();
+    const errorLog = mock.method(console, "error", () => {});
+    try {
+      const res = await handleVinIdentification(
+        { db: failingDelegate("apiClient", "update"), identify },
+        { authorization, body: { vin: VIN } },
+      );
+      assert.equal(res.status, 200);
+      assert.equal(errorLog.mock.calls.some((call) => String(call.arguments[0]).includes("API_CLIENT_TOUCH_ERROR")), true);
+    } finally {
+      mock.restoreAll();
+    }
+    const rows = await usageRows(client.id);
+    assert.equal(rows.length, 1, "wpis rozliczeniowy musi istnieć mimo błędu lastUsedAt");
+    assert.equal(rows[0].outcome, "IDENTIFIED");
+    assert.equal(rows[0].billable, true);
+    assert.equal((await testPrisma.apiClient.findUniqueOrThrow({ where: { id: client.id } })).lastUsedAt, null);
+  });
+
+  test("niespodziewany błąd autoryzacji -> 500 INTERNAL_ERROR, bez wpisu ApiUsage, bez tokenu i VIN w logach", async () => {
+    const { token } = await createApiClient();
+    const { fn, identify } = stubIdentify();
+    const logged: unknown[][] = [];
+    for (const method of ["error", "warn"] as const) {
+      mock.method(console, method, (...args: unknown[]) => {
+        logged.push(args);
+      });
+    }
+    // Błąd zawiera zarówno token, jak i VIN (np. echo zapytania w komunikacie sterownika).
+    const brokenDb = {
+      apiClient: {
+        findUnique: async () => {
+          throw new Error(`connection lost near ${token} / ${VIN}`);
+        },
+      },
+    } as unknown as typeof testPrisma;
+    try {
+      const res = await handleVinIdentification(
+        { db: brokenDb, identify },
+        { authorization: `Bearer ${token}`, body: { vin: VIN } },
+      );
+      assert.equal(res.status, 500);
+      assert.equal((res.body as { error: string }).error, "INTERNAL_ERROR");
+    } finally {
+      mock.restoreAll();
+    }
+    assert.ok(logged.length >= 1);
+    const serialized = JSON.stringify(logged);
+    assert.equal(serialized.includes(VIN), false, "VIN w logach");
+    assert.equal(serialized.includes(token), false, "token w logach");
+    assert.equal(fn.mock.callCount(), 0);
+    assert.equal(await testPrisma.apiUsage.count(), 0);
+  });
+});
+
+describe("handleVinIdentification: tryb mock (useCache=false)", () => {
+  test("nie czyta i nie zapisuje cache, ale loguje ApiUsage jak zwykle", async () => {
+    const { client, authorization } = await createApiClient();
+    const raw = fixtureRaw();
+    // Cache z innym autem pod tym samym VIN: tryb mock ma go zignorować.
+    await testPrisma.vinIdentificationCache.create({
+      data: {
+        vin: VIN,
+        ibsCode: "stary",
+        fittedEquipmentCodes: "[]",
+        vinXml: "x",
+        classificationXml: loadFixture("kia-sportage.cls.xml"),
+        fetchedAt: new Date(),
+      },
+    });
+    const { fn, identify } = stubIdentify(async () => raw);
+    const deps = { db: testPrisma, identify, useCache: false };
+
+    for (let i = 0; i < 2; i += 1) {
+      const res = await handleVinIdentification(deps, { authorization, body: { vin: VIN } });
+      assert.equal(res.status, 200);
+      assert.equal((res.body as Record<string, unknown>).make, "BMW", "wynik z identify, nie z cache");
+    }
+    assert.equal(fn.mock.callCount(), 2, "bez cache każde żądanie woła identify");
+
+    const cache = await testPrisma.vinIdentificationCache.findMany();
+    assert.equal(cache.length, 1);
+    assert.equal(cache[0].ibsCode, "stary", "istniejący wpis nie został nadpisany");
+
+    const rows = await usageRows(client.id);
+    assert.equal(rows.length, 2);
+    for (const row of rows) {
+      assert.equal(row.outcome, "IDENTIFIED");
+      assert.equal(row.billable, true);
+      assert.equal(row.cacheHit, false);
+    }
+  });
+
+  test("tryb mock nie tworzy wpisu cache dla nowego VIN", async () => {
+    const { authorization } = await createApiClient();
+    const { identify } = stubIdentify();
+    await handleVinIdentification({ db: testPrisma, identify, useCache: false }, { authorization, body: { vin: VIN } });
+    assert.equal(await testPrisma.vinIdentificationCache.count(), 0);
   });
 });

@@ -14,7 +14,12 @@ export async function POST(req: Request) {
   }
 
   const result = await handleVinIdentification(
-    { db: prisma, identify: (vin) => valuationAdapter.identifyVehicle(vin) },
+    {
+      db: prisma,
+      identify: (vin) => valuationAdapter.identifyVehicle(vin),
+      // Tryb mock zwraca stały fixture: nie wolno go zapisywać w cache pod prawdziwym VIN.
+      useCache: !valuationAdapter.getIsMockMode(),
+    },
     { authorization: req.headers.get("authorization"), body },
   );
   return NextResponse.json(result.body, { status: result.status, headers: result.headers });

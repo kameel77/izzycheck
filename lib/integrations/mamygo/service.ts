@@ -1,5 +1,6 @@
 import type { ApiUsageOutcome, PrismaClient } from "@prisma/client";
 import { authenticateApiClient } from "../../api-clients/auth.ts";
+import { parseBearerToken } from "../../api-clients/token.ts";
 import { VinNotFoundError, type VehicleIdentificationRaw } from "../../audatex/types.ts";
 import { isRateLimited } from "../../rate-limit.ts";
 import { toExternalVinIdentification } from "./mapper.ts";
@@ -17,6 +18,8 @@ export interface VinIdentificationDeps {
   db: PrismaClient;
   identify: (vin: string) => Promise<VehicleIdentificationRaw>;
   now?: () => Date;
+  /** false w trybie mock: fixture nie może trafić do cache ani być z niego czytany. Domyślnie true. */
+  useCache?: boolean;
 }
 
 export interface VinIdentificationResponse {
@@ -29,10 +32,13 @@ function errorResponse(status: number, error: string, message: string, headers?:
   return { status, body: { error, message }, headers };
 }
 
-/** Komunikat błędu do logów aplikacji: VIN nie może się w nich znaleźć (np. w komunikacie Prismy). */
-function scrubbedMessage(err: unknown, vin: string | null): string {
-  const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-  return vin ? message.split(vin).join("[VIN]") : message;
+/** Komunikat błędu do logów aplikacji: VIN ani token nie mogą się w nich znaleźć (np. w komunikacie Prismy). */
+function scrubbedMessage(err: unknown, ...secrets: Array<string | null>): string {
+  let message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  for (const secret of secrets) {
+    if (secret) message = message.split(secret).join("[REDACTED]");
+  }
+  return message;
 }
 
 interface UsageRecord {
@@ -55,8 +61,16 @@ export async function handleVinIdentification(
 ): Promise<VinIdentificationResponse> {
   const { db, identify } = deps;
   const now = deps.now ?? (() => new Date());
+  const useCache = deps.useCache ?? true;
 
-  const client = await authenticateApiClient(db, request.authorization);
+  let client: Awaited<ReturnType<typeof authenticateApiClient>>;
+  try {
+    client = await authenticateApiClient(db, request.authorization);
+  } catch (err) {
+    // Bez wpisu w ApiUsage (nie wiadomo czyj to klient); ani token, ani VIN nie trafiają do logów.
+    console.error("[API_VIN_AUTH_ERROR]", scrubbedMessage(err, parseBearerToken(request.authorization), vinForUsageLog(request.body)));
+    return errorResponse(500, "INTERNAL_ERROR", "Wystąpił błąd wewnętrzny.");
+  }
   if (!client) {
     // Bez wpisu w ApiUsage (nie wiadomo czyj to klient) i bez tokenu w logach.
     console.warn("[API_VIN_UNAUTHORIZED] Odrzucono żądanie z brakującym lub nieprawidłowym tokenem API.");
@@ -92,7 +106,7 @@ export async function handleVinIdentification(
     usage.vin = vin;
 
     let raw: VehicleIdentificationRaw;
-    const cached = await db.vinIdentificationCache.findUnique({ where: { vin } });
+    const cached = useCache ? await db.vinIdentificationCache.findUnique({ where: { vin } }) : null;
     if (cached && now().getTime() - cached.fetchedAt.getTime() < VIN_CACHE_TTL_MS) {
       usage.cacheHit = true;
       raw = {
@@ -120,17 +134,19 @@ export async function handleVinIdentification(
       usage.upstreamMs = Date.now() - startedAt;
 
       // Zapis cache nie może zepsuć udanej odpowiedzi (Audatex został już odpytany).
-      try {
-        const data = {
-          ibsCode: raw.ibsCode,
-          fittedEquipmentCodes: JSON.stringify(raw.fittedEquipmentCodes),
-          vinXml: raw.vinXml,
-          classificationXml: raw.classificationXml,
-          fetchedAt: now(),
-        };
-        await db.vinIdentificationCache.upsert({ where: { vin }, create: { vin, ...data }, update: data });
-      } catch (cacheErr) {
-        console.error("[API_VIN_CACHE_ERROR]", scrubbedMessage(cacheErr, vin));
+      if (useCache) {
+        try {
+          const data = {
+            ibsCode: raw.ibsCode,
+            fittedEquipmentCodes: JSON.stringify(raw.fittedEquipmentCodes),
+            vinXml: raw.vinXml,
+            classificationXml: raw.classificationXml,
+            fetchedAt: now(),
+          };
+          await db.vinIdentificationCache.upsert({ where: { vin }, create: { vin, ...data }, update: data });
+        } catch (cacheErr) {
+          console.error("[API_VIN_CACHE_ERROR]", scrubbedMessage(cacheErr, vin));
+        }
       }
     }
 
@@ -148,19 +164,22 @@ export async function handleVinIdentification(
   } finally {
     // Błąd zapisu logu rozliczeniowego nie zmienia odpowiedzi, ale musi być widoczny w logach.
     try {
-      await db.$transaction([
-        db.apiUsage.create({
-          data: {
-            apiClientId: client.id,
-            organizationId: client.organizationId,
-            endpoint: VIN_IDENTIFICATION_ENDPOINT,
-            ...usage,
-          },
-        }),
-        db.apiClient.update({ where: { id: client.id }, data: { lastUsedAt: now() } }),
-      ]);
+      await db.apiUsage.create({
+        data: {
+          apiClientId: client.id,
+          organizationId: client.organizationId,
+          endpoint: VIN_IDENTIFICATION_ENDPOINT,
+          ...usage,
+        },
+      });
     } catch (usageErr) {
       console.error("[API_USAGE_LOG_ERROR]", scrubbedMessage(usageErr, usage.vin));
+    }
+    // lastUsedAt jest tylko informacyjne: jego błąd nie może odebrać wpisu rozliczeniowego (osobny zapis).
+    try {
+      await db.apiClient.update({ where: { id: client.id }, data: { lastUsedAt: now() } });
+    } catch (touchErr) {
+      console.error("[API_CLIENT_TOUCH_ERROR]", scrubbedMessage(touchErr, usage.vin));
     }
   }
 }
