@@ -8,6 +8,8 @@ import { computeRequestHash } from "@/lib/audatex/hash";
 import { Prisma } from "@prisma/client";
 import { generateMonotonicReference } from "@/lib/reports/reference";
 import { finalizeReport } from "@/lib/reports/finalize";
+import { getBalances, isPrepaid } from "@/lib/billing/credits";
+import { checkCreditsForNewReport } from "@/lib/billing/report-guard";
 
 const valuationAdapter = new AudatexValuationAdapter();
 const historyAdapter = new AudatexHistoryAdapter();
@@ -168,6 +170,23 @@ export async function POST(req: Request) {
           isDuplicateDeduplicated: true,
           requestHashMatched: true,
         });
+      }
+    }
+
+    // 4b. Credit gate: a PREPAID organization needs credits for every requested paid module
+    if (freshUser.organization) {
+      const prepaid = isPrepaid(freshUser.organization);
+      const creditCheck = checkCreditsForNewReport({
+        prepaid,
+        balances: prepaid ? await getBalances(prisma, freshUser.organization.id) : null,
+        includeValuation: Boolean(includeValuation),
+        includeClaimDetails: Boolean(includeClaimDetails),
+      });
+      if (!creditCheck.ok) {
+        return NextResponse.json(
+          { error: creditCheck.message, code: "NO_CREDITS", creditType: creditCheck.creditType },
+          { status: 402 }
+        );
       }
     }
 
