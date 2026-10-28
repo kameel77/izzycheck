@@ -3,6 +3,7 @@ import { getCurrentUser, getFreshUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { syncOrderWithPayu } from "@/lib/billing/orders";
 import { canResumePayment, canViewOrder } from "@/lib/billing/order-access";
+import { issueInvoiceAfterResponse } from "@/lib/invoices/background";
 import { getSharedPayuClient } from "@/lib/payments/payu";
 import { isRateLimited } from "@/lib/rate-limit";
 
@@ -48,7 +49,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       const payu = getSharedPayuClient();
       // At most one PayU poll per order per 10 s, however often the page asks; otherwise return DB state.
       if (payu && !isRateLimited("orders_sync", order.id, 1, 10_000).limited) {
-        synced = await syncOrderWithPayu(prisma, order.id, payu);
+        const sync = await syncOrderWithPayu(prisma, order.id, payu);
+        synced = sync.synced;
+        if (sync.result === "PAID_NOW") issueInvoiceAfterResponse(order.id);
         order = await prisma.order.findUnique({ where: { id }, select: ORDER_SELECT });
         if (!order) return notFound();
       }

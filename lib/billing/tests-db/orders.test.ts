@@ -841,7 +841,7 @@ describe("handlePayuNotification", () => {
     const ctx = await setup();
     const order = await placeOrder(ctx);
     const res = await handlePayuNotification(testPrisma, { ...signed(payload(order)), config });
-    assert.deepEqual(res, { status: 200, body: { status: "OK" } });
+    assert.deepEqual(res, { status: 200, body: { status: "OK" }, paidOrderId: order.id });
     assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PAID");
     assert.equal(await readBalance(ctx.org.id, "VALUATION"), 25);
     assert.equal(await readBalance(ctx.org.id, "CLAIM_DETAILS"), 10);
@@ -849,6 +849,7 @@ describe("handlePayuNotification", () => {
     // PayU retries the same notification: still 200, no double credit.
     const again = await handlePayuNotification(testPrisma, { ...signed(payload(order)), config });
     assert.equal(again.status, 200);
+    assert.equal(again.paidOrderId, undefined);
     assert.equal(await readBalance(ctx.org.id, "VALUATION"), 25);
   });
 
@@ -975,7 +976,7 @@ describe("syncOrderWithPayu", () => {
         return { status: "COMPLETED", totalAmount: order.totalGrossGrosze, currencyCode: "PLN", extOrderId: order.id };
       },
     });
-    assert.equal(await syncOrderWithPayu(testPrisma, order.id, payu), true);
+    assert.deepEqual(await syncOrderWithPayu(testPrisma, order.id, payu), { synced: true, result: "PAID_NOW" });
     assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PAID");
     assert.equal(await readBalance(ctx.org.id, "VALUATION"), 25);
     assert.equal(await readBalance(ctx.org.id, "CLAIM_DETAILS"), 10);
@@ -991,7 +992,7 @@ describe("syncOrderWithPayu", () => {
         return { status: "COMPLETED", totalAmount: order.totalGrossGrosze, currencyCode: "PLN", extOrderId: order.id };
       },
     });
-    assert.equal(await syncOrderWithPayu(testPrisma, order.id, payu), false);
+    assert.deepEqual(await syncOrderWithPayu(testPrisma, order.id, payu), { synced: false, result: null });
     assert.equal(calls, 0);
     assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: order.id } })).status, "PENDING_PAYMENT");
   });
