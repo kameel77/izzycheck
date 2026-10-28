@@ -108,3 +108,20 @@ export async function setBalance(
     create: { organizationId, creditType, balance },
   });
 }
+
+export async function createOrder(opts: {
+  organizationId: string;
+  userId: string;
+}): Promise<{ id: string }> {
+  return testPrisma.order.create({
+    data: {
+      organizationId: opts.organizationId,
+      userId: opts.userId,
+      paymentMethod: "PAYU",
+      totalNetGrosze: 2500,
+      totalVatGrosze: 575,
+      totalGrossGrosze: 3075,
+    },
+    select: { id: true },
+  });
+}

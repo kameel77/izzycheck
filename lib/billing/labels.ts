@@ -4,6 +4,7 @@ import type { CreditLedgerType, CreditType } from "@prisma/client";
 export const LEDGER_TYPE_LABELS: Record<CreditLedgerType, string> = {
   USAGE: "Zużycie",
   MANUAL_ADJUSTMENT: "Korekta",
+  PURCHASE: "Zakup",
 };
 
 export const CREDIT_TYPE_LABELS: Record<CreditType, string> = {

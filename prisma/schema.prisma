@@ -42,6 +42,18 @@ enum CreditType {
 enum CreditLedgerType {
   USAGE
   MANUAL_ADJUSTMENT
+  PURCHASE
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  CANCELED
+  FAILED
+}
+
+enum PaymentMethod {
+  PAYU
 }
 
 enum CreditHoldStatus {
@@ -68,6 +80,7 @@ model Organization {
   creditBalances CreditBalance[]
   creditHolds    CreditHold[]
   ledgerEntries  CreditLedgerEntry[]
+  orders         Order[]
 
   @@map("organizations")
 }
@@ -90,6 +103,7 @@ model User {
   reports                 Report[]
   auditEvents             AuditEvent[]
   ledgerEntries           CreditLedgerEntry[]
+  orders                  Order[]
 
   @@index([organizationId])
   @@map("users")
@@ -249,16 +263,81 @@ model CreditLedgerEntry {
   creditType     CreditType
   amount         Int              // -1 usage, 0 usage bez opłaty, +/-N korekta
   type           CreditLedgerType
-  idempotencyKey String           @unique // "usage:{reportId}:{moduleId}" | "manual:{uuid}"
+  idempotencyKey String           @unique // "usage:{reportId}:{moduleId}" | "manual:{uuid}" | "purchase:{orderId}:{creditType}"
   reportId       String?
   report         Report?          @relation(fields: [reportId], references: [id])
   moduleId       ReportModuleId?
   userId         String?          // USAGE: report.createdById; MANUAL_ADJUSTMENT: admin
   user           User?            @relation(fields: [userId], references: [id])
   note           String?
+  orderId        String?
+  order          Order?           @relation(fields: [orderId], references: [id])
   createdAt      DateTime         @default(now())
 
   @@index([organizationId, createdAt])
   @@index([userId, createdAt])
+  @@index([orderId])
   @@map("credit_ledger_entries")
+}
+
+model CreditPackage {
+  id             String      @id @default(uuid())
+  name           String
+  creditType     CreditType
+  credits        Int
+  priceNetGrosze Int
+  vatRate        Int         @default(23)
+  isActive       Boolean     @default(true)
+  sortOrder      Int         @default(0)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  orderItems     OrderItem[]
+
+  @@map("credit_packages")
+}
+
+model Order {
+  id               String              @id @default(uuid())
+  organizationId   String
+  organization     Organization        @relation(fields: [organizationId], references: [id])
+  userId           String
+  user             User                @relation(fields: [userId], references: [id])
+  status           OrderStatus         @default(PENDING_PAYMENT)
+  paymentMethod    PaymentMethod
+  totalNetGrosze   Int
+  totalVatGrosze   Int
+  totalGrossGrosze Int
+  currency         String              @default("PLN")
+  payuOrderId      String?             @unique
+  payuRedirectUri  String?
+  paidAt           DateTime?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  items            OrderItem[]
+  ledgerEntries    CreditLedgerEntry[]
+
+  @@index([organizationId, createdAt])
+  @@index([userId, createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                String        @id @default(uuid())
+  orderId           String
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  packageId         String
+  package           CreditPackage @relation(fields: [packageId], references: [id])
+  packageName       String
+  creditType        CreditType
+  creditsPerPackage Int
+  quantity          Int
+  unitNetGrosze     Int
+  unitGrossGrosze   Int
+  vatRate           Int
+  lineNetGrosze     Int
+  lineVatGrosze     Int
+  lineGrossGrosze   Int
+
+  @@index([orderId])
+  @@map("order_items")
 }
