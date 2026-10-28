@@ -76,7 +76,12 @@ function InvoiceCell({ order }: { order: OrderRow }) {
     return order.paymentMethod === "PROFORMA" ? <ProformaInfo order={order} /> : <span className="text-slate-400">—</span>;
   }
   if (order.invoiceStatus === "PENDING") {
-    return <span className="text-slate-500 dark:text-slate-400">W przygotowaniu</span>;
+    return (
+      <div className="flex flex-col items-start gap-2">
+        {order.paymentMethod === "PROFORMA" && <ProformaInfo order={order} />}
+        <span className="text-slate-500 dark:text-slate-400">W przygotowaniu</span>
+      </div>
+    );
   }
   return (
     <div className="flex flex-col items-start gap-2">

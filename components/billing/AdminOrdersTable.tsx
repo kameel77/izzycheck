@@ -175,7 +175,7 @@ const hasProforma = (order: AdminOrderRow) => order.paymentMethod === "PROFORMA"
 
 function PaymentCell({ order, now }: { order: AdminOrderRow; now: Date }) {
   const expired = isProformaExpired(order, now);
-  const emailNotSent = hasProforma(order) && order.proformaEmailedAt === null;
+  const emailNotSent = hasProforma(order) && order.status === "PENDING_PAYMENT" && order.proformaEmailedAt === null;
   return (
     <div className="flex flex-col items-start gap-1.5">
       <span
