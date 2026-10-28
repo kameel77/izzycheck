@@ -36,9 +36,11 @@ export async function createCheckout(
     customerIp: string;
     payu: PayuClientLike;
     appUrl: string;
+    /** True when PayU runs against its sandbox; recorded on the order so test payments are recognizable. */
+    sandbox: boolean;
   },
 ): Promise<{ orderId: string; redirectUri: string }> {
-  const { user, items, customerIp, payu, appUrl } = args;
+  const { user, items, customerIp, payu, appUrl, sandbox } = args;
 
   const organization = user.organizationId
     ? await db.organization.findUnique({
@@ -84,6 +86,7 @@ export async function createCheckout(
       totalVatGrosze: priced.totalVatGrosze,
       totalGrossGrosze: priced.totalGrossGrosze,
       currency: "PLN",
+      payuSandbox: sandbox,
       items: { create: priced.lines },
     },
     select: { id: true },

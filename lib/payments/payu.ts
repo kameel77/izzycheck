@@ -7,9 +7,27 @@ export type PayuConfig = {
   clientSecret: string;
   secondKey: string;
   appUrl: string;
+  /** True when baseUrl points at the PayU sandbox (secure.snd.payu.com). */
+  isSandbox: boolean;
 };
 
-/** Reads PayU settings from env; null when any required variable is missing or blank. */
+let sandboxInProductionLogged = false;
+
+function isSandboxUrl(baseUrl: string): boolean {
+  let host = baseUrl;
+  try {
+    host = new URL(baseUrl).hostname;
+  } catch {
+    // Not a parsable URL: fall back to matching the raw value.
+  }
+  return host.toLowerCase().includes(".snd.");
+}
+
+/**
+ * Reads PayU settings from env; null when any required variable is missing or blank. Fails closed: the
+ * sandbox in production (NODE_ENV=production) disables payments unless PAYU_ALLOW_SANDBOX=true, because
+ * sandbox payments would otherwise grant real credits for test money.
+ */
 export function getPayuConfig(env: Record<string, string | undefined> = process.env): PayuConfig | null {
   const read = (name: string) => (env[name] ?? "").trim();
   const baseUrl = read("PAYU_BASE_URL").replace(/\/+$/, "");
@@ -19,7 +37,17 @@ export function getPayuConfig(env: Record<string, string | undefined> = process.
   const secondKey = read("PAYU_SECOND_KEY");
   const appUrl = read("APP_URL").replace(/\/+$/, "");
   if (!baseUrl || !posId || !clientId || !clientSecret || !secondKey || !appUrl) return null;
-  return { baseUrl, posId, clientId, clientSecret, secondKey, appUrl };
+  const isSandbox = isSandboxUrl(baseUrl);
+  if (isSandbox && env.NODE_ENV === "production" && env.PAYU_ALLOW_SANDBOX !== "true") {
+    if (!sandboxInProductionLogged) {
+      sandboxInProductionLogged = true;
+      console.error(
+        "[PAYU_SANDBOX_IN_PRODUCTION] Płatności wyłączone: sandbox PayU w środowisku produkcyjnym. Ustaw PAYU_ALLOW_SANDBOX=true, aby świadomie testować.",
+      );
+    }
+    return null;
+  }
+  return { baseUrl, posId, clientId, clientSecret, secondKey, appUrl, isSandbox };
 }
 
 export class PayuError extends Error {

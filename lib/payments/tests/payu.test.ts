@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import {
   PayuError,
   createPayuClient,
@@ -18,6 +18,7 @@ const config: PayuConfig = {
   clientSecret: "client-secret",
   secondKey: "second-key",
   appUrl: "https://app.example.com",
+  isSandbox: true,
 };
 
 const orderInput = {
@@ -65,6 +66,38 @@ const fullEnv = {
 
 test("getPayuConfig maps env and strips trailing slashes", () => {
   assert.deepEqual(getPayuConfig(fullEnv), config);
+});
+
+test("getPayuConfig: sandbox in production is disabled and logged once", () => {
+  const error = mock.method(console, "error", () => {});
+  try {
+    const prod = { ...fullEnv, NODE_ENV: "production" };
+    assert.equal(getPayuConfig(prod), null);
+    assert.equal(getPayuConfig(prod), null);
+    assert.equal(getPayuConfig({ ...prod, PAYU_ALLOW_SANDBOX: "false" }), null);
+    assert.equal(error.mock.calls.length, 1);
+    assert.match(String(error.mock.calls[0].arguments[0]), /^\[PAYU_SANDBOX_IN_PRODUCTION\] Płatności wyłączone/);
+  } finally {
+    error.mock.restore();
+  }
+});
+
+test("getPayuConfig: sandbox in production with PAYU_ALLOW_SANDBOX=true is allowed and flagged", () => {
+  const cfg = getPayuConfig({ ...fullEnv, NODE_ENV: "production", PAYU_ALLOW_SANDBOX: "true" });
+  assert.ok(cfg);
+  assert.equal(cfg.isSandbox, true);
+});
+
+test("getPayuConfig: production PayU host is not sandbox", () => {
+  const cfg = getPayuConfig({ ...fullEnv, NODE_ENV: "production", PAYU_BASE_URL: "https://secure.payu.com" });
+  assert.ok(cfg);
+  assert.equal(cfg.isSandbox, false);
+  assert.equal(cfg.baseUrl, "https://secure.payu.com");
+});
+
+test("getPayuConfig: sandbox outside production works", () => {
+  assert.equal(getPayuConfig({ ...fullEnv, NODE_ENV: "development" })?.isSandbox, true);
+  assert.equal(getPayuConfig(fullEnv)?.isSandbox, true);
 });
 
 test("getPayuConfig returns null when PAYU_SECOND_KEY is missing", () => {

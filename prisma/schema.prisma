@@ -310,6 +310,7 @@ model Order {
   currency         String              @default("PLN")
   payuOrderId      String?             @unique
   payuRedirectUri  String?
+  payuSandbox      Boolean             @default(false)
   paidAt           DateTime?
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt

@@ -72,6 +72,7 @@ export async function POST(request: Request) {
       customerIp,
       payu,
       appUrl: config.appUrl,
+      sandbox: config.isSandbox,
     });
 
     try {

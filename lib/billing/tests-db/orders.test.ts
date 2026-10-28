@@ -103,6 +103,7 @@ function checkoutArgs(ctx: Ctx, payu: PayuClientLike, items?: Array<{ packageId:
     customerIp: "203.0.113.5",
     payu,
     appUrl: APP_URL,
+    sandbox: false,
   };
 }
 
@@ -275,6 +276,14 @@ describe("createCheckout", () => {
       sent.products.map((p) => p.quantity).sort((a, b) => a - b),
       [1, 25],
     );
+  });
+
+  test("sandbox flag is stored on the order", async () => {
+    const ctx = await setup();
+    const real = await createCheckout(testPrisma, checkoutArgs(ctx, stubPayu()));
+    assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: real.orderId } })).payuSandbox, false);
+    const sandboxed = await createCheckout(testPrisma, { ...checkoutArgs(ctx, stubPayu()), sandbox: true });
+    assert.equal((await testPrisma.order.findUniqueOrThrow({ where: { id: sandboxed.orderId } })).payuSandbox, true);
   });
 
   test("single-word name is sent as first name only", async () => {
