@@ -41,7 +41,7 @@ const CRON_PAYU_BUDGET_MS = 15_000;
 /** Minimum pause between two KSeF refreshes / e-mail retries of one invoice, and the PayU sync grace period. */
 const CRON_RECHECK_MS = 15 * 60_000;
 /** How long after issuing the e-mail is still retried. */
-const EMAIL_RETRY_WINDOW_MS = 3 * 24 * 60 * 60_000;
+export const EMAIL_RETRY_WINDOW_MS = 3 * 24 * 60 * 60_000;
 /** How long after issuing the KSeF status is still polled. */
 const KSEF_POLL_WINDOW_MS = 30 * 24 * 60 * 60_000;
 const PAYU_SYNC_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
@@ -107,6 +107,8 @@ export async function processInvoice(
       select: {
         id: true,
         paidAt: true,
+        paymentMethod: true,
+        proformaFakturowniaId: true,
         totalGrossGrosze: true,
         items: {
           select: { packageName: true, quantity: true, vatRate: true, lineGrossGrosze: true },
@@ -118,7 +120,12 @@ export async function processInvoice(
       },
     });
     const departmentId = deps.departmentId !== undefined ? deps.departmentId : (getFakturowniaConfig()?.departmentId ?? null);
-    const payload = buildInvoicePayload(order, order.organization, departmentId, clock());
+    // An order paid against a proforma is settled by transfer and linked to the proforma in Fakturownia.
+    const options =
+      order.paymentMethod === "PROFORMA"
+        ? { paymentType: "transfer" as const, fromInvoiceId: order.proformaFakturowniaId }
+        : undefined;
+    const payload = buildInvoicePayload(order, order.organization, departmentId, clock(), options);
     created = await client.createInvoice(payload);
   } catch (error) {
     return recordIssueFailure(db, orderId, owned, error, clock);

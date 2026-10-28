@@ -17,10 +17,25 @@ describe("parseAdminOrderFilters", () => {
     });
   });
 
+  test("paymentMethod accepts known methods and ignores unknown ones", () => {
+    assert.deepEqual(parse("paymentMethod=PROFORMA"), { paymentMethod: "PROFORMA" });
+    assert.deepEqual(parse("paymentMethod=PAYU&status=PAID"), { paymentMethod: "PAYU", status: "PAID" });
+    assert.deepEqual(parse("paymentMethod=BLIK"), {});
+    assert.deepEqual(parse("paymentMethod=proforma"), {});
+    assert.deepEqual(parse("paymentMethod=toString"), {});
+    assert.deepEqual(parse("paymentMethod="), {});
+  });
+
   test("ksefProblem is on only for the exact value true", () => {
     assert.deepEqual(parse("ksefProblem=true"), { ksefProblem: true });
     assert.deepEqual(parse("ksefProblem=false&status=PAID"), { status: "PAID" });
     assert.deepEqual(parse("ksefProblem=1"), {});
+  });
+
+  test("emailOverdue is on only for the exact value true", () => {
+    assert.deepEqual(parse("emailOverdue=true"), { emailOverdue: true });
+    assert.deepEqual(parse("emailOverdue=false&status=PAID"), { status: "PAID" });
+    assert.deepEqual(parse("emailOverdue=1"), {});
   });
 
   test("ignores unknown values, blank ids and inherited property names", () => {

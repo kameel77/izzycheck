@@ -103,6 +103,8 @@ describe("getOrdersAttention and the cron heartbeat", () => {
       // The FAILED order with a stale ksefStatus from seedKsefCases also has no next attempt.
       failedManualOnly: 2,
       ksefProblems: 5,
+      // ok, demoOk and offline were issued 100 h ago and never e-mailed; duplicate is a KSeF problem, counted there.
+      emailOverdue: 3,
       lastCronRunAt: null,
     });
 
@@ -120,7 +122,52 @@ describe("getOrdersAttention and the cron heartbeat", () => {
       needsAttention: 0,
       failedManualOnly: 0,
       ksefProblems: 0,
+      emailOverdue: 0,
       lastCronRunAt: null,
     });
+  });
+
+  test("emailOverdue counts issued invoices not e-mailed 3 days after issuing", async () => {
+    const MINUTE = 60_000;
+    const threeDaysAgo = (offsetMinutes: number) => new Date(now.getTime() - 3 * 24 * HOUR - offsetMinutes * MINUTE);
+    const base = { ksefStatus: "ok" };
+    await issued({ ...base, invoiceIssuedAt: threeDaysAgo(1) }); // 3 days + 1 min: counted
+    await issued({ ...base, invoiceIssuedAt: threeDaysAgo(-1) }); // 3 days - 1 min: not yet
+    await issued({ ...base, invoiceIssuedAt: threeDaysAgo(1), invoiceEmailedAt: hoursAgo(1) }); // already sent
+    await createOrder("ISSUED", { ...base, invoiceIssuedAt: threeDaysAgo(1), invoiceNumber: "FV/ręczna" }); // manual: no Fakturownia id
+    await createOrder("FAILED", { fakturowniaInvoiceId: "INV-x", invoiceIssuedAt: threeDaysAgo(1), invoiceNextAttemptAt: hoursAgo(-1) });
+
+    assert.equal((await getOrdersAttention(testPrisma, now)).emailOverdue, 1);
+  });
+
+  test("emailOverdue never counts an invoice that is already a KSeF problem", async () => {
+    const old = hoursAgo(100);
+    await issued({ ksefStatus: "ok", invoiceIssuedAt: old }); // overdue only
+    await issued({ ksefStatus: "send_error", invoiceIssuedAt: old }); // KSeF error: counted as ksefProblems
+    await issued({ ksefStatus: null, invoiceIssuedAt: old }); // KSeF stale: counted as ksefProblems
+
+    const attention = await getOrdersAttention(testPrisma, now);
+    assert.equal(attention.emailOverdue, 1);
+    assert.equal(attention.ksefProblems, 2);
+  });
+
+  test("the emailOverdue list filter returns exactly the counted rows and combines with other filters", async () => {
+    const old = hoursAgo(100);
+    const overdue = await issued({ ksefStatus: "ok", invoiceIssuedAt: old });
+    const overdueDemo = await issued({ ksefStatus: "demo_not_applicable", invoiceIssuedAt: old });
+    await issued({ ksefStatus: "send_error", invoiceIssuedAt: old });
+    await issued({ ksefStatus: "ok", invoiceIssuedAt: old, invoiceEmailedAt: hoursAgo(1) });
+    await issued({ ksefStatus: "ok", invoiceIssuedAt: hoursAgo(1) });
+    await createOrder("PENDING");
+
+    const where = (query: string) => buildAdminOrdersWhere(parseAdminOrderFilters(new URLSearchParams(query)), now);
+    const ids = async (query: string) =>
+      (await testPrisma.order.findMany({ where: where(query), select: { id: true } })).map((r) => r.id).sort();
+
+    assert.deepEqual(await ids("emailOverdue=true"), [overdue.id, overdueDemo.id].sort());
+    assert.equal(await testPrisma.order.count({ where: where("emailOverdue=true") }), (await getOrdersAttention(testPrisma, now)).emailOverdue);
+    assert.deepEqual(await ids(`emailOverdue=true&organizationId=${overdue.organizationId}`), [overdue.id]);
+    assert.deepEqual(await ids("emailOverdue=true&invoiceStatus=FAILED"), []);
+    assert.equal((await ids("emailOverdue=false")).length, 6);
   });
 });

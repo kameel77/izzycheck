@@ -5,6 +5,9 @@ import {
   INVOICE_STATUS_LABELS,
   LEDGER_TYPE_LABELS,
   ORDER_STATUS_LABELS,
+  PAYMENT_METHOD_LABELS,
+  formatYmdPl,
+  orderStatusLabel,
   formatCreditAmount,
   describeCronAge,
   formatCreditCount,
@@ -117,5 +120,50 @@ describe("describeCronAge", () => {
   test("long gaps are shown in hours and a clock slightly ahead does not go negative", () => {
     assert.deepEqual(describeCronAge(ago(180), now), { text: "3 h temu", stale: true });
     assert.deepEqual(describeCronAge(ago(-2), now), { text: "0 min temu", stale: false });
+  });
+});
+
+describe("PAYMENT_METHOD_LABELS", () => {
+  test("every payment method has a Polish label", () => {
+    assert.deepEqual(PAYMENT_METHOD_LABELS, { PAYU: "PayU", PROFORMA: "Proforma" });
+  });
+});
+
+describe("orderStatusLabel", () => {
+  const now = new Date("2026-10-30T10:00:00.000Z");
+  const proforma = (status: "PENDING_PAYMENT" | "PAID" | "CANCELED" | "FAILED", proformaDueDate: string | Date | null) => ({
+    status,
+    paymentMethod: "PROFORMA" as const,
+    proformaDueDate,
+  });
+
+  test("a pending proforma within its term awaits the transfer, also on the due day", () => {
+    assert.equal(orderStatusLabel(proforma("PENDING_PAYMENT", "2026-11-03"), now), "Oczekuje na przelew");
+    assert.equal(orderStatusLabel(proforma("PENDING_PAYMENT", "2026-10-30"), now), "Oczekuje na przelew");
+    assert.equal(orderStatusLabel(proforma("PENDING_PAYMENT", new Date("2026-11-03T00:00:00.000Z")), now), "Oczekuje na przelew");
+  });
+
+  test("a pending proforma past its due date is expired", () => {
+    assert.equal(orderStatusLabel(proforma("PENDING_PAYMENT", "2026-10-29"), now), "Wygasło");
+    assert.equal(orderStatusLabel(proforma("PENDING_PAYMENT", new Date("2026-10-29T00:00:00.000Z")), now), "Wygasło");
+  });
+
+  test("other proforma statuses use the common labels", () => {
+    assert.equal(orderStatusLabel(proforma("PAID", "2026-10-01"), now), "Opłacone");
+    assert.equal(orderStatusLabel(proforma("CANCELED", "2026-10-01"), now), "Anulowane");
+    assert.equal(orderStatusLabel(proforma("FAILED", null), now), "Nieudane");
+  });
+
+  test("a PayU order keeps the common labels", () => {
+    const payu = (status: "PENDING_PAYMENT" | "PAID") => ({ status, paymentMethod: "PAYU" as const, proformaDueDate: null });
+    assert.equal(orderStatusLabel(payu("PENDING_PAYMENT"), now), "Oczekuje na płatność");
+    assert.equal(orderStatusLabel(payu("PAID"), now), "Opłacone");
+  });
+});
+
+describe("formatYmdPl", () => {
+  test("writes a date as DD.MM.RRRR, from a plain date or a serialized @db.Date", () => {
+    assert.equal(formatYmdPl("2026-11-03"), "03.11.2026");
+    assert.equal(formatYmdPl("2026-11-03T00:00:00.000Z"), "03.11.2026");
   });
 });

@@ -85,7 +85,7 @@ Zasady naliczania:
 
 **E-mail i link do PDF:** faktura jest wysyłana z Fakturowni na e-mail do faktur organizacji, a osoba, która złożyła zamówienie, dostaje kopię (gdy jej adres jest inny). Numer faktury i link do PDF widzi klient w historii zamówień, ale dopiero gdy faktura jest wystawiona z linkiem (token) i KSeF jest w dobrym, końcowym stanie (`ok`, `offline`, `not_applicable`, także z przedrostkiem `demo_`) albo faktura została już wysłana e-mailem. Do tego czasu klient widzi tylko „W przygotowaniu” (błędy są widoczne wyłącznie dla admina). Faktura oznaczona ręcznie nie ma linku: klient widzi sam jej numer.
 
-**KSeF:** w ustawieniach konta Fakturowni włącz automatyczne wysyłanie faktur do KSeF. Fakturownia wysyła e-mail dopiero po nadaniu numeru KSeF, więc pierwsza próba zaraz po wystawieniu może się nie udać (log `[INVOICE_EMAIL_ERROR]`) i jest to normalne: zadanie cykliczne ponawia wysyłkę nie częściej niż co 15 minut, przez 3 dni od wystawienia. Odmowa wysyłki e-maila z powodu braku numeru KSeF (odpowiedź 200 ze statusem `error` wspominającym KSeF) jest oczekiwana: nie zapisuje się jej jako błąd faktury, tylko loguje na poziomie info jako `[INVOICE_EMAIL_WAITING_FOR_KSEF]`. Status KSeF jest odpytywany przez 30 dni od wystawienia (do statusu końcowego) i widoczny w panelu **/admin/orders** (przycisk „Odśwież KSeF” wymusza sprawdzenie).
+**KSeF:** w ustawieniach konta Fakturowni włącz automatyczne wysyłanie faktur do KSeF. Fakturownia wysyła e-mail dopiero po nadaniu numeru KSeF, więc pierwsza próba zaraz po wystawieniu może zostać odrzucona (log `[INVOICE_EMAIL_WAITING_FOR_KSEF]`, poziom info) i jest to normalne: zadanie cykliczne ponawia wysyłkę nie częściej niż co 15 minut, przez 3 dni od wystawienia. Taka odmowa (odpowiedź 200 ze statusem `error` wspominającym KSeF) jest oczekiwana: nie zapisuje się jej jako błąd faktury. Każdy inny błąd wysyłki to `[INVOICE_EMAIL_ERROR]`. Status KSeF jest odpytywany przez 30 dni od wystawienia (do statusu końcowego) i widoczny w panelu **/admin/orders** (przycisk „Odśwież KSeF” wymusza sprawdzenie).
 
 **Problemy KSeF są głośne.** Poprawne statusy to `ok`, `processing`, `offline` i `not_applicable` (oraz ich warianty `demo_`). Każdy inny status (`send_error`, `server_error`, `status_check_error`, `duplicate_error`, `blocked_403_error`, `not_connected`, `offline_error`, dowolny błąd `demo_*`) to problem: przy każdym odświeżeniu, które go widzi, aplikacja loguje `[INVOICE_KSEF_ERROR]` (ze statusem i komunikatami KSeF), a faktura dostaje czerwoną etykietę „Błąd KSeF” w panelu. Brak statusu albo `processing` dłużej niż 6 godzin po wystawieniu to „KSeF: brak potwierdzenia” (log `[INVOICE_KSEF_STALE]`). Statusy problemowe są dalej odpytywane przez 30 dni (poza `duplicate_error`, który jest końcowy, ale nadal jest problemem). W panelu filtr **KSeF: Problemy KSeF** pokazuje tylko takie faktury.
 
@@ -115,7 +115,9 @@ Bez `BILLING_CRON_SECRET` endpoint zwraca 503, z błędnym sekretem 401. Jeden p
 
 Przebieg ma łączny budżet 45 s: po jego wyczerpaniu nie startuje nowych jednostek pracy, a reszta czeka na następny przebieg. Odpowiedź zawiera same liczniki: `invoicesProcessed`, `ksefRefreshed`, `emailsSent`, `ordersSynced` i `budgetExhausted`. Każdy krok jest pomijany, gdy jego klient (PayU albo Fakturownia) nie jest skonfigurowany. Po każdym przebiegu cron zapisuje „puls” (tabela `job_heartbeats`, nazwa `billing-cron`, liczniki w `lastResultJson`).
 
-**Sygnały dla admina i alerty:** nagłówek **/admin/orders** pokazuje „Wymaga uwagi: N” (suma: faktury „Wymaga sprawdzenia”, „Błąd (tylko ręcznie)” i problemy KSeF; czerwone, gdy N > 0) oraz „Ostatni przebieg crona: X min temu” (czerwone, gdy cron nigdy nie działał albo ostatni przebieg był ponad 15 minut temu). Ustaw w Coolify lub narzędziu do logów alerty na wpisy zawierające `[INVOICE_` i `[BILLING_CRON_ERROR]` oraz zaglądaj do panelu codziennie.
+**Sygnały dla admina i alerty:** nagłówek **/admin/orders** pokazuje „Wymaga uwagi: N” (suma: faktury „Wymaga sprawdzenia”, „Błąd (tylko ręcznie)”, problemy KSeF i wystawione faktury niewysłane e-mailem mimo upływu 3 dni okna ponawiania, bez tych, które już liczą się jako problemy KSeF; czerwone, gdy N > 0) oraz „Ostatni przebieg crona: X min temu” (czerwone, gdy cron nigdy nie działał albo ostatni przebieg był ponad 15 minut temu). Ustaw w Coolify lub narzędziu do logów alerty na wpisy zawierające `[INVOICE_` i `[BILLING_CRON_ERROR]` oraz zaglądaj do panelu codziennie.
+
+**Niewysłany e-mail z fakturą:** gdy cron poddał się po 3 dniach, admin wysyła fakturę klientowi ręcznie z Fakturowni, a potem klika w wierszu zamówienia „Oznacz e-mail jako wysłany” (działa bez konfiguracji Fakturowni; zapisuje datę wysyłki i usuwa zamówienie z licznika). Takie faktury listuje filtr „E-mail faktury: Niewysłane po 3 dniach” (`emailOverdue=true`), dokładnie te same wiersze, które zlicza „Wymaga uwagi”.
 
 **Logi do obserwowania:**
   - `[INVOICE_ISSUE_ERROR]` — nieudane wystawienie faktury (kod i komunikat, bez danych wrażliwych), albo faktura powstała w Fakturowni, ale nie udało się jej zapisać (w logu `createdInvoiceId` i `createdNumber` do ręcznego uzgodnienia; zamówienie trafia do „Wymaga sprawdzenia”).
@@ -143,6 +145,33 @@ Przebieg ma łączny budżet 45 s: po jego wyczerpaniu nie startuje nowych jedno
    WHERE status='PAID' AND "payuSandbox"=false AND "invoiceStatus"='NOT_REQUIRED';
    ```
 5. Dopiero potem ustaw produkcyjne zmienne PayU.
+
+### Proformy
+
+Faktura proforma to płatność przelewem dla zamówień, których klient nie chce opłacać przez PayU. Wymaga skonfigurowanej Fakturowni (te same zmienne co faktury) oraz jawnego włącznika `PROFORMA_ENABLED="true"` (domyślnie wyłączony). Gdy któregoś brakuje, przycisk „Zamów proformę” jest ukryty, a `POST /api/orders` z metodą `PROFORMA` zwraca 503. Włącz dopiero po sprawdzeniu punktów z „Do potwierdzenia” na prawdziwym koncie Fakturowni. Włącznik dotyczy tylko nowych zamówień: oznaczanie wpłaty i anulowanie istniejących zamówień z proformą działa niezależnie od niego.
+
+**Przepływ klienta:** na **/credits** klient wybiera pakiety i klika „Zamów proformę”. Aplikacja od razu wystawia w Fakturowni dokument typu proforma (forma płatności: przelew, termin 14 dni od dnia wystawienia). PDF proformy jest w historii zamówień (numer, „Pobierz proformę” i termin płatności), a Fakturownia wysyła go e-mailem na adres do faktur organizacji, z osobą zamawiającą w kopii (gdy jej adres jest inny). Jeśli wystawienie w Fakturowni się nie uda, zamówienie dostaje status „Nieudane”, a klient może spróbować jeszcze raz. Nieudana wysyłka e-maila nie psuje zamówienia (PDF jest w aplikacji); admin widzi wtedy plakietkę „Proforma niewysłana e-mailem”. Po upływie 14 dni klient widzi „Wygasło”; zamówienie nie zmienia statusu.
+
+**Procedura admina (/admin/orders):**
+1. Sprawdź wpływ przelewu na koncie bankowym.
+2. Przy zamówieniu kliknij „Oznacz jako opłacone”, podaj datę wpłaty (nie z przyszłości i nie wcześniejszą niż data zamówienia) i opcjonalnie notatkę (do 500 znaków). Kredyty są księgowane od razu.
+3. Fakturę VAT wystawia automatycznie istniejący outbox faktur: forma płatności przelew, data sprzedaży i zapłaty równa dacie wpłaty, powiązana z proformą przez `from_invoice_id`. Dalej obowiązuje zwykły obieg (e-mail, KSeF, sygnały „Wymaga uwagi”).
+4. Oznaczenie wpłaty jest dozwolone także po terminie i po anulowaniu zamówienia (wpłata przyszła, więc kredyty się należą).
+5. „Anuluj” działa tylko dla nieopłaconych proform i nie dotyka dokumentu w Fakturowni. Zamówienie, któremu nie udało się zapisać dokumentu proformy (brak numeru), można anulować dopiero po 10 minutach od złożenia.
+
+**Konto bankowe na proformie** pochodzi z ustawień działu sprzedawcy w Fakturowni (`FAKTUROWNIA_DEPARTMENT_ID` albo dział domyślny): musi być tam ustawiony numer konta, inaczej klient dostanie proformę bez danych do przelewu.
+
+**Logi do obserwowania:**
+  - `[PROFORMA_CREATE_ERROR]`: nieudane wystawienie proformy w Fakturowni (zamówienie staje się „Nieudane”).
+  - `[PROFORMA_SAVE_ERROR]`: proforma powstała w Fakturowni, ale nie udało się jej zapisać przy zamówieniu (zamówienie staje się „Nieudane”; w logu dane dokumentu do ręcznego uzgodnienia), albo e-mail poszedł, ale nie udało się zapisać znacznika wysyłki.
+  - `[PROFORMA_EMAIL_ERROR]`: nieudana wysyłka proformy e-mailem (jedna próba; błąd zapisany w zamówieniu, PDF nadal dostępny).
+
+**Do potwierdzenia na prawdziwym koncie Fakturowni** (integracja była testowana tylko na mocku):
+  - `from_invoice_id` wiąże fakturę VAT z proformą (wysyłamy pełny payload faktury z tym polem, a nie `copy_invoice_from`),
+  - seria numeracji proform,
+  - numer konta bankowego widoczny na PDF proformy,
+  - `payment_to` (termin płatności) widoczny na proformie.
+  - czy Fakturownia wysyła proformę e-mailem na koncie z włączonym KSeF.
 
 ### Lista kontrolna wdrożenia
 

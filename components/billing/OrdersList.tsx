@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Building2, ExternalLink, FileDown, Loader2, Receipt, RefreshCw, User } from "lucide-react";
-import { ORDER_STATUS_LABELS, formatGrosze, formatOrderItem } from "@/lib/billing/labels";
+import { ORDER_STATUS_LABELS, formatGrosze, formatOrderItem, formatYmdPl, orderStatusLabel } from "@/lib/billing/labels";
+import { isProformaExpired } from "@/lib/billing/proforma-dates";
 
 interface OrderRow {
   id: string;
@@ -10,6 +11,11 @@ interface OrderRow {
   totalGrossGrosze: number;
   createdAt: string;
   paidAt: string | null;
+  paymentMethod: "PAYU" | "PROFORMA";
+  /** YYYY-MM-DD */
+  proformaDueDate: string | null;
+  proformaNumber: string | null;
+  proformaPdfUrl: string | null;
   invoiceStatus: "NOT_REQUIRED" | "PENDING" | "ISSUED";
   invoiceNumber: string | null;
   invoicePdfUrl: string | null;
@@ -40,13 +46,46 @@ const STATUS_CLASSES: Record<OrderRow["status"], string> = {
   FAILED: "bg-red-500/10 text-red-700 dark:text-red-400",
 };
 
-function InvoiceCell({ order }: { order: OrderRow }) {
-  if (order.invoiceStatus === "NOT_REQUIRED") return <span className="text-slate-400">—</span>;
-  if (order.invoiceStatus === "PENDING") {
-    return <span className="text-slate-500 dark:text-slate-400">W przygotowaniu</span>;
-  }
+/** A proforma that ran past its due date looks like a canceled order. */
+const EXPIRED_CLASSES = STATUS_CLASSES.CANCELED;
+
+function ProformaInfo({ order }: { order: OrderRow }) {
   return (
     <div className="flex flex-col items-start gap-1">
+      {order.proformaNumber && <span className="font-medium text-slate-700 dark:text-slate-300">{order.proformaNumber}</span>}
+      {order.proformaPdfUrl && (
+        <a
+          href={order.proformaPdfUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:underline dark:text-blue-400"
+        >
+          <FileDown className="h-3 w-3" />
+          Pobierz proformę
+        </a>
+      )}
+      {order.status === "PENDING_PAYMENT" && order.proformaDueDate && (
+        <span className="text-[11px] text-slate-500 dark:text-slate-400">Termin płatności: {formatYmdPl(order.proformaDueDate)}</span>
+      )}
+    </div>
+  );
+}
+
+function InvoiceCell({ order }: { order: OrderRow }) {
+  if (order.invoiceStatus === "NOT_REQUIRED") {
+    return order.paymentMethod === "PROFORMA" ? <ProformaInfo order={order} /> : <span className="text-slate-400">—</span>;
+  }
+  if (order.invoiceStatus === "PENDING") {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        {order.paymentMethod === "PROFORMA" && <ProformaInfo order={order} />}
+        <span className="text-slate-500 dark:text-slate-400">W przygotowaniu</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col items-start gap-2">
+      {order.paymentMethod === "PROFORMA" && <ProformaInfo order={order} />}
       {order.invoiceNumber && <span className="font-medium text-slate-700 dark:text-slate-300">{order.invoiceNumber}</span>}
       {order.invoicePdfUrl && (
         <a
@@ -167,6 +206,13 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
     loadOrders(scope, null);
   }, [scope, loadOrders]);
 
+  // The credit shop announces a new (proforma) order, so it shows up here without a page reload.
+  useEffect(() => {
+    const reload = () => loadOrders(scope, null);
+    window.addEventListener("orders:changed", reload);
+    return () => window.removeEventListener("orders:changed", reload);
+  }, [scope, loadOrders]);
+
   // GET /api/orders/:id syncs a pending order with PayU (throttled server-side) and returns its current state.
   const checkStatus = useCallback((orderId: string) => {
     if (checkingRef.current.has(orderId)) return;
@@ -227,6 +273,8 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
         : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
     }`;
 
+  const now = new Date();
+
   return (
     <section className="space-y-4">
       <h2 className="text-lg font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
@@ -284,16 +332,18 @@ export default function OrdersList({ canViewOrg }: { canViewOrg: boolean }) {
                       </td>
                       <td className="px-5 py-4">
                         <span
-                          className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${STATUS_CLASSES[order.status]}`}
+                          className={`inline-block rounded-full px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${
+                            isProformaExpired(order, now) ? EXPIRED_CLASSES : STATUS_CLASSES[order.status]
+                          }`}
                         >
-                          {ORDER_STATUS_LABELS[order.status]}
+                          {orderStatusLabel(order, now)}
                         </span>
                       </td>
                       <td className="px-5 py-4">
                         <InvoiceCell order={order} />
                       </td>
                       <td className="px-5 py-4">
-                        {order.status === "PENDING_PAYMENT" && (
+                        {order.status === "PENDING_PAYMENT" && order.paymentMethod === "PAYU" && (
                           <OrderActions order={order} check={rowChecks[order.id]} onCheck={checkStatus} />
                         )}
                       </td>

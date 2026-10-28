@@ -3,6 +3,7 @@ import { mock, test } from "node:test";
 import {
   FakturowniaError,
   buildInvoicePayload,
+  buildProformaPayload,
   createFakturowniaClient,
   getFakturowniaConfig,
   getSharedFakturowniaClient,
@@ -672,4 +673,124 @@ test("sendInvoiceByEmail: empty recipients throw VALIDATION without calling the 
     });
   }
   assert.equal(calls.length, 0);
+});
+
+// --- proforma ---
+
+const proformaOrder = {
+  id: order.id,
+  totalGrossGrosze: order.totalGrossGrosze,
+  items: order.items,
+};
+
+test("buildProformaPayload: sets proforma, buyer and position fields", () => {
+  // 08:00 UTC on 29 Oct is still 29 Oct in Warsaw; +14 days is 12 Nov.
+  assert.deepEqual(buildProformaPayload(proformaOrder, organization, null, issueDate), {
+    kind: "proforma",
+    payment_type: "transfer",
+    issue_date: "2026-10-29",
+    sell_date: "2026-10-29",
+    payment_to: "2026-11-12",
+    currency: "PLN",
+    lang: "pl",
+    oid: `proforma-${order.id}`,
+    calculating_strategy: { position: "keep_gross", sum: "keep_gross" },
+    buyer_name: "Auto Serwis Sp. z o.o.",
+    buyer_tax_no: "5252445767",
+    buyer_street: "ul. Nowa 44",
+    buyer_post_code: "30-314",
+    buyer_city: "Kraków",
+    buyer_country: "PL",
+    buyer_email: "faktury@serwis.example",
+    buyer_company: true,
+    positions: [
+      { name: "Pakiet wycen 10", quantity: 2, tax: 23, total_price_gross: "492.00" },
+      { name: "Pakiet szczegółów szkód 1", quantity: 1, tax: 23, total_price_gross: "24.60" },
+    ],
+  });
+});
+
+test("buildProformaPayload: no oid_unique, status or paid; position sum equals the order gross", () => {
+  const proforma = buildProformaPayload(proformaOrder, organization, null, issueDate) as Record<string, any>;
+  for (const key of ["oid_unique", "status", "paid", "paid_date", "payment_to_kind"]) assert.equal(key in proforma, false, key);
+  const sum = proforma.positions.reduce((acc: number, p: { total_price_gross: string }) => acc + Math.round(Number(p.total_price_gross) * 100), 0);
+  assert.equal(sum, order.totalGrossGrosze);
+});
+
+test("buildProformaPayload: dates use the Europe/Warsaw day of issueDate", () => {
+  // 23:30 UTC on 30 Oct is 00:30 on 31 Oct in Warsaw (CET, UTC+1 after the switch on 25 Oct).
+  const proforma = buildProformaPayload(proformaOrder, organization, null, new Date("2026-10-30T23:30:00.000Z"));
+  assert.equal(proforma.issue_date, "2026-10-31");
+  assert.equal(proforma.sell_date, "2026-10-31");
+  assert.equal(proforma.payment_to, "2026-11-14");
+});
+
+test("buildProformaPayload: department_id only when set", () => {
+  assert.equal("department_id" in buildProformaPayload(proformaOrder, organization, null, issueDate), false);
+  assert.equal(buildProformaPayload(proformaOrder, organization, 42, issueDate).department_id, 42);
+});
+
+test("buildProformaPayload: refuses an order whose items do not add up to its gross total", () => {
+  assert.throws(() => buildProformaPayload({ ...proformaOrder, totalGrossGrosze: 100 }, organization, null, issueDate), /nie sumują się/);
+});
+
+test("buildInvoicePayload: transfer payment type and from_invoice_id as a number", () => {
+  const invoice = buildInvoicePayload(order, organization, null, issueDate, { paymentType: "transfer", fromInvoiceId: "123" });
+  assert.equal(invoice.payment_type, "transfer");
+  assert.equal(invoice.from_invoice_id, 123);
+  assert.equal(typeof invoice.from_invoice_id, "number");
+  assert.equal(invoice.oid, order.id);
+  assert.equal(invoice.oid_unique, "yes");
+  assert.equal(invoice.status, "paid");
+});
+
+test("buildInvoicePayload: without options the payload is unchanged (payu, no from_invoice_id)", () => {
+  assert.equal(validInvoice.payment_type, "payu");
+  assert.equal("from_invoice_id" in validInvoice, false);
+  assert.deepEqual(buildInvoicePayload(order, organization, null, issueDate, {}), validInvoice);
+  assert.deepEqual(buildInvoicePayload(order, organization, null, issueDate, { fromInvoiceId: null }), validInvoice);
+});
+
+test("createProforma: posts the proforma to invoices.json and returns id as string", async () => {
+  const proforma = buildProformaPayload(proformaOrder, organization, null, issueDate);
+  const { calls, fetchImpl } = mockFetch(() => json({ id: 777, number: "PRO/10/2026", token: "protoken" }, 201));
+  const result = await createFakturowniaClient(config, fetchImpl).createProforma(proforma);
+  assert.deepEqual(result, { id: "777", number: "PRO/10/2026", token: "protoken" });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://izzy-test.fakturownia.pl/invoices.json");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { api_token: TOKEN, invoice: JSON.parse(JSON.stringify(proforma)) });
+  assert.equal(calls[0].init.redirect, "error");
+});
+
+test("createProforma: 422 is VALIDATION, also when the message mentions oid (never DUPLICATE_OID)", async () => {
+  const proforma = buildProformaPayload(proformaOrder, organization, null, issueDate);
+  for (const body of [
+    { code: "error", message: { buyer_tax_no: ["jest nieprawidłowy"] } },
+    { code: "error", message: { oid: ["has already been taken"] } },
+  ]) {
+    const { fetchImpl } = mockFetch(() => json(body, 422));
+    await assert.rejects(createFakturowniaClient(config, fetchImpl).createProforma(proforma), (err: unknown) => {
+      assert.ok(err instanceof FakturowniaError);
+      assert.equal(err.code, "VALIDATION");
+      assert.equal(err.status, 422);
+      assert.equal(err.message.includes(TOKEN), false);
+      return true;
+    });
+  }
+});
+
+test("createProforma: 401 is AUTH, 5xx is SERVER, incomplete response is SERVER", async () => {
+  const proforma = buildProformaPayload(proformaOrder, organization, null, issueDate);
+  for (const [response, code] of [
+    [json({ message: "no" }, 401), "AUTH"],
+    [new Response("boom", { status: 503 }), "SERVER"],
+    [json({ id: 1 }, 201), "SERVER"],
+  ] as const) {
+    const { fetchImpl } = mockFetch(() => response.clone());
+    await assert.rejects(
+      createFakturowniaClient(config, fetchImpl).createProforma(proforma),
+      (err: unknown) => err instanceof FakturowniaError && err.code === code,
+    );
+  }
 });

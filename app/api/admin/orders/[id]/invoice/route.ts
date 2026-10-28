@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth-admin";
 import { prisma } from "@/lib/db";
 import { getSharedFakturowniaClient } from "@/lib/invoices/fakturownia";
-import { markInvoiceManual, parseInvoiceAction, retryInvoice } from "@/lib/invoices/admin-actions";
+import { markInvoiceEmailedManually, markInvoiceManual, parseInvoiceAction, retryInvoice } from "@/lib/invoices/admin-actions";
 import { issueInvoiceAfterResponse } from "@/lib/invoices/background";
 import { refreshKsefStatus } from "@/lib/invoices/service";
 
@@ -50,6 +50,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const result = await markInvoiceManual(prisma, id, input.invoiceNumber, new Date());
       if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
       await audit("INVOICE_MARK_MANUAL", { invoiceNumber: input.invoiceNumber });
+      return NextResponse.json({ success: true });
+    }
+
+    if (input.action === "markEmailed") {
+      const result = await markInvoiceEmailedManually(prisma, id, new Date());
+      if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+      await audit("INVOICE_MARK_EMAILED", {});
       return NextResponse.json({ success: true });
     }
 
