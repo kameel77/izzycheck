@@ -4,7 +4,16 @@ import { AudatexHistoryAdapter } from "../audatex/history.ts";
 import { NonRetryableError } from "../audatex/types.ts";
 import { finalizeReport } from "./finalize.ts";
 import { isRateLimited } from "../rate-limit.ts";
-import { ReportModuleId } from "@prisma/client";
+import { ReportModuleId, type CreditType } from "@prisma/client";
+import {
+  NoCreditsError,
+  captureCredit,
+  creditTypeForModule,
+  isPrepaid,
+  recordUnlimitedUsage,
+  releaseCredit,
+  reserveCredit,
+} from "../billing/credits.ts";
 
 const valuationAdapter = new AudatexValuationAdapter();
 const historyAdapter = new AudatexHistoryAdapter();
@@ -12,12 +21,21 @@ const historyAdapter = new AudatexHistoryAdapter();
 export class ModuleExecutionError extends Error {
   statusCode: number;
   isNonRetryable: boolean;
+  code?: "NO_CREDITS";
+  creditType?: CreditType;
 
-  constructor(message: string, statusCode = 400, isNonRetryable = false) {
+  constructor(
+    message: string,
+    statusCode = 400,
+    isNonRetryable = false,
+    extra?: { code?: "NO_CREDITS"; creditType?: CreditType }
+  ) {
     super(message);
     this.name = "ModuleExecutionError";
     this.statusCode = statusCode;
     this.isNonRetryable = isNonRetryable;
+    this.code = extra?.code;
+    this.creditType = extra?.creditType;
   }
 }
 
@@ -99,6 +117,7 @@ export async function executeReportModule(
       moduleResults: true,
       vehicleSnapshot: true,
       damageClaims: true,
+      organization: { select: { id: true, billingMode: true } },
     },
   });
 
@@ -204,28 +223,78 @@ export async function executeReportModule(
     }
   }
 
-  // 5. Atomic Lock Transition with Stale-Lock Recovery (>120s)
+  // 5. Atomic Lock Transition with Stale-Lock Recovery (>120s) and credit reservation.
+  // Lock and reservation share one transaction: a missing credit rolls the lock back (status and retryCount untouched).
+  const creditType = creditTypeForModule(moduleId);
+  const organization: { id: string; billingMode: "PREPAID" | "UNLIMITED" } | null = report.organization ?? null;
   const staleThreshold = new Date(Date.now() - STALE_LOCK_MS);
-  const lockResult = await db.reportModuleResult.updateMany({
-    where: {
-      id: targetModule.id,
-      OR: [
-        { status: { in: ["PENDING", "FAILED"] } },
-        { status: "RUNNING", updatedAt: { lt: staleThreshold } },
-      ],
-    },
-    data: {
-      status: "RUNNING",
-      ...(isRetry ? { retryCount: { increment: 1 } } : {}),
-    },
-  });
+  let lockCount: number;
+  try {
+    lockCount = await db.$transaction(async (tx: any) => {
+      const lockResult = await tx.reportModuleResult.updateMany({
+        where: {
+          id: targetModule.id,
+          OR: [
+            { status: { in: ["PENDING", "FAILED"] } },
+            { status: "RUNNING", updatedAt: { lt: staleThreshold } },
+          ],
+        },
+        data: {
+          status: "RUNNING",
+          ...(isRetry ? { retryCount: { increment: 1 } } : {}),
+        },
+      });
 
-  if (lockResult.count === 0) {
+      if (lockResult.count === 1 && creditType && isPrepaid(organization)) {
+        await reserveCredit(tx, {
+          organizationId: organization!.id,
+          reportId,
+          moduleId,
+          creditType,
+          staleBefore: new Date(Date.now() - STALE_LOCK_MS),
+        });
+      }
+      return lockResult.count as number;
+    });
+  } catch (err: any) {
+    if (err instanceof NoCreditsError) {
+      const what = err.creditType === "VALUATION" ? "wycenę pojazdu" : "szczegóły szkód";
+      throw new ModuleExecutionError(
+        `Brak dostępnych kredytów na ${what}. Dokup kredyty, aby kontynuować.`,
+        402,
+        false,
+        { code: "NO_CREDITS", creditType: err.creditType }
+      );
+    }
+    throw err;
+  }
+
+  if (lockCount === 0) {
     throw new ModuleExecutionError(
       "Moduł jest obecnie przetwarzany przez inne żądanie.",
       409
     );
   }
+
+  // Credit settlement for the final result update of a paid module (runs inside the same transaction as that update).
+  // chargeable = the module produced a billable result; otherwise a PREPAID reservation is released.
+  const settleCredit = async (tx: any, chargeable: boolean) => {
+    if (!creditType || !organization) return;
+    const args = {
+      organizationId: organization.id,
+      reportId,
+      moduleId,
+      creditType,
+      userId: report.createdById,
+    };
+    if (isPrepaid(organization)) {
+      if (chargeable) await captureCredit(tx, args);
+      else await releaseCredit(tx, { reportId, moduleId });
+    } else if (chargeable) {
+      await recordUnlimitedUsage(tx, args);
+    }
+  };
+  const hasCreditOps = Boolean(creditType && organization);
 
   // 6. Execute Specific Module Logic
   let executionSuccess = false;
@@ -278,7 +347,7 @@ export async function executeReportModule(
       executedStatus = "SUCCEEDED";
       executionSuccess = true;
 
-      await db.reportModuleResult.update({
+      const valuationUpdate = {
         where: { id: targetModule.id },
         data: {
           status: "SUCCEEDED",
@@ -286,7 +355,15 @@ export async function executeReportModule(
           errorMessage: null,
           responseMetadata: JSON.stringify({ ibsCode: valRes.ibsCode, make: valRes.make, model: valRes.model }),
         },
-      });
+      };
+      if (hasCreditOps) {
+        await db.$transaction(async (tx: any) => {
+          await tx.reportModuleResult.update(valuationUpdate);
+          await settleCredit(tx, true);
+        });
+      } else {
+        await db.reportModuleResult.update(valuationUpdate);
+      }
     } else if (moduleId === "CLAIM_CHECK") {
       const checkRes = await histAdapter.checkClaimHistory({
         vin: report.vin,
@@ -362,7 +439,7 @@ export async function executeReportModule(
       executedStatus = "SUCCEEDED";
       executionSuccess = true;
 
-      await db.reportModuleResult.update({
+      const detailsUpdate = {
         where: { id: targetModule.id },
         data: {
           status: "SUCCEEDED",
@@ -370,20 +447,37 @@ export async function executeReportModule(
           errorMessage: null,
           responseMetadata: JSON.stringify({ claimsCount: detailsRes.claims.length }),
         },
-      });
+      };
+      if (hasCreditOps) {
+        await db.$transaction(async (tx: any) => {
+          await tx.reportModuleResult.update(detailsUpdate);
+          // Zero claims is a free result: the reservation is released instead of captured.
+          await settleCredit(tx, detailsRes.claims.length > 0);
+        });
+      } else {
+        await db.reportModuleResult.update(detailsUpdate);
+      }
     }
   } catch (err: any) {
     executionError = err;
     const isNonRetryable = err instanceof NonRetryableError || Boolean(err.isNonRetryable);
 
-    await db.reportModuleResult.update({
+    const failureUpdate = {
       where: { id: targetModule.id },
       data: {
         status: "FAILED",
         isNonRetryable,
         errorMessage: err.message || "Błąd wykonania modułu Audatex.",
       },
-    });
+    };
+    if (hasCreditOps) {
+      await db.$transaction(async (tx: any) => {
+        await tx.reportModuleResult.update(failureUpdate);
+        await settleCredit(tx, false);
+      });
+    } else {
+      await db.reportModuleResult.update(failureUpdate);
+    }
   }
 
   // 7. Invariant D-6: Unfreeze PDF on successful module retry
@@ -421,7 +515,7 @@ export async function executeReportModule(
  * determines the final report status (COMPLETED / PARTIALLY_FAILED / FAILED)
  * and executes finalizeReport.
  */
-async function checkAndFinalizeReportIfDone(reportId: string, db: any) {
+export async function checkAndFinalizeReportIfDone(reportId: string, db: any) {
   const currentReport = await db.report.findUnique({
     where: { id: reportId },
     include: { moduleResults: true },

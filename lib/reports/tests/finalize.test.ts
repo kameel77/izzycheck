@@ -196,6 +196,7 @@ describe("Report Finalization & PDF Immutability Rules", () => {
       damageClaim: {
         deleteMany: async () => ({ count: 0 }),
       },
+      $transaction: async (fn: any) => fn(mockPrisma),
     };
 
     const mockValAdapter = {
