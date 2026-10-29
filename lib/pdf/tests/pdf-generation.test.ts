@@ -630,11 +630,11 @@ describe("PDF Generation & View Model Module", () => {
       const texts = textsOf(tree);
       assert.ok(texts.includes("Cena nowego pojazdu (CV)"));
       assert.ok(texts.includes("Wartość rynkowa (COB)"));
-      assert.ok(texts.includes("Wartość techniczna (TH)"));
+      assert.ok(!texts.includes("Wartość techniczna (TH)"));
       assert.ok(texts.includes("256 958 PLN brutto"));
       assert.ok(texts.includes("(208 909 PLN netto)"));
-      assert.ok(texts.includes("145 140 PLN brutto"));
-      assert.ok(texts.includes("(118 000 PLN netto)"));
+      assert.ok(!texts.includes("145 140 PLN brutto"));
+      assert.ok(!texts.includes("(118 000 PLN netto)"));
       assert.ok(texts.includes("Wartość rynkowa = 60% ceny nowego"));
     });
 
@@ -749,9 +749,9 @@ describe("PDF Generation & View Model Module", () => {
           "full caption on the two claim pages"
         );
         assert.ok(texts.includes("brutto, szacunek"), "short caption in the table / timeline");
-        // vehicle valuation prices show gross as primary and net in parentheses below (KPI tile + 3 valuation cells)
-        assert.strictEqual(texts.filter((t) => t.endsWith("PLN brutto")).length, 4);
-        assert.strictEqual(texts.filter((t) => /^\(.*PLN netto\)$/.test(t)).length, 4);
+        // vehicle valuation prices show gross as primary and net in parentheses below (KPI tile + 2 valuation cells)
+        assert.strictEqual(texts.filter((t) => t.endsWith("PLN brutto")).length, 3);
+        assert.strictEqual(texts.filter((t) => /^\(.*PLN netto\)$/.test(t)).length, 3);
         assert.strictEqual(texts.some((t) => /^\d[\d ]* PLN$/.test(t)), false, "no net damage amount in the timeline");
         assert.ok(texts.includes("brutto, szacunek"));
       });

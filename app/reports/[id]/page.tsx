@@ -720,7 +720,7 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 p-6 space-y-2 shadow-sm">
                 <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Cena Nowego (CVv)</span>
                 {renderValuationPrice(snapshot?.newPriceCv, "text-slate-900 dark:text-white")}
@@ -731,12 +731,6 @@ export default function ReportDetailPage({ params }: { params: Promise<{ id: str
                 <span className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wider">Cena Rynkowa (COBv)</span>
                 {renderValuationPrice(snapshot?.marketPriceCob, "text-blue-600 dark:text-blue-400")}
                 <p className="text-[11px] text-slate-600 dark:text-slate-300">Bieżąca szacunkowa wartość rynkowa pojazdu</p>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 p-6 space-y-2 shadow-sm">
-                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Wartość Techniczna (THv)</span>
-                {renderValuationPrice(snapshot?.technicalValueTh, "text-emerald-600 dark:text-emerald-400")}
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">Wartość techniczna pojazdu wyliczona przez Audatex</p>
               </div>
             </div>
           </div>

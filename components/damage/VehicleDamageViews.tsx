@@ -11,7 +11,7 @@ import {
   UNDERBODY_VIEWBOX_W,
 } from "@/lib/damage/vehicle-templates";
 
-export type StageMode = "standard" | "contrast" | "schematic";
+export type StageMode = "standard" | "contrast";
 
 interface VehicleDamageViewsProps {
   template?: VehicleTemplateDefinition;
@@ -36,7 +36,7 @@ export function VehicleDamageViews({
   useEffect(() => {
     try {
       const savedMode = localStorage.getItem("izzycheck.stageMode") as StageMode | null;
-      if (savedMode === "standard" || savedMode === "contrast" || savedMode === "schematic") {
+      if (savedMode === "standard" || savedMode === "contrast") {
         setStageMode(savedMode);
       }
     } catch {
@@ -75,7 +75,7 @@ export function VehicleDamageViews({
           )}
         </div>
 
-        {/* 3-Mode Stage Presentation Switcher */}
+        {/* 2-Mode Stage Presentation Switcher */}
         <div className="flex items-center gap-1 bg-slate-100 border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-1 rounded-xl shadow-inner">
           <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 px-2 select-none">
             Widok makiety:
@@ -104,18 +104,6 @@ export function VehicleDamageViews({
           >
             Kontrast
           </button>
-          <button
-            type="button"
-            onClick={() => handleSetMode("schematic")}
-            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-              stageMode === "schematic"
-                ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-600 hover:text-slate-900 hover:bg-slate-200 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60"
-            }`}
-            title="Wektorowy schemat SVG (tryb wycofania)"
-          >
-            Schemat SVG
-          </button>
         </div>
       </div>
 
@@ -134,19 +122,13 @@ export function VehicleDamageViews({
           </div>
 
           <div className="relative w-full aspect-[2/1] bg-white rounded-xl overflow-hidden flex items-center justify-center p-0 border border-slate-200 dark:border-slate-800 shadow-inner">
-            {stageMode === "schematic" ? (
-              <div className="w-full h-full bg-slate-100 dark:bg-slate-900/40 p-2">
-                <RightFront3QSvg bodyType={bodyType} />
-              </div>
-            ) : (
-              <img
-                src={frontWebp}
-                alt={PHOTO_1_CAPTION}
-                className={`w-full h-full object-contain select-none pointer-events-none transition-all duration-200 ${
-                  stageMode === "contrast" ? "grayscale contrast-[0.85] brightness-[0.92]" : ""
-                }`}
-              />
-            )}
+            <img
+              src={frontWebp}
+              alt={PHOTO_1_CAPTION}
+              className={`w-full h-full object-contain select-none pointer-events-none transition-all duration-200 ${
+                stageMode === "contrast" ? "grayscale contrast-[0.85] brightness-[0.92]" : ""
+              }`}
+            />
 
             {/* Render markers for RF 3/4 */}
             {rf3qMarkers.map((m) => {
@@ -181,19 +163,13 @@ export function VehicleDamageViews({
           </div>
 
           <div className="relative w-full aspect-[2/1] bg-white rounded-xl overflow-hidden flex items-center justify-center p-0 border border-slate-200 dark:border-slate-800 shadow-inner">
-            {stageMode === "schematic" ? (
-              <div className="w-full h-full bg-slate-100 dark:bg-slate-900/40 p-2">
-                <LeftRear3QSvg bodyType={bodyType} />
-              </div>
-            ) : (
-              <img
-                src={backWebp}
-                alt={PHOTO_2_CAPTION}
-                className={`w-full h-full object-contain select-none pointer-events-none transition-all duration-200 ${
-                  stageMode === "contrast" ? "grayscale contrast-[0.85] brightness-[0.92]" : ""
-                }`}
-              />
-            )}
+            <img
+              src={backWebp}
+              alt={PHOTO_2_CAPTION}
+              className={`w-full h-full object-contain select-none pointer-events-none transition-all duration-200 ${
+                stageMode === "contrast" ? "grayscale contrast-[0.85] brightness-[0.92]" : ""
+              }`}
+            />
 
             {/* Render markers for LR 3/4 */}
             {lr3qMarkers.map((m) => {
@@ -311,128 +287,5 @@ function MarkerTooltip({ marker, viewName }: { marker: ProcessedMarkerItem; view
       {marker.hintPl && <p className="text-slate-500 dark:text-slate-400">{marker.hintPl}</p>}
       <div className="text-[10px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-800 pt-1">{marker.categoryLabelPl}</div>
     </div>
-  );
-}
-
-// Right Front 3/4 SVG Canvas (400 x 200) with Body Type Silhouettes
-function RightFront3QSvg({ bodyType }: { bodyType: VehicleBodyType }) {
-  // SVG paths depending on bodyType (SUV, Sedan, Hatchback, Wagon)
-  const isSuv = bodyType === "passenger-suv";
-  const isWagon = bodyType === "passenger-wagon";
-  const isHatch = bodyType === "passenger-hatchback";
-
-  const bodyPath = isSuv
-    ? "M 50 115 L 80 80 L 130 45 L 210 40 L 265 65 L 305 90 L 345 110 L 375 130 L 365 155 L 325 165 L 135 165 L 75 150 Z"
-    : isWagon
-    ? "M 50 110 L 80 75 L 140 50 L 230 48 L 265 68 L 305 92 L 345 112 L 370 132 L 360 155 L 320 165 L 140 165 L 75 150 Z"
-    : isHatch
-    ? "M 65 115 L 95 82 L 145 52 L 215 50 L 260 70 L 300 95 L 340 115 L 370 135 L 360 155 L 320 165 L 140 165 L 80 155 Z"
-    : "M 60 120 L 90 90 L 140 55 L 210 50 L 260 70 L 300 95 L 340 115 L 370 135 L 360 155 L 320 165 L 140 165 L 80 155 Z";
-
-  const glassPath = isSuv
-    ? "M 135 50 L 205 45 L 260 70 L 215 90 L 145 90 Z"
-    : isWagon
-    ? "M 135 55 L 225 53 L 260 73 L 215 93 L 145 93 Z"
-    : "M 145 60 L 205 55 L 255 75 L 215 95 L 155 95 Z";
-
-  return (
-    <svg viewBox="0 0 400 200" className="w-full h-full text-slate-700 select-none">
-      <defs>
-        <linearGradient id="carBodyRF" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#334155" />
-          <stop offset="100%" stopColor="#1e293b" />
-        </linearGradient>
-        <linearGradient id="glassRF" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.4" />
-          <stop offset="100%" stopColor="#0284c7" stopOpacity="0.2" />
-        </linearGradient>
-      </defs>
-
-      {/* Shadow */}
-      <ellipse cx="220" cy="165" rx="150" ry="20" fill="#020617" opacity="0.6" />
-
-      {/* Main Car Silhouette */}
-      <path d={bodyPath} fill="url(#carBodyRF)" stroke="#64748b" strokeWidth="2" />
-
-      {/* Roof & Windshield Glasses */}
-      <path d={glassPath} fill="url(#glassRF)" stroke="#38bdf8" strokeWidth="1.5" />
-
-      {/* Front Hood Line */}
-      <path d="M 255 75 L 300 95 L 345 120" stroke="#475569" strokeWidth="1.5" fill="none" />
-
-      {/* Right Front Wheel */}
-      <ellipse cx="330" cy="155" rx="22" ry="14" fill="#0f172a" stroke="#94a3b8" strokeWidth="2" />
-      <ellipse cx="330" cy="155" rx="12" ry="7" fill="#334155" />
-
-      {/* Right Rear Wheel */}
-      <ellipse cx="140" cy="155" rx="20" ry="13" fill="#0f172a" stroke="#94a3b8" strokeWidth="2" />
-      <ellipse cx="140" cy="155" rx="10" ry="6" fill="#334155" />
-
-      {/* Headlights Front Right */}
-      <polygon points="340,120 365,135 345,140" fill="#fef08a" opacity="0.8" stroke="#facc15" strokeWidth="1" />
-      {/* Front Grille */}
-      <path d="M 310 125 L 340 138 L 335 150 L 305 135 Z" fill="#020617" stroke="#475569" strokeWidth="1" />
-    </svg>
-  );
-}
-
-// Left Rear 3/4 SVG Canvas (400 x 200) with Body Type Silhouettes
-function LeftRear3QSvg({ bodyType }: { bodyType: VehicleBodyType }) {
-  const isSuv = bodyType === "passenger-suv";
-  const isWagon = bodyType === "passenger-wagon";
-  const isHatch = bodyType === "passenger-hatchback";
-
-  const bodyPath = isSuv
-    ? "M 45 125 L 60 100 L 105 70 L 155 45 L 225 42 L 275 65 L 335 90 L 355 115 L 335 155 L 260 165 L 90 165 Z"
-    : isWagon
-    ? "M 45 125 L 55 90 L 100 65 L 155 48 L 225 46 L 275 68 L 335 92 L 355 118 L 335 155 L 260 165 L 90 165 Z"
-    : isHatch
-    ? "M 50 130 L 65 105 L 105 72 L 155 50 L 220 48 L 270 70 L 330 95 L 350 120 L 330 155 L 260 165 L 90 165 Z"
-    : "M 50 135 L 70 115 L 115 85 L 160 55 L 220 50 L 270 70 L 330 95 L 350 120 L 330 155 L 260 165 L 90 165 Z";
-
-  const glassPath = isSuv
-    ? "M 115 70 L 155 50 L 220 45 L 255 70 L 170 90 Z"
-    : isWagon
-    ? "M 105 65 L 155 50 L 220 48 L 255 70 L 165 92 Z"
-    : "M 125 85 L 165 60 L 215 55 L 250 80 L 175 95 Z";
-
-  return (
-    <svg viewBox="0 0 400 200" className="w-full h-full text-slate-700 select-none">
-      <defs>
-        <linearGradient id="carBodyLR" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#334155" />
-          <stop offset="100%" stopColor="#1e293b" />
-        </linearGradient>
-        <linearGradient id="glassLR" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.4" />
-          <stop offset="100%" stopColor="#0284c7" stopOpacity="0.2" />
-        </linearGradient>
-      </defs>
-
-      {/* Shadow */}
-      <ellipse cx="180" cy="165" rx="150" ry="20" fill="#020617" opacity="0.6" />
-
-      {/* Main Car Silhouette */}
-      <path d={bodyPath} fill="url(#carBodyLR)" stroke="#64748b" strokeWidth="2" />
-
-      {/* Roof & Rear Windshield Glasses */}
-      <path d={glassPath} fill="url(#glassLR)" stroke="#38bdf8" strokeWidth="1.5" />
-
-      {/* Trunk Line */}
-      <path d="M 70 115 L 115 85 L 175 95" stroke="#475569" strokeWidth="1.5" fill="none" />
-
-      {/* Rear Left Wheel */}
-      <ellipse cx="110" cy="155" rx="22" ry="14" fill="#0f172a" stroke="#94a3b8" strokeWidth="2" />
-      <ellipse cx="110" cy="155" rx="12" ry="7" fill="#334155" />
-
-      {/* Front Left Wheel */}
-      <ellipse cx="290" cy="155" rx="20" ry="13" fill="#0f172a" stroke="#94a3b8" strokeWidth="2" />
-      <ellipse cx="290" cy="155" rx="10" ry="6" fill="#334155" />
-
-      {/* Rear Taillights Left */}
-      <polygon points="60,125 90,115 85,135" fill="#f87171" opacity="0.9" stroke="#ef4444" strokeWidth="1" />
-      {/* Bumper Bottom Line */}
-      <path d="M 60 135 L 90 155 L 130 155" stroke="#334155" strokeWidth="2" fill="none" />
-    </svg>
   );
 }

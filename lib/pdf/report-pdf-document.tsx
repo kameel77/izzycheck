@@ -879,15 +879,6 @@ export function ReportPdfDocument({ model }: { model: ReportPdfViewModel }): Rea
                 </Text>
                 <Text style={styles.caption}>{`(${formatAmount(model.marketPriceCob as number)} PLN netto)`}</Text>
               </View>
-              <View style={styles.valuationCell}>
-                <Text style={styles.label}>Wartość techniczna (TH)</Text>
-                <Text style={styles.valuationValue}>
-                  {model.technicalValueTh !== undefined ? `${formatGrossAmount(model.technicalValueTh)} PLN brutto` : "—"}
-                </Text>
-                <Text style={styles.caption}>
-                  {model.technicalValueTh !== undefined ? `(${formatAmount(model.technicalValueTh)} PLN netto)` : NET_LABEL}
-                </Text>
-              </View>
             </View>
             {marketPct !== undefined && (
               <View wrap={false}>
