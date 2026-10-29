@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Tags, Plus, Edit2, Check, X, RefreshCw, Loader2, AlertCircle } from "lucide-react";
-import { CREDIT_TYPE_LABELS } from "@/lib/billing/labels";
 import { unitGrossFromNet } from "@/lib/billing/pricing";
 
 type CreditType = "VALUATION" | "CLAIM_DETAILS";
@@ -15,26 +14,26 @@ interface CreditPackage {
   priceNetGrosze: number;
   vatRate: number;
   isActive: boolean;
-  sortOrder: number;
 }
 
 interface FormState {
   name: string;
-  creditType: CreditType;
   credits: string;
   pricePln: string;
   vatRate: string;
-  sortOrder: string;
 }
 
 const EMPTY_FORM: FormState = {
   name: "",
-  creditType: "VALUATION",
   credits: "",
   pricePln: "",
   vatRate: "23",
-  sortOrder: "0",
 };
+
+const SECTIONS: Array<{ creditType: CreditType; title: string }> = [
+  { creditType: "VALUATION", title: "Pakiety wyceny pojazdu" },
+  { creditType: "CLAIM_DETAILS", title: "Pakiety raportów historii szkód" },
+];
 
 const pln = new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN" });
 const formatGrosze = (grosze: number) => pln.format(grosze / 100);
@@ -55,15 +54,13 @@ function groszeToPlnInput(grosze: number): string {
 function formFromPackage(p: CreditPackage): FormState {
   return {
     name: p.name,
-    creditType: p.creditType,
     credits: String(p.credits),
     pricePln: groszeToPlnInput(p.priceNetGrosze),
     vatRate: String(p.vatRate),
-    sortOrder: String(p.sortOrder),
   };
 }
 
-/** Converts the form to an API body, or returns an error message. */
+/** Converts the form to an API body, or returns an error message. The credit type is never part of the form. */
 function formToBody(form: FormState): { body: Record<string, unknown> } | { error: string } {
   const priceNetGrosze = plnToGrosze(form.pricePln);
   if (priceNetGrosze === null) {
@@ -72,82 +69,135 @@ function formToBody(form: FormState): { body: Record<string, unknown> } | { erro
   return {
     body: {
       name: form.name,
-      creditType: form.creditType,
       credits: form.credits.trim() === "" ? null : Number(form.credits),
       priceNetGrosze,
       vatRate: form.vatRate.trim() === "" ? null : Number(form.vatRate),
-      sortOrder: form.sortOrder.trim() === "" ? null : Number(form.sortOrder),
     },
   };
 }
 
-const inputClass =
-  "rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white";
-const labelClass = "text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400";
+/** Live preview numbers, or null while the form is not valid enough to compute them. */
+function previewFromForm(form: FormState): { gross: number; perReportNet: number } | null {
+  const priceNet = plnToGrosze(form.pricePln);
+  if (priceNet === null || priceNet <= 0) return null;
+  if (!/^\d+$/.test(form.credits.trim()) || !/^\d+$/.test(form.vatRate.trim())) return null;
+  const credits = Number(form.credits);
+  const vatRate = Number(form.vatRate);
+  if (credits < 1 || vatRate > 100) return null;
+  return { gross: unitGrossFromNet(priceNet, vatRate), perReportNet: priceNet / credits };
+}
 
-function PackageFields({ form, onChange }: { form: FormState; onChange: (next: FormState) => void }) {
-  const set = (patch: Partial<FormState>) => onChange({ ...form, ...patch });
+const inputClass =
+  "w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white";
+const labelClass = "text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400";
+const helpClass = "text-[11px] text-slate-500 dark:text-slate-400";
+
+function Field({
+  label,
+  help,
+  className = "",
+  children,
+}: {
+  label: string;
+  help: string;
+  className?: string;
+  children: (ids: { id: string; describedBy: string }) => React.ReactNode;
+}) {
+  const id = useId();
+  const helpId = `${id}-help`;
   return (
-    <>
-      <input
-        aria-label="Nazwa"
-        value={form.name}
-        onChange={(e) => set({ name: e.target.value })}
-        className={`${inputClass} w-full min-w-[10rem]`}
-      />
-      <select
-        aria-label="Rodzaj"
-        value={form.creditType}
-        onChange={(e) => set({ creditType: e.target.value as CreditType })}
-        className={inputClass}
-      >
-        {(Object.keys(CREDIT_TYPE_LABELS) as CreditType[]).map((t) => (
-          <option key={t} value={t}>
-            {CREDIT_TYPE_LABELS[t]}
-          </option>
-        ))}
-      </select>
-      <input
-        aria-label="Kredyty"
-        type="number"
-        min={1}
-        value={form.credits}
-        onChange={(e) => set({ credits: e.target.value })}
-        className={`${inputClass} w-24`}
-      />
-      <input
-        aria-label="Cena netto (PLN)"
-        inputMode="decimal"
-        value={form.pricePln}
-        onChange={(e) => set({ pricePln: e.target.value })}
-        placeholder="0,00"
-        className={`${inputClass} w-28`}
-      />
-      <input
-        aria-label="VAT (%)"
-        type="number"
-        min={0}
-        max={100}
-        value={form.vatRate}
-        onChange={(e) => set({ vatRate: e.target.value })}
-        className={`${inputClass} w-20`}
-      />
-      <input
-        aria-label="Kolejność"
-        type="number"
-        value={form.sortOrder}
-        onChange={(e) => set({ sortOrder: e.target.value })}
-        className={`${inputClass} w-20`}
-      />
-    </>
+    <div className={`flex flex-col gap-1 ${className}`}>
+      <label htmlFor={id} className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+        {label}
+      </label>
+      {children({ id, describedBy: helpId })}
+      <p id={helpId} className={helpClass}>
+        {help}
+      </p>
+    </div>
   );
 }
 
-export default function AdminCreditPackagesPage() {
-  const [packages, setPackages] = useState<CreditPackage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+function PackageFields({ form, onChange }: { form: FormState; onChange: (next: FormState) => void }) {
+  const set = (patch: Partial<FormState>) => onChange({ ...form, ...patch });
+  const preview = previewFromForm(form);
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Field
+          label="Nazwa pakietu"
+          help="Widoczna dla klienta w sklepie, na proformie i fakturze, np. „10 raportów historii szkód”."
+          className="sm:col-span-2"
+        >
+          {({ id, describedBy }) => (
+            <input
+              id={id}
+              aria-describedby={describedBy}
+              value={form.name}
+              onChange={(e) => set({ name: e.target.value })}
+              className={inputClass}
+            />
+          )}
+        </Field>
+        <Field label="Liczba raportów" help="Ile raportów (kredytów) klient dostaje w pakiecie.">
+          {({ id, describedBy }) => (
+            <input
+              id={id}
+              aria-describedby={describedBy}
+              type="number"
+              min={1}
+              value={form.credits}
+              onChange={(e) => set({ credits: e.target.value })}
+              className={inputClass}
+            />
+          )}
+        </Field>
+        <Field label="Cena netto pakietu (zł)" help="Cena za cały pakiet, bez VAT.">
+          {({ id, describedBy }) => (
+            <input
+              id={id}
+              aria-describedby={describedBy}
+              inputMode="decimal"
+              value={form.pricePln}
+              onChange={(e) => set({ pricePln: e.target.value })}
+              placeholder="0,00"
+              className={inputClass}
+            />
+          )}
+        </Field>
+        <Field label="Stawka VAT (%)" help="Zwykle 23.">
+          {({ id, describedBy }) => (
+            <input
+              id={id}
+              aria-describedby={describedBy}
+              type="number"
+              min={0}
+              max={100}
+              value={form.vatRate}
+              onChange={(e) => set({ vatRate: e.target.value })}
+              className={inputClass}
+            />
+          )}
+        </Field>
+      </div>
+      {preview && (
+        <p className="text-xs font-medium text-slate-700 dark:text-slate-200">
+          Brutto: {formatGrosze(preview.gross)} · za raport: {formatGrosze(preview.perReportNet)} netto
+        </p>
+      )}
+    </div>
+  );
+}
 
+interface SectionProps {
+  creditType: CreditType;
+  title: string;
+  packages: CreditPackage[];
+  onReload: () => Promise<void>;
+  onError: (message: string) => void;
+}
+
+function PackageSection({ creditType, title, packages, onReload, onError }: SectionProps) {
   const [showAdd, setShowAdd] = useState(false);
   const [addForm, setAddForm] = useState<FormState>(EMPTY_FORM);
   const [addError, setAddError] = useState("");
@@ -158,30 +208,12 @@ export default function AdminCreditPackagesPage() {
   const [editError, setEditError] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  const load = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch("/api/admin/credit-packages");
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Nie udało się pobrać cennika pakietów.");
-      } else {
-        setPackages(data.packages || []);
-      }
-    } catch {
-      setError("Wystąpił błąd sieciowy podczas pobierania danych.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
+  // Smallest package first; the sort is stable, so ties keep the server order (createdAt).
+  const sorted = [...packages].sort((a, b) => a.credits - b.credits);
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (adding) return;
     setAddError("");
     const converted = formToBody(addForm);
     if ("error" in converted) {
@@ -193,13 +225,13 @@ export default function AdminCreditPackagesPage() {
       const res = await fetch("/api/admin/credit-packages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(converted.body),
+        body: JSON.stringify({ ...converted.body, creditType }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Nie udało się dodać pakietu.");
       setAddForm(EMPTY_FORM);
       setShowAdd(false);
-      await load();
+      await onReload();
     } catch (err: any) {
       setAddError(err.message || "Nie udało się dodać pakietu.");
     } finally {
@@ -224,6 +256,7 @@ export default function AdminCreditPackagesPage() {
   };
 
   const handleSaveEdit = async (id: string) => {
+    if (savingId) return;
     setEditError("");
     const converted = formToBody(editForm);
     if ("error" in converted) {
@@ -234,7 +267,7 @@ export default function AdminCreditPackagesPage() {
     try {
       await patchPackage(id, converted.body);
       setEditingId(null);
-      await load();
+      await onReload();
     } catch (err: any) {
       setEditError(err.message || "Nie udało się zapisać pakietu.");
     } finally {
@@ -243,69 +276,44 @@ export default function AdminCreditPackagesPage() {
   };
 
   const handleToggleActive = async (p: CreditPackage) => {
+    if (savingId) return;
     setSavingId(p.id);
-    setError("");
+    onError("");
     try {
       await patchPackage(p.id, { isActive: !p.isActive });
-      await load();
+      await onReload();
     } catch (err: any) {
-      setError(err.message || "Nie udało się zmienić aktywności pakietu.");
+      onError(err.message || "Nie udało się zmienić aktywności pakietu.");
     } finally {
       setSavingId(null);
     }
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-3">
-            <Tags className="h-7 w-7 text-blue-600 dark:text-blue-400" />
-            Cennik kredytów
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Pakiety kredytów dostępne w sklepie. Ceny podawane netto, VAT naliczany od ceny za sztukę. Pakietów nie usuwamy,
-            wyłączamy je z oferty.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={load}
-            title="Odśwież"
-            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors shadow-sm"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Odśwież
-          </button>
-          <button
-            onClick={() => {
-              setShowAdd((v) => !v);
-              setAddError("");
-            }}
-            className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500 shadow-sm shadow-blue-500/20 transition-all"
-          >
-            <Plus className="h-4 w-4" />
-            Nowy pakiet
-          </button>
-        </div>
+    <section className="space-y-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <h2 className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">{title}</h2>
+        <button
+          type="button"
+          onClick={() => {
+            setShowAdd((v) => !v);
+            setAddError("");
+          }}
+          className="flex items-center gap-2 self-start rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-500 shadow-sm shadow-blue-500/20 transition-all"
+        >
+          <Plus className="h-4 w-4" />
+          Dodaj pakiet
+        </button>
       </div>
-
-      {error && (
-        <div className="flex items-center gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-xs font-medium text-red-600 dark:text-red-400">
-          <AlertCircle className="h-5 w-5 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
 
       {showAdd && (
         <form
           onSubmit={handleAdd}
           className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-3 dark:border-slate-800 dark:bg-slate-900"
         >
-          <h2 className={labelClass}>Nowy pakiet</h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <PackageFields form={addForm} onChange={setAddForm} />
+          <h3 className={labelClass}>Nowy pakiet: {title.toLowerCase()}</h3>
+          <PackageFields form={addForm} onChange={setAddForm} />
+          <div className="flex items-center gap-3">
             <button
               type="submit"
               disabled={adding}
@@ -314,38 +322,29 @@ export default function AdminCreditPackagesPage() {
               {adding && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Dodaj
             </button>
+            {addError && <p className="text-xs text-red-600 dark:text-red-400">{addError}</p>}
           </div>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            Kolumny: nazwa, rodzaj, kredyty, cena netto (PLN), VAT (%), kolejność.
-          </p>
-          {addError && <p className="text-xs text-red-600 dark:text-red-400">{addError}</p>}
         </form>
       )}
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 overflow-x-auto">
-        {loading ? (
-          <div className="flex items-center justify-center p-12 text-slate-500 text-xs">
-            <Loader2 className="h-6 w-6 animate-spin text-blue-500 mr-2" />
-            Ładowanie cennika...
-          </div>
-        ) : packages.length === 0 ? (
-          <div className="p-12 text-center text-xs text-slate-500 dark:text-slate-400">Brak pakietów w cenniku.</div>
+        {sorted.length === 0 ? (
+          <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">Brak pakietów.</div>
         ) : (
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 <th className="px-4 py-3 font-semibold">Nazwa</th>
-                <th className="px-4 py-3 font-semibold">Rodzaj</th>
-                <th className="px-4 py-3 font-semibold text-right">Kredyty</th>
-                <th className="px-4 py-3 font-semibold text-right">Cena netto</th>
-                <th className="px-4 py-3 font-semibold text-right">Cena brutto</th>
-                <th className="px-4 py-3 font-semibold text-right">Cena/szt. netto</th>
-                <th className="px-4 py-3 font-semibold">Aktywny</th>
+                <th className="px-4 py-3 font-semibold text-right">Liczba raportów</th>
+                <th className="px-4 py-3 font-semibold text-right">Cena netto pakietu</th>
+                <th className="px-4 py-3 font-semibold text-right">Cena brutto pakietu</th>
+                <th className="px-4 py-3 font-semibold text-right">Cena za raport (netto)</th>
+                <th className="px-4 py-3 font-semibold">Widoczny w sklepie</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody>
-              {packages.map((p) => {
+              {sorted.map((p) => {
                 const isEditing = editingId === p.id;
                 const isSaving = savingId === p.id;
                 return (
@@ -356,16 +355,13 @@ export default function AdminCreditPackagesPage() {
                     }`}
                   >
                     {isEditing ? (
-                      <td colSpan={7} className="px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <PackageFields form={editForm} onChange={setEditForm} />
-                        </div>
+                      <td colSpan={6} className="px-4 py-3">
+                        <PackageFields form={editForm} onChange={setEditForm} />
                         {editError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{editError}</p>}
                       </td>
                     ) : (
                       <>
                         <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white">{p.name}</td>
-                        <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{CREDIT_TYPE_LABELS[p.creditType]}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-slate-900 dark:text-white">{p.credits}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-slate-900 dark:text-white">
                           {formatGrosze(p.priceNetGrosze)}
@@ -382,7 +378,7 @@ export default function AdminCreditPackagesPage() {
                             type="button"
                             role="switch"
                             aria-checked={p.isActive}
-                            aria-label={p.isActive ? "Wyłącz pakiet" : "Włącz pakiet"}
+                            aria-label={p.isActive ? "Ukryj pakiet w sklepie" : "Pokaż pakiet w sklepie"}
                             disabled={isSaving}
                             onClick={() => handleToggleActive(p)}
                             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-50 ${
@@ -398,7 +394,7 @@ export default function AdminCreditPackagesPage() {
                         </td>
                       </>
                     )}
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 align-top">
                       <div className="flex items-center justify-end gap-1.5">
                         {isEditing ? (
                           <>
@@ -440,6 +436,89 @@ export default function AdminCreditPackagesPage() {
           </table>
         )}
       </div>
+    </section>
+  );
+}
+
+export default function AdminCreditPackagesPage() {
+  const [packages, setPackages] = useState<CreditPackage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/credit-packages");
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Nie udało się pobrać cennika pakietów.");
+      } else {
+        setPackages(data.packages || []);
+        setLoaded(true);
+      }
+    } catch {
+      setError("Wystąpił błąd sieciowy podczas pobierania danych.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-3">
+            <Tags className="h-7 w-7 text-blue-600 dark:text-blue-400" />
+            Cennik kredytów
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Pakiety to oferta, którą klienci kupują w sklepie na /credits. Ceny podajemy netto. Nieaktywne pakiety znikają ze
+            sklepu, ale zostają na dotychczasowych zamówieniach.
+          </p>
+        </div>
+
+        <button
+          onClick={load}
+          title="Odśwież"
+          className="flex items-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors shadow-sm"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading && loaded ? "animate-spin" : ""}`} />
+          Odśwież
+        </button>
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-xs font-medium text-red-600 dark:text-red-400">
+          <AlertCircle className="h-5 w-5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {!loaded ? (
+        loading && (
+          <div className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-12 text-slate-500 text-xs shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <Loader2 className="h-6 w-6 animate-spin text-blue-500 mr-2" />
+            Ładowanie cennika...
+          </div>
+        )
+      ) : (
+        SECTIONS.map((section) => (
+          <PackageSection
+            key={section.creditType}
+            creditType={section.creditType}
+            title={section.title}
+            packages={packages.filter((p) => p.creditType === section.creditType)}
+            onReload={load}
+            onError={setError}
+          />
+        ))
+      )}
     </div>
   );
 }
