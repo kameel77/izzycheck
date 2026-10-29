@@ -130,9 +130,9 @@ describe("toExternalVinIdentification: pozostałe auta ze spike'a", () => {
     assert.equal(result.fuelType, "Diesel");
   });
 
-  test("Renault HEV (BAEL): benzyna, bateria z petrlCapacitySecondary, CUV, brak zużycia", () => {
+  test("Renault HEV (BAEL): hybryda benzyna/elektryk, bateria z petrlCapacitySecondary, CUV, brak zużycia", () => {
     const result = mapCar("renault-arkana-hev");
-    assert.equal(result.fuelType, "Gasoline");
+    assert.equal(result.fuelType, "Hybrid gasoline/electric");
     assert.equal(result.tankVolume, "50");
     assert.equal(result.batteryCapacityKWh, "1.2");
     assert.equal(result.body, "Crossover Utility Vehicle (CUV)");
@@ -283,15 +283,25 @@ describe("toExternalVinIdentification: słowniki", () => {
     assert.equal(result.batteryCapacityKWh, null);
   });
 
-  test("paliwa: BA, NM, EL, LPG, CNG, hybrydy BAEL/NMEL", () => {
+  test("paliwa: BA, NM, EL, LPG, CNG", () => {
     const fuel = (code: string) => mapWith("kia-sportage", { engineFuelType: code }).fuelType;
     assert.equal(fuel("BA"), "Gasoline");
     assert.equal(fuel("NM"), "Diesel");
     assert.equal(fuel("EL"), "Electric");
     assert.equal(fuel("LPG"), "Liquefied Petroleum Gas (propane or LPG)");
     assert.equal(fuel("CNG"), "Compressed Natural Gas (CNG)");
-    assert.equal(fuel("BAEL"), "Gasoline");
-    assert.equal(fuel("NMEL"), "Diesel");
+  });
+
+  test("hybrydy: BAEL/NMEL, plug-in po hybridType zawierającym PHEV lub PLUG", () => {
+    const hybrid = (engineFuelType: string, hybridType: string) =>
+      mapWith("renault-arkana-hev", { engineFuelType, hybridType }).fuelType;
+    assert.equal(hybrid("BAEL", "HEV"), "Hybrid gasoline/electric");
+    assert.equal(hybrid("BAEL", "PHEV"), "Plugin hybrid gasoline/electric");
+    assert.equal(hybrid("BAEL", ""), "Hybrid gasoline/electric");
+    assert.equal(hybrid("BAEL", " plug-in "), "Plugin hybrid gasoline/electric");
+    assert.equal(hybrid("NMEL", "HEV"), "Hybrid diesel/electric");
+    assert.equal(hybrid("NMEL", "PHEV"), "Plugin hybrid diesel/electric");
+    assert.equal(hybrid("nmel", "phev"), "Plugin hybrid diesel/electric");
   });
 
   test("nadwozie: wielkość liter nie ma znaczenia, fallback na carBodyType", () => {
