@@ -205,6 +205,7 @@ Obiekt z polami: `vin`, `make`, `model`, `manufacturerName`, `constructionTime`,
 
 - Wartości skalarne są stringami albo `null` (liczby jako stringi, ułamki z kropką, np. `"5.2"`).
 - `body`, `drive`, `transmission`, `fuelType`, `productType` są normalizowane do wartości słownikowych DAT/Vincario; nieznana wartość daje `null`. `constructionTime` i `airbagsCount` są zawsze `null`.
+- `fuelType` dla hybryd: `Hybrid gasoline/electric`, `Plugin hybrid gasoline/electric`, `Hybrid diesel/electric`, `Plugin hybrid diesel/electric` (plug-in, gdy `hybridType` z Audatex zawiera `PHEV` lub `PLUG`).
 - `constructionYear` pochodzi ze znaku roku modelowego VIN (pozycja 10) i jest zwracany tylko, gdy mieści się między `productionBeginYear` a bieżącym rokiem + 1.
 - Wyposażenie nie jest mapowane: `carFeaturesBasicWithId` to pozycje seryjne z Audatex, `carFeaturesAdditionalWithId` to kody z VIN (`AdditionalEquipmentsCodes`), każda jako `{ "label": <nazwa Audatex PL>, "id": <kod Audatex> }`. Mapowanie na własne cechy robi mamygo po swojej stronie.
 

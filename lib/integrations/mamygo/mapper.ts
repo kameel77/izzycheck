@@ -15,8 +15,8 @@ const AUDATEX_EQUIPMENT_NAMES = equipmentCatalog as Record<string, string>;
 const KW_TO_HP = 1.35962;
 
 /**
- * Kod paliwa Audatex -> słownik DAT/Vincario. Hybrydy (BAEL, NMEL) są tymczasowo spłaszczone do
- * benzyny/diesla do czasu potwierdzenia z mamygo; zmiana tylko w tej mapie.
+ * Kod paliwa Audatex -> słownik DAT/Vincario (FuelMethodType). Hybrydy (BAEL, NMEL) mapuje osobno
+ * mapFuelType, bo wariant (zwykła/plug-in) zależy od hybridType.
  */
 const FUEL_TYPE_MAP: Record<string, string> = {
   BA: "Gasoline",
@@ -24,8 +24,12 @@ const FUEL_TYPE_MAP: Record<string, string> = {
   EL: "Electric",
   LPG: "Liquefied Petroleum Gas (propane or LPG)",
   CNG: "Compressed Natural Gas (CNG)",
-  BAEL: "Gasoline",
-  NMEL: "Diesel",
+};
+
+/** Hybrydy: kod paliwa Audatex -> [zwykła hybryda, plug-in] (wartości potwierdzone przez mamygo). */
+const HYBRID_FUEL_TYPES: Record<string, [string, string]> = {
+  BAEL: ["Hybrid gasoline/electric", "Plugin hybrid gasoline/electric"],
+  NMEL: ["Hybrid diesel/electric", "Plugin hybrid diesel/electric"],
 };
 
 const BODY_MAP: Record<string, string> = {
@@ -124,6 +128,16 @@ function mapProductType(params: Record<string, string>): string | null {
   return null;
 }
 
+/** Hybryda plug-in, gdy hybridType zawiera PHEV lub PLUG (bez względu na wielkość liter); inaczej zwykła. */
+function mapFuelType(fuelCode: string, params: Record<string, string>): string | null {
+  const hybrid = HYBRID_FUEL_TYPES[fuelCode];
+  if (hybrid) {
+    const hybridType = (params.hybridType ?? "").trim().toUpperCase();
+    return hybridType.includes("PHEV") || hybridType.includes("PLUG") ? hybrid[1] : hybrid[0];
+  }
+  return FUEL_TYPE_MAP[fuelCode] ?? null;
+}
+
 function mapBatteryCapacity(fuelCode: string, params: Record<string, string>): string | null {
   if (fuelCode === "EL") return scalar(params.petrolCapacityMain, true);
   if (fuelCode === "BAEL" || fuelCode === "NMEL") return scalar(params.petrlCapacitySecondary, true); // literówka Audatex
@@ -193,7 +207,7 @@ export function toExternalVinIdentification(
     drive: mapDrive(p),
     transmission: mapTransmission(p),
     gearsCount: scalar(p.gearNumber),
-    fuelType: FUEL_TYPE_MAP[fuelCode] ?? null,
+    fuelType: mapFuelType(fuelCode, p),
     tankVolume: fuelCode === "EL" ? null : scalar(p.petrolCapacityMain, true),
     originalTireSizeAxle1: isBlank(p.tireFront) ? null : p.tireFront.replace(/\s+/g, ""),
     batteryCapacityKWh: mapBatteryCapacity(fuelCode, p),
