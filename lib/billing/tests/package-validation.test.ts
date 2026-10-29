@@ -18,6 +18,11 @@ describe("parsePackageInput (full)", () => {
     });
   });
 
+  test("sortOrder is optional: a body without it is accepted and defaulted to 0", () => {
+    const r = parsePackageInput(FULL, { partial: false });
+    assert.ok(r.ok && r.value.sortOrder === 0);
+  });
+
   test("explicit isActive and sortOrder are kept", () => {
     assert.deepEqual(parsePackageInput({ ...FULL, isActive: false, sortOrder: -5 }, { partial: false }), {
       ok: true,

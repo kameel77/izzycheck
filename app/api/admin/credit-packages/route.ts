@@ -9,7 +9,7 @@ export async function GET() {
     if (auth.error) return auth.error;
 
     const packages = await prisma.creditPackage.findMany({
-      orderBy: [{ creditType: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+      orderBy: [{ creditType: "asc" }, { credits: "asc" }, { createdAt: "asc" }],
     });
     return NextResponse.json({ packages });
   } catch (err) {

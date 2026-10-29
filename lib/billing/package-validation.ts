@@ -27,7 +27,8 @@ const REQUIRED = ["name", "creditType", "credits", "priceNetGrosze"] as const;
 /**
  * Validates a credit package body from an admin. `partial: true` (PATCH) validates only the provided
  * fields; `partial: false` (POST) requires name, creditType, credits and priceNetGrosze and defaults
- * vatRate (23), isActive (true) and sortOrder (0).
+ * vatRate (23), isActive (true) and sortOrder (0). sortOrder is legacy: optional, still accepted, no longer
+ * used for ordering (packages sort by credits).
  */
 export function parsePackageInput(body: unknown, opts: { partial: false }): PackageParseResult;
 export function parsePackageInput(body: unknown, opts: { partial: true }): PartialParseResult;
