@@ -20,6 +20,11 @@ Kod źródłowy **nie zawiera żadnych wbudowanych haseł ani stałych kluczy JW
 - `AUDATEX_CHE_USERNAME`, `AUDATEX_CHE_PASSWORD`, `AUDATEX_CERTIFICATE_HASH`, `AUDATEX_LICENCE_NUMBER`: Produkcyjne poświadczenia Audatex.
 - `AUDATEX_MARKET_CODE` (domyślnie `PL`) & `AUDATEX_LANGUAGE` (domyślnie `PL`).
 
+### Sesja i przekierowanie do logowania
+
+- Strony chroni `proxy.ts`: brak, nieprawidłowa lub wygasła sesja (`izzycheck_session`) przekierowuje na `/login`. Publiczne są tylko `/login` i `/credits/payment-return`.
+- Na już otwartej stronie `components/AuthRedirectGuard.tsx` przekierowuje na `/login`, gdy wywołanie API zwróci 401 (np. po wygaśnięciu sesji lub wylogowaniu w innej karcie). Wyjątki: `/api/auth/login` (błędne dane logowania) oraz strony publiczne.
+
 ---
 
 ## 🚀 Instrukcja Wdrożenia w Coolify v4
