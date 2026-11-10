@@ -96,7 +96,7 @@ export default function AdminOrganizationsPage() {
     name: "",
     email: "",
     password: "",
-    role: "USER" as "MANAGER" | "USER",
+    role: "USER" as "ADMIN" | "MANAGER" | "USER" | "OPERATOR",
     canGenerateValuation: false,
     canGenerateClaimCheck: false,
     canGenerateClaimDetails: false,
@@ -253,7 +253,7 @@ export default function AdminOrganizationsPage() {
       name: user.name,
       email: user.email,
       password: "", // empty means keep existing
-      role: user.role === "MANAGER" ? "MANAGER" : "USER",
+      role: user.role,
       canGenerateValuation: user.canGenerateValuation,
       canGenerateClaimCheck: user.canGenerateClaimCheck,
       canGenerateClaimDetails: user.canGenerateClaimDetails,
@@ -808,11 +808,13 @@ export default function AdminOrganizationsPage() {
                 <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">Rola konta</label>
                 <select
                   value={userForm.role}
-                  onChange={(e) => setUserForm({ ...userForm, role: e.target.value as any })}
+                  onChange={(e) => setUserForm({ ...userForm, role: e.target.value as typeof userForm.role })}
                   className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950 dark:text-white"
                 >
                   <option value="USER">Pracownik (USER) — uprawnienia nadawane flagami</option>
                   <option value="MANAGER">Manager Firmy (MANAGER) — pełne prawa generowania i zarządzania zespołem</option>
+                  <option value="ADMIN">Administrator platformy (ADMIN) — dostęp do wszystkich organizacji, kredytów i zamówień</option>
+                  {editingUser?.role === "OPERATOR" && <option value="OPERATOR">Operator (OPERATOR)</option>}
                 </select>
               </div>
 
@@ -899,6 +901,12 @@ export default function AdminOrganizationsPage() {
               {userForm.role === "MANAGER" && (
                 <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 p-3 text-xs text-purple-700 dark:text-purple-300">
                   Manager posiada w systemie domyślnie aktywne wszystkie uprawnienia generowania raportów oraz wgląd w historię całego zespołu.
+                </div>
+              )}
+
+              {userForm.role === "ADMIN" && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-300">
+                  Administrator ma pełny dostęp do całej platformy: wszystkich organizacji, użytkowników, kredytów, zamówień i faktur. Nadawaj tylko zaufanym osobom.
                 </div>
               )}
 
