@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AuthRedirectGuard } from "@/components/AuthRedirectGuard";
 import { Navbar } from "@/components/Navbar";
 import { ThemeProvider } from "@/components/theme-provider";
 
@@ -37,6 +38,7 @@ export default function RootLayout({
       </head>
       <body className="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 antialiased selection:bg-blue-600 selection:text-white transition-colors duration-200">
         <ThemeProvider>
+          <AuthRedirectGuard />
           <Navbar />
           <main className="min-h-[calc(100vh-4rem)] bg-slate-50 text-slate-900 dark:bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] dark:from-slate-900 dark:via-slate-950 dark:to-black dark:text-slate-100 transition-colors duration-200">
             {children}
